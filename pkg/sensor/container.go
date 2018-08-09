@@ -193,19 +193,20 @@ func NewContainerCache(sensor *Sensor) *ContainerCache {
 		sensor: sensor,
 	}
 
-	cache.ContainerCreatedEventID = sensor.Monitor.RegisterExternalEvent(
+	monitor := sensor.Monitor()
+	cache.ContainerCreatedEventID = monitor.RegisterExternalEvent(
 		"CONTAINER_CREATED", cache.decodeContainerCreatedEvent)
 
-	cache.ContainerRunningEventID = sensor.Monitor.RegisterExternalEvent(
+	cache.ContainerRunningEventID = monitor.RegisterExternalEvent(
 		"CONTAINER_RUNNING", cache.decodeContainerRunningEvent)
 
-	cache.ContainerExitedEventID = sensor.Monitor.RegisterExternalEvent(
+	cache.ContainerExitedEventID = monitor.RegisterExternalEvent(
 		"CONTAINER_EXITED", cache.decodeContainerExitedEvent)
 
-	cache.ContainerDestroyedEventID = sensor.Monitor.RegisterExternalEvent(
+	cache.ContainerDestroyedEventID = monitor.RegisterExternalEvent(
 		"CONTAINER_DESTROYED", cache.decodeContainerDestroyedEvent)
 
-	cache.ContainerUpdatedEventID = sensor.Monitor.RegisterExternalEvent(
+	cache.ContainerUpdatedEventID = monitor.RegisterExternalEvent(
 		"CONTAINER_UPDATED", cache.decodeContainerUpdatedEvent)
 
 	return cache
@@ -266,7 +267,7 @@ func (cc *ContainerCache) enqueueContainerEvent(
 	data := map[string]interface{}{
 		"__container__": *info,
 	}
-	return cc.sensor.Monitor.EnqueueExternalSample(eventID, sampleID, data)
+	return cc.sensor.Monitor().EnqueueExternalSample(eventID, sampleID, data)
 }
 
 func (cc *ContainerCache) decodeContainerCreatedEvent(

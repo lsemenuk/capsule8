@@ -322,7 +322,7 @@ func TestHandleSysClone(t *testing.T) {
 	)
 
 	ctx, _ := context.WithCancel(context.Background())
-	s := sensor.NewSubscription()
+	s := newTestSubscription(t, sensor)
 	s.RegisterProcessForkEventFilter(nil)
 	status, err := s.Run(ctx, func(event TelemetryEvent) {
 		if e, ok := event.(ProcessForkTelemetryEvent); ok {
@@ -358,7 +358,7 @@ func TestHandleSysClone(t *testing.T) {
 	cache.handleSysClone(parentTask, parentLeader, childTask,
 		cloneFlags, childComm, sample)
 
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	lock.Lock()
 	if assert.NotNil(t, forkEvent) {
 		// Make sure the fork event contains the right information
@@ -385,7 +385,7 @@ func TestHandleSysClone(t *testing.T) {
 	cache.handleSysClone(childTask, parentLeader, aNewTask, cloneFlags,
 		childComm, sample)
 
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	lock.Lock()
 	if assert.NotNil(t, forkEvent) {
 		// Make sure the fork event contains the right information
@@ -411,7 +411,7 @@ func TestDecodeNewTask(t *testing.T) {
 	)
 
 	ctx, _ := context.WithCancel(context.Background())
-	s := sensor.NewSubscription()
+	s := newTestSubscription(t, sensor)
 	s.RegisterProcessForkEventFilter(nil)
 	status, err := s.Run(ctx, func(event TelemetryEvent) {
 		if e, ok := event.(ProcessForkTelemetryEvent); ok {
@@ -438,7 +438,7 @@ func TestDecodeNewTask(t *testing.T) {
 	assert.Nil(t, i)
 	assert.NoError(t, err)
 
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	lock.Lock()
 	if assert.NotNil(t, forkEvent) {
 		assert.Equal(t, data["pid"], forkEvent.ChildPID)
@@ -457,7 +457,7 @@ func TestDecodeDoExit(t *testing.T) {
 	)
 
 	ctx, _ := context.WithCancel(context.Background())
-	s := sensor.NewSubscription()
+	s := newTestSubscription(t, sensor)
 	s.RegisterProcessExitEventFilter(nil)
 	status, err := s.Run(ctx, func(event TelemetryEvent) {
 		if e, ok := event.(ProcessExitTelemetryEvent); ok {
@@ -499,7 +499,7 @@ func TestDecodeDoExit(t *testing.T) {
 		assert.Nil(t, i)
 		assert.NoError(t, err)
 
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 		lock.Lock()
 		if assert.NotNil(t, exitEvent) {
 			assert.Equal(t, tc.exitCode, exitEvent.ExitCode)
@@ -576,7 +576,7 @@ func TestDecodeExecve(t *testing.T) {
 	)
 
 	ctx, _ := context.WithCancel(context.Background())
-	s := sensor.NewSubscription()
+	s := newTestSubscription(t, sensor)
 	s.RegisterProcessExecEventFilter(nil)
 	status, err := s.Run(ctx, func(event TelemetryEvent) {
 		if e, ok := event.(ProcessExecTelemetryEvent); ok {
@@ -610,7 +610,7 @@ func TestDecodeExecve(t *testing.T) {
 	assert.Nil(t, i)
 	assert.NoError(t, err)
 
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	lock.Lock()
 	if assert.NotNil(t, execEvent) {
 		assert.Equal(t, data["filename"], execEvent.Filename)
@@ -634,7 +634,7 @@ func TestDecodeDoFork(t *testing.T) {
 	)
 
 	ctx, _ := context.WithCancel(context.Background())
-	s := sensor.NewSubscription()
+	s := newTestSubscription(t, sensor)
 	s.RegisterProcessForkEventFilter(nil)
 	status, err := s.Run(ctx, func(event TelemetryEvent) {
 		if e, ok := event.(ProcessForkTelemetryEvent); ok {
@@ -680,7 +680,7 @@ func TestDecodeDoFork(t *testing.T) {
 	assert.Nil(t, i)
 	assert.NoError(t, err)
 
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 
 	task = sensor.ProcessCache.LookupTask(410)
 	assert.Nil(t, task.pendingClone)
@@ -703,7 +703,7 @@ func TestDecodeSchedProcessFork(t *testing.T) {
 	)
 
 	ctx, _ := context.WithCancel(context.Background())
-	s := sensor.NewSubscription()
+	s := newTestSubscription(t, sensor)
 	s.RegisterProcessForkEventFilter(nil)
 	status, err := s.Run(ctx, func(event TelemetryEvent) {
 		if e, ok := event.(ProcessForkTelemetryEvent); ok {
@@ -744,7 +744,7 @@ func TestDecodeSchedProcessFork(t *testing.T) {
 	assert.Nil(t, i)
 	assert.NoError(t, err)
 
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 
 	task = sensor.ProcessCache.LookupTask(410)
 	assert.Nil(t, task.pendingClone)
@@ -845,29 +845,40 @@ func TestCommToString(t *testing.T) {
 	assert.Equal(t, "whatever", s)
 }
 
+func verifyProcessEventRegistration(t *testing.T, s *Subscription, count int) {
+	if count > 0 {
+		assert.Len(t, s.eventSinks, count)
+	} else {
+		assert.Len(t, s.status, -count)
+		assert.Len(t, s.eventSinks, 0)
+	}
+}
+
 func TestProcessEventRegistration(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
-
-	s := sensor.NewSubscription()
 
 	e := expression.Equal(expression.Identifier("foo"), expression.Value("bar"))
 	expr, err := expression.NewExpression(e)
 	require.NotNil(t, expr)
 	require.NoError(t, err)
 
-	funcs := []func(*expression.Expression){
-		s.RegisterProcessExecEventFilter,
-		s.RegisterProcessExitEventFilter,
-		s.RegisterProcessForkEventFilter,
-		s.RegisterProcessUpdateEventFilter,
+	names := []string{
+		"RegisterProcessExecEventFilter",
+		"RegisterProcessExitEventFilter",
+		"RegisterProcessForkEventFilter",
+		"RegisterProcessUpdateEventFilter",
 	}
-	for i, f := range funcs {
-		f(expr)
-		assert.Len(t, s.status, i+1)
-		assert.Len(t, s.eventSinks, i)
+	for _, name := range names {
+		s := newTestSubscription(t, sensor)
+		v := reflect.ValueOf(s)
+		m := v.MethodByName(name)
 
-		f(nil)
-		assert.Len(t, s.eventSinks, i+1)
+		m.Call([]reflect.Value{reflect.ValueOf(expr)})
+		verifyProcessEventRegistration(t, s, -1)
+
+		var nilExpr *expression.Expression
+		m.Call([]reflect.Value{reflect.ValueOf(nilExpr)})
+		verifyProcessEventRegistration(t, s, 1)
 	}
 }

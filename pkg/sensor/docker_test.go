@@ -38,7 +38,7 @@ func TestDockerMonitor(t *testing.T) {
 	assert.Nil(t, dm)
 
 	// Create a functioning monitor
-	newUnitTestKprobe(t, sensor, `name: ^^NAME^^
+	newUnitTestKprobe(t, sensor, 0, `name: ^^NAME^^
 ID: ^^ID^^
 format:
 	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
@@ -50,7 +50,7 @@ format:
 	field:__data_loc char[] newname;	offset:16;	size:4;	signed:1;
 
 print fmt: "(%lx) newname=\"%s\"", REC->__probe_ip, __get_str(newname)`)
-	newUnitTestKprobe(t, sensor, `name: ^^NAME^^
+	newUnitTestKprobe(t, sensor, 0, `name: ^^NAME^^
 ID: ^^ID^^
 format:
 	field:unsigned short common_type;	offset:0;	size:2;	signed:0;

@@ -29,8 +29,7 @@ func TestDecodeKprobe(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	s := sensor.NewSubscription()
-	require.NotNil(t, s)
+	s := newTestSubscription(t, sensor)
 
 	sample := &perf.SampleRecord{
 		Time: uint64(sys.CurrentMonotonicRaw()),
@@ -65,29 +64,7 @@ func TestDecodeKprobe(t *testing.T) {
 	assert.Equal(t, data, e.Arguments)
 }
 
-func TestRegisterKernelFunctionCallEventFilter(t *testing.T) {
-	sensor := newUnitTestSensor(t)
-	defer sensor.Stop()
-
-	s := sensor.NewSubscription()
-	require.NotNil(t, s)
-
-	s.RegisterKernelFunctionCallEventFilter("0x83764287", false, nil, nil)
-	assert.Len(t, s.status, 1)
-	assert.Len(t, s.eventSinks, 0)
-
-	e := expression.Equal(expression.Identifier("foo"), expression.Value("bar"))
-	expr, err := expression.NewExpression(e)
-	require.NotNil(t, expr)
-	require.NoError(t, err)
-
-	symbol := "do_sys_open"
-	arguments := map[string]string{
-		"filename": "+0(%si):string",
-		"flags":    "%dx:s32",
-		"mode":     "%cx:s32",
-	}
-
+func prepareForRegisterKernelFunctionCallEventFilter(t *testing.T, s *Subscription) {
 	format := `name: ^^NAME^^
 id: ^^ID^^
 format:
@@ -102,12 +79,45 @@ format:
 
 print fmt: "filename=\"%s\" flags=%d mode=%d", __get_str(filename), REC->flags, REC->mode`
 
-	newUnitTestKprobe(t, sensor, format)
-	s.RegisterKernelFunctionCallEventFilter(symbol, false, arguments, expr)
-	assert.Len(t, s.status, 2)
-	assert.Len(t, s.eventSinks, 0)
+	newUnitTestKprobe(t, s.sensor, 0, format)
+}
 
-	newUnitTestKprobe(t, sensor, format)
+func verifyRegisterKernelFunctionCallEventFilter(t *testing.T, s *Subscription, count int) {
+	if count > 0 {
+		assert.Len(t, s.eventSinks, count)
+	} else {
+		assert.Len(t, s.status, -count)
+		assert.Len(t, s.eventSinks, 0)
+	}
+}
+
+func TestRegisterKernelFunctionCallEventFilter(t *testing.T) {
+	sensor := newUnitTestSensor(t)
+	defer sensor.Stop()
+
+	s := newTestSubscription(t, sensor)
+	s.RegisterKernelFunctionCallEventFilter("0x83764287", false, nil, nil)
+	verifyRegisterKernelFunctionCallEventFilter(t, s, -1)
+
+	e := expression.Equal(expression.Identifier("foo"), expression.Value("bar"))
+	expr, err := expression.NewExpression(e)
+	require.NotNil(t, expr)
+	require.NoError(t, err)
+
+	symbol := "do_sys_open"
+	arguments := map[string]string{
+		"filename": "+0(%si):string",
+		"flags":    "%dx:s32",
+		"mode":     "%cx:s32",
+	}
+
+	s = newTestSubscription(t, sensor)
+	prepareForRegisterKernelFunctionCallEventFilter(t, s)
+	s.RegisterKernelFunctionCallEventFilter(symbol, false, arguments, expr)
+	verifyRegisterKernelFunctionCallEventFilter(t, s, -1)
+
+	s = newTestSubscription(t, sensor)
+	prepareForRegisterKernelFunctionCallEventFilter(t, s)
 	s.RegisterKernelFunctionCallEventFilter(symbol, false, arguments, nil)
-	assert.Len(t, s.eventSinks, 1)
+	verifyRegisterKernelFunctionCallEventFilter(t, s, 1)
 }

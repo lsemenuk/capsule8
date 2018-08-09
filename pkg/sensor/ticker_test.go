@@ -30,8 +30,7 @@ func TestDecodeTickerEvent(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	s := sensor.NewSubscription()
-	require.NotNil(t, s)
+	s := newTestSubscription(t, sensor)
 
 	sample := &perf.SampleRecord{}
 	data := perf.TraceEventSampleData{
@@ -50,21 +49,23 @@ func TestDecodeTickerEvent(t *testing.T) {
 	assert.Equal(t, data["nanoseconds"], e.Nanoseconds)
 }
 
+func verifyRegisterTickerEventFilter(t *testing.T, s *Subscription, count int) {
+	if count > 0 {
+		assert.Len(t, s.eventSinks, count)
+	} else {
+		assert.Len(t, s.status, -count)
+		assert.Len(t, s.eventSinks, 0)
+	}
+}
+
 func TestRegisterTickerEventFilter(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	s := sensor.NewSubscription()
-	require.NotNil(t, s)
-
-	// Sanity check
-	assert.Len(t, s.status, 0)
-	assert.Len(t, s.eventSinks, 0)
-
 	// Invalid interval should fail
+	s := newTestSubscription(t, sensor)
 	s.RegisterTickerEventFilter(0, nil)
-	assert.Len(t, s.status, 1)
-	assert.Len(t, s.eventSinks, 0)
+	verifyRegisterTickerEventFilter(t, s, -1)
 
 	// Invalid filter expression should fail
 	e := expression.Equal(expression.Identifier("foo"), expression.Value("bar"))
@@ -72,13 +73,14 @@ func TestRegisterTickerEventFilter(t *testing.T) {
 	require.NotNil(t, expr)
 	require.NoError(t, err)
 
+	s = newTestSubscription(t, sensor)
 	s.RegisterTickerEventFilter(50*int64(time.Millisecond), expr)
-	assert.Len(t, s.status, 2)
-	assert.Len(t, s.eventSinks, 0)
+	verifyRegisterTickerEventFilter(t, s, -1)
 
 	// This should succeed
+	s = newTestSubscription(t, sensor)
 	s.RegisterTickerEventFilter(50*int64(time.Millisecond), nil)
-	assert.Len(t, s.eventSinks, 1)
+	verifyRegisterTickerEventFilter(t, s, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s.Run(ctx, nil)

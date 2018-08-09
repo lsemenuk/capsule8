@@ -238,10 +238,10 @@ func writeFile(t *testing.T, filename string, data []byte) {
 
 var nextProbeID uint64 = 8800
 
-func newUnitTestKprobe(t *testing.T, sensor *Sensor, format string) {
+func newUnitTestKprobe(t *testing.T, sensor *Sensor, delta uint64, format string) {
 	require.True(t, strings.HasPrefix(format, "name: ^^NAME^^"))
 
-	nextProbeName := sensor.Monitor.NextProbeName()
+	nextProbeName := sensor.Monitor().NextProbeName(delta)
 	probeNameParts := strings.Split(nextProbeName, "/")
 	nextProbeID++
 
@@ -499,15 +499,14 @@ func TestDispatchQueuedSamples(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	eventID := sensor.Monitor.RegisterExternalEvent("dispatch test",
+	eventID := sensor.Monitor().RegisterExternalEvent("dispatch test",
 		func(sample *perf.SampleRecord, data perf.TraceEventSampleData) (interface{}, error) {
 			// This should not get called
 			t.Fatal("Unexpected call to external event decoder")
 			return nil, nil
 		})
 
-	s := sensor.NewSubscription()
-	require.NotNil(t, s)
+	s := newTestSubscription(t, sensor)
 
 	expr, err := expression.NewExpression(
 		expression.Equal(

@@ -77,8 +77,8 @@ func (s *Subscription) RegisterChargenEventFilter(
 		return
 	}
 
-	eventID := s.sensor.Monitor.RegisterExternalEvent("chargen",
-		s.decodeChargenEvent)
+	monitor := s.sensor.Monitor()
+	eventID := monitor.RegisterExternalEvent("chargen", s.decodeChargenEvent)
 
 	done := make(chan struct{})
 
@@ -86,18 +86,15 @@ func (s *Subscription) RegisterChargenEventFilter(
 	if err != nil {
 		s.logStatus(
 			fmt.Sprintf("Invalid filter expression for chargen filter: %v", err))
-		s.sensor.Monitor.UnregisterEvent(eventID)
+		monitor.UnregisterEvent(eventID)
 		return
 	}
 	es.unregister = func(es *eventSink) {
-		if monitor := s.sensor.Monitor; monitor != nil {
-			monitor.UnregisterEvent(es.eventID)
-		}
+		monitor.UnregisterEvent(es.eventID)
 		close(done)
 	}
 
 	go func() {
-		monitor := s.sensor.Monitor
 		index := uint64(0)
 		for {
 			select {

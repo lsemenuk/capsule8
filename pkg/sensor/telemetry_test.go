@@ -15,17 +15,666 @@
 package sensor
 
 import (
+	"context"
+	"net"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	api "github.com/capsule8/capsule8/api/v0"
 
+	"github.com/capsule8/capsule8/pkg/config"
+	"github.com/capsule8/capsule8/pkg/expression"
 	"github.com/capsule8/capsule8/pkg/sys/perf"
+
+	"github.com/golang/protobuf/ptypes/wrappers"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"golang.org/x/sys/unix"
+
+	"google.golang.org/genproto/googleapis/rpc/code"
+
+	"google.golang.org/grpc"
 )
+
+// Custom gRPC Dialer that understands "unix:/path/to/sock" as well as TCP addrs
+func dialer(addr string, timeout time.Duration) (net.Conn, error) {
+	var network, address string
+
+	parts := strings.Split(addr, ":")
+	if len(parts) > 1 && parts[0] == "unix" {
+		network = "unix"
+		address = parts[1]
+	} else {
+		network = "tcp"
+		address = addr
+	}
+
+	return net.DialTimeout(network, address, timeout)
+}
+
+func newTelemetryStream(
+	t *testing.T,
+	client api.TelemetryServiceClient,
+	sub *api.Subscription,
+) (api.TelemetryService_GetEventsClient, context.CancelFunc, error) {
+	streamContext, streamCancel := context.WithCancel(context.Background())
+	stream, err := client.GetEvents(streamContext, &api.GetEventsRequest{
+		Subscription: sub,
+	})
+	require.NoError(t, err)
+
+	return stream, streamCancel, err
+}
+
+func TestTelemetryService(t *testing.T) {
+	var start, stop, getEventsRequest, getEventsResponse bool
+
+	options := []TelemetryServiceOption{
+		WithStartFunc(func() { start = true }),
+		WithStopFunc(func() { stop = true }),
+		WithGetEventsRequestFunc(func(request *api.GetEventsRequest) { getEventsRequest = true }),
+		WithGetEventsResponseFunc(func(response *api.GetEventsResponse, err error) { getEventsResponse = true }),
+	}
+
+	sensor := newUnitTestSensor(t)
+	address := "unix:" + filepath.Join(sensor.runtimeDir, "socket")
+	service := NewTelemetryService(sensor, address, options...)
+	assert.NotZero(t, service.Name())
+
+	config.Sensor.UseTLS = false
+	go service.Serve()
+	time.Sleep(200 * time.Millisecond)
+
+	// Establish a connection to the telemetry service that'll be reused
+	// for various tests to check request handling.
+	connContext, connCancel := context.WithCancel(context.Background())
+
+	conn, err := grpc.DialContext(connContext, address,
+		grpc.WithDialer(dialer),
+		grpc.WithBlock(),
+		grpc.WithTimeout(1*time.Second),
+		grpc.WithInsecure())
+	require.NoError(t, err)
+	client := api.NewTelemetryServiceClient(conn)
+
+	// These subscription requests should all return errors immediately.
+	badSubscriptions := []*api.Subscription{
+		// Invalid subscription (no EventFilter)
+		&api.Subscription{},
+		// Invalid subscription (empty EventFilter)
+		&api.Subscription{
+			EventFilter: &api.EventFilter{},
+		},
+		// LimitModifier is invalid (0)
+		&api.Subscription{
+			EventFilter: &api.EventFilter{},
+			Modifier: &api.Modifier{
+				Limit: &api.LimitModifier{
+					Limit: 0,
+				},
+			},
+		},
+		// ThrottleModifier interval is invalid (0)
+		&api.Subscription{
+			EventFilter: &api.EventFilter{},
+			Modifier: &api.Modifier{
+				Throttle: &api.ThrottleModifier{
+					Interval: 0,
+				},
+			},
+		},
+		// ThrottleModifier interval type is invalid (8888)
+		&api.Subscription{
+			EventFilter: &api.EventFilter{},
+			Modifier: &api.Modifier{
+				Throttle: &api.ThrottleModifier{
+					IntervalType: 8888,
+					Interval:     8,
+				},
+			},
+		},
+	}
+	for _, sub := range badSubscriptions {
+		var (
+			stream       api.TelemetryService_GetEventsClient
+			streamCancel context.CancelFunc
+		)
+		stream, streamCancel, err = newTelemetryStream(t, client, sub)
+		if assert.NoErrorf(t, err, "%#v", sub) {
+			_, err = stream.Recv()
+			assert.Error(t, err, "%#v", sub)
+			streamCancel()
+		}
+	}
+
+	// This should return a response with status information and then an
+	// error after that.
+	sub := &api.Subscription{
+		EventFilter: &api.EventFilter{
+			KernelEvents: []*api.KernelFunctionCallFilter{
+				&api.KernelFunctionCallFilter{
+					Type:   api.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_EXIT,
+					Symbol: "alksdfjha",
+					Arguments: map[string]string{
+						"ret": "$retval:u64",
+					},
+				},
+			},
+		},
+		ContainerFilter: &api.ContainerFilter{
+			Ids:        []string{"abc", "def", "ghi"},
+			Names:      []string{"jkl", "mno", "pqrs"},
+			ImageIds:   []string{"tuv", "wxyz"},
+			ImageNames: []string{"123", "456", "7890"},
+		},
+	}
+	stream, streamCancel, err := newTelemetryStream(t, client, sub)
+	if assert.NoErrorf(t, err, "%#v", sub) {
+		var response *api.GetEventsResponse
+		response, err = stream.Recv()
+		if assert.NoError(t, err) {
+			assert.NotZero(t, response.Statuses)
+			assert.NotEqual(t, int32(code.Code_OK), response.Statuses[0].Code)
+
+			response, err = stream.Recv()
+			assert.Error(t, err)
+		}
+		streamCancel()
+	}
+
+	// This should be successful! The first event returned should just be
+	// a status indicating OK. Then there should be 8 events that follow.
+	// And finally, the last stream.Recv() should be an error.
+	sub = &api.Subscription{
+		EventFilter: &api.EventFilter{
+			ChargenEvents: []*api.ChargenEventFilter{
+				&api.ChargenEventFilter{
+					Length: 10,
+				},
+			},
+		},
+		Modifier: &api.Modifier{
+			Limit: &api.LimitModifier{
+				Limit: 8,
+			},
+		},
+	}
+	stream, streamCancel, err = newTelemetryStream(t, client, sub)
+	if assert.NoErrorf(t, err, "%#v", sub) {
+		var response *api.GetEventsResponse
+		response, err = stream.Recv()
+		require.NoError(t, err)
+		if assert.NotZero(t, len(response.Statuses)) {
+			assert.Equal(t, int32(code.Code_OK), response.Statuses[0].Code)
+		}
+
+		gotError := false
+		var events []*api.ReceivedTelemetryEvent
+		for len(events) < 10 {
+			response, err = stream.Recv()
+			if err != nil {
+				gotError = true
+				break
+			}
+			events = append(events, response.Events...)
+		}
+		assert.Len(t, events, 8)
+		assert.True(t, gotError)
+
+		streamCancel()
+	}
+
+	connCancel()
+
+	service.Stop()
+
+	assert.True(t, start)
+	assert.True(t, stop)
+	assert.True(t, getEventsRequest)
+	assert.True(t, getEventsResponse)
+}
+
+func TestRegisterChargenEvents(t *testing.T) {
+	sensor := newUnitTestSensor(t)
+	defer sensor.Stop()
+
+	events := []*api.ChargenEventFilter{
+		&api.ChargenEventFilter{
+			Length: 32,
+		},
+		&api.ChargenEventFilter{
+			Length: 4,
+		},
+		&api.ChargenEventFilter{
+			Length: 57,
+		},
+	}
+
+	s := newTestSubscription(t, sensor)
+	s.registerChargenEvents(events)
+	verifyRegisterChargenEventFilter(t, s, len(events))
+}
+
+func TestRegisterContainerEvents(t *testing.T) {
+	sensor := newUnitTestSensor(t)
+	defer sensor.Stop()
+
+	events := []*api.ContainerEventFilter{
+		&api.ContainerEventFilter{
+			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
+			View: api.ContainerEventView_FULL,
+		},
+		&api.ContainerEventFilter{
+			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
+			View: api.ContainerEventView_FULL,
+		},
+		&api.ContainerEventFilter{
+			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
+			FilterExpression: expression.Equal(
+				expression.Identifier("exit_signal"),
+				expression.Value(uint32(11))),
+		},
+		&api.ContainerEventFilter{
+			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_DESTROYED,
+		},
+	}
+	invalidEvents := []*api.ContainerEventFilter{
+		&api.ContainerEventFilter{
+			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_UNKNOWN,
+		},
+		&api.ContainerEventFilter{
+			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_UPDATED,
+			FilterExpression: expression.BitwiseAnd(
+				expression.Identifier("asdfa"),
+				expression.Value(make(chan bool))),
+		},
+	}
+
+	s := newTestSubscription(t, sensor)
+	s.registerContainerEvents(events)
+	s.registerContainerEvents(invalidEvents)
+	verifyContainerEventRegistration(t, s, len(events))
+}
+
+func TestRegisterFileEvents(t *testing.T) {
+	sensor := newUnitTestSensor(t)
+	defer sensor.Stop()
+
+	eventSet1 := []*api.FileEventFilter{
+		&api.FileEventFilter{
+			Type:           api.FileEventType_FILE_EVENT_TYPE_OPEN,
+			Filename:       &wrappers.StringValue{"/etc/passwd"},
+			OpenFlagsMask:  &wrappers.Int32Value{823467},
+			CreateModeMask: &wrappers.Int32Value{234},
+		},
+	}
+	eventSet2 := []*api.FileEventFilter{
+		&api.FileEventFilter{
+			Type:            api.FileEventType_FILE_EVENT_TYPE_OPEN,
+			FilenamePattern: &wrappers.StringValue{"/bin/*"},
+		},
+	}
+	eventSet3 := []*api.FileEventFilter{
+		&api.FileEventFilter{
+			Type: api.FileEventType_FILE_EVENT_TYPE_OPEN,
+		},
+	}
+	invalidEvents := []*api.FileEventFilter{
+		&api.FileEventFilter{
+			Type: api.FileEventType_FILE_EVENT_TYPE_UNKNOWN,
+		},
+		&api.FileEventFilter{
+			Type: api.FileEventType_FILE_EVENT_TYPE_OPEN,
+			FilterExpression: expression.Equal(
+				expression.Identifier("asdf"),
+				expression.Value(make(chan bool))),
+		},
+	}
+
+	s := newTestSubscription(t, sensor)
+	prepareForRegisterFileOpenEventFilter(t, s, 0)
+	prepareForRegisterFileOpenEventFilter(t, s, 1)
+	prepareForRegisterFileOpenEventFilter(t, s, 2)
+	s.registerFileEvents(eventSet1)
+	s.registerFileEvents(eventSet2)
+	s.registerFileEvents(eventSet3)
+	s.registerFileEvents(invalidEvents)
+	verifyRegisterFileOpenEventFilter(t, s, len(eventSet1)+len(eventSet2)+len(eventSet3))
+}
+
+func TestRegisterKernelFunctionCallEvents(t *testing.T) {
+	sensor := newUnitTestSensor(t)
+	defer sensor.Stop()
+
+	events := []*api.KernelFunctionCallFilter{
+		&api.KernelFunctionCallFilter{
+			Type:   api.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_ENTER,
+			Symbol: "sys_connect",
+		},
+		&api.KernelFunctionCallFilter{
+			Type:   api.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_EXIT,
+			Symbol: "sys_connect",
+		},
+	}
+	invalidEvents := []*api.KernelFunctionCallFilter{
+		&api.KernelFunctionCallFilter{
+			Type: api.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_UNKNOWN,
+		},
+		&api.KernelFunctionCallFilter{
+			Type: api.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_EXIT,
+			FilterExpression: expression.Equal(
+				expression.Identifier("asdfasdf"),
+				expression.Value(make(chan bool))),
+		},
+	}
+
+	for x := range events {
+		newUnitTestKprobe(t, sensor, uint64(x), networkKprobeFormat)
+	}
+
+	s := newTestSubscription(t, sensor)
+	s.registerKernelFunctionCallEvents(events)
+	s.registerKernelFunctionCallEvents(invalidEvents)
+	verifyRegisterKernelFunctionCallEventFilter(t, s, len(events))
+}
+
+func TestRegisterNetworkEvents(t *testing.T) {
+	sensor := newUnitTestSensor(t)
+	defer sensor.Stop()
+
+	events := []*api.NetworkEventFilter{
+		&api.NetworkEventFilter{
+			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_ATTEMPT,
+		},
+		&api.NetworkEventFilter{
+			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_RESULT,
+		},
+		&api.NetworkEventFilter{
+			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_BIND_ATTEMPT,
+		},
+		&api.NetworkEventFilter{
+			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_BIND_RESULT,
+		},
+		&api.NetworkEventFilter{
+			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_ATTEMPT,
+		},
+		&api.NetworkEventFilter{
+			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_RESULT,
+		},
+		&api.NetworkEventFilter{
+			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_ATTEMPT,
+			FilterExpression: expression.Equal(
+				expression.Identifier("backlog"),
+				expression.Value(uint64(1024))),
+		},
+		&api.NetworkEventFilter{
+			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_RESULT,
+		},
+		&api.NetworkEventFilter{
+			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_ATTEMPT,
+		},
+		&api.NetworkEventFilter{
+			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_RESULT,
+		},
+		&api.NetworkEventFilter{
+			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_ATTEMPT,
+		},
+		&api.NetworkEventFilter{
+			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_RESULT,
+		},
+	}
+	invalidEvents := []*api.NetworkEventFilter{
+		&api.NetworkEventFilter{
+			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_UNKNOWN,
+		},
+		&api.NetworkEventFilter{
+			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_ATTEMPT,
+			FilterExpression: expression.Equal(
+				expression.Identifier("asdf"),
+				expression.Value(make(chan bool))),
+		},
+	}
+
+	s := newTestSubscription(t, sensor)
+	prepareForRegisterNetworkBindAttemptEventFilter(t, s, 0)
+	prepareForRegisterNetworkConnectAttemptEventFilter(t, s, 1)
+	prepareForRegisterNetworkSendtoAttemptEventFilter(t, s, 2)
+	s.registerNetworkEvents(events)
+	s.registerNetworkEvents(invalidEvents)
+	verifyNetworkEventRegistration(t, s, "(telemetry api)", len(events)+6)
+}
+
+func TestRegisterPerformanceEvents(t *testing.T) {
+	sensor := newUnitTestSensor(t)
+	defer sensor.Stop()
+
+	events := []*api.PerformanceEventFilter{
+		&api.PerformanceEventFilter{
+			SampleRateType: api.SampleRateType_SAMPLE_RATE_TYPE_PERIOD,
+			SampleRate:     &api.PerformanceEventFilter_Period{345},
+			Events: []*api.PerformanceEventCounter{
+				&api.PerformanceEventCounter{
+					Type:   api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE,
+					Config: 394857,
+				},
+				&api.PerformanceEventCounter{
+					Type:   api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE_CACHE,
+					Config: 32478,
+				},
+			},
+		},
+		&api.PerformanceEventFilter{
+			SampleRateType: api.SampleRateType_SAMPLE_RATE_TYPE_FREQUENCY,
+			SampleRate:     &api.PerformanceEventFilter_Frequency{345},
+			Events: []*api.PerformanceEventCounter{
+				&api.PerformanceEventCounter{
+					Type:   api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_SOFTWARE,
+					Config: 394857,
+				},
+			},
+		},
+	}
+	invalidEvents := []*api.PerformanceEventFilter{
+		&api.PerformanceEventFilter{
+			SampleRateType: api.SampleRateType_SAMPLE_RATE_TYPE_PERIOD,
+		},
+		&api.PerformanceEventFilter{
+			SampleRateType: api.SampleRateType_SAMPLE_RATE_TYPE_FREQUENCY,
+		},
+		&api.PerformanceEventFilter{
+			SampleRateType: api.SampleRateType_SAMPLE_RATE_TYPE_UNKNOWN,
+		},
+		&api.PerformanceEventFilter{
+			SampleRateType: api.SampleRateType_SAMPLE_RATE_TYPE_FREQUENCY,
+			SampleRate:     &api.PerformanceEventFilter_Frequency{345},
+			Events: []*api.PerformanceEventCounter{
+				&api.PerformanceEventCounter{
+					Type:   api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_UNKNOWN,
+					Config: 394857,
+				},
+			},
+		},
+	}
+
+	s := newTestSubscription(t, sensor)
+	s.registerPerformanceEvents(events)
+	s.registerPerformanceEvents(invalidEvents)
+	verifyRegisterPerformanceEventFilter(t, s, len(events))
+}
+
+func TestRegisterProcessEvents(t *testing.T) {
+	sensor := newUnitTestSensor(t)
+	defer sensor.Stop()
+
+	eventSet1 := []*api.ProcessEventFilter{
+		&api.ProcessEventFilter{
+			Type:         api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
+			ExecFilename: &wrappers.StringValue{"/bin/bash"},
+		},
+		&api.ProcessEventFilter{
+			Type:     api.ProcessEventType_PROCESS_EVENT_TYPE_EXIT,
+			ExitCode: &wrappers.Int32Value{88},
+		},
+		&api.ProcessEventFilter{
+			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_FORK,
+		},
+		&api.ProcessEventFilter{
+			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_UPDATE,
+		},
+	}
+	eventSet2 := []*api.ProcessEventFilter{
+		/*	FIXME
+			A second registration of an external event for the same
+			subscription will overwrite the first one. Fixing this
+			correctly is extremely low priority and requires
+			extensive changes.
+
+			&api.ProcessEventFilter{
+				Type:                api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
+				ExecFilenamePattern: &wrappers.StringValue{"/sbin/*"},
+			},
+		*/
+	}
+	invalidEvents := []*api.ProcessEventFilter{
+		&api.ProcessEventFilter{
+			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_UNKNOWN,
+		},
+		&api.ProcessEventFilter{
+			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
+			FilterExpression: expression.Equal(
+				expression.Identifier("asdf"),
+				expression.Value(make(chan bool))),
+		},
+	}
+
+	s := newTestSubscription(t, sensor)
+	s.registerProcessEvents(eventSet1)
+	s.registerProcessEvents(eventSet2)
+	s.registerProcessEvents(invalidEvents)
+	verifyProcessEventRegistration(t, s, len(eventSet1)+len(eventSet2))
+}
+
+func TestContainsIDFilter(t *testing.T) {
+	expr := expression.Equal(
+		expression.Identifier("id"),
+		expression.Value(int64(8)))
+	assert.True(t, containsIDFilter(expr))
+
+	expr = expression.NotEqual(
+		expression.Identifier("id"),
+		expression.Value(int64(88)))
+	assert.False(t, containsIDFilter(expr))
+
+	expr = expression.Equal(
+		expression.Value(int64(88)),
+		expression.Identifier("id"))
+	assert.False(t, containsIDFilter(expr))
+
+	expr = expression.LogicalAnd(
+		expression.Equal(expression.Identifier("id"), expression.Value(int64(8))),
+		expression.Equal(expression.Identifier("foo"), expression.Value(int32(4))))
+	assert.True(t, containsIDFilter(expr))
+
+	expr = expression.LogicalAnd(
+		expression.Equal(expression.Identifier("foo"), expression.Value(int32(4))),
+		expression.Equal(expression.Identifier("id"), expression.Value(int64(8))))
+	assert.True(t, containsIDFilter(expr))
+
+	expr = expression.LogicalOr(
+		expression.Equal(expression.Identifier("id"), expression.Value(int64(8))),
+		expression.Equal(expression.Identifier("foo"), expression.Value(int32(4))))
+	assert.False(t, containsIDFilter(expr))
+
+	expr = expression.LogicalOr(
+		expression.Equal(expression.Identifier("foo"), expression.Value(int32(4))),
+		expression.Equal(expression.Identifier("id"), expression.Value(int64(8))))
+	assert.False(t, containsIDFilter(expr))
+
+	expr = expression.LogicalOr(
+		expression.Equal(expression.Identifier("id"), expression.Value(int64(4))),
+		expression.Equal(expression.Identifier("id"), expression.Value(int64(8))))
+	assert.True(t, containsIDFilter(expr))
+}
+
+func TestRegisterSyscallEvents(t *testing.T) {
+	sensor := newUnitTestSensor(t)
+	defer sensor.Stop()
+
+	enterEvents := []*api.SyscallEventFilter{
+		&api.SyscallEventFilter{
+			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
+			Id:   &wrappers.Int64Value{8},
+			Arg0: &wrappers.UInt64Value{11},
+			Arg1: &wrappers.UInt64Value{22},
+			Arg2: &wrappers.UInt64Value{33},
+			Arg3: &wrappers.UInt64Value{44},
+			Arg4: &wrappers.UInt64Value{55},
+			Arg5: &wrappers.UInt64Value{66},
+		},
+	}
+	exitEvents := []*api.SyscallEventFilter{
+		&api.SyscallEventFilter{
+			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT,
+			Id:   &wrappers.Int64Value{8},
+			Ret:  &wrappers.Int64Value{0},
+		},
+	}
+	invalidEvents := []*api.SyscallEventFilter{
+		&api.SyscallEventFilter{
+			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_UNKNOWN,
+			Id:   &wrappers.Int64Value{8},
+		},
+		&api.SyscallEventFilter{
+			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
+		},
+		&api.SyscallEventFilter{
+			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT,
+		},
+		&api.SyscallEventFilter{
+			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
+			Id:   &wrappers.Int64Value{8},
+			FilterExpression: expression.Equal(
+				expression.Identifier("asdf"),
+				expression.Value(make(chan bool))),
+		},
+		&api.SyscallEventFilter{
+			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT,
+			Id:   &wrappers.Int64Value{8},
+			FilterExpression: expression.Equal(
+				expression.Identifier("asdf"),
+				expression.Value(make(chan bool))),
+		},
+	}
+
+	s := newTestSubscription(t, sensor)
+	s.registerSyscallEvents(enterEvents)
+	s.registerSyscallEvents(exitEvents)
+	s.registerSyscallEvents(invalidEvents)
+	verifyRegisterSyscallEnterEventFilter(t, s, len(enterEvents))
+	verifyRegisterSyscallExitEventFilter(t, s, len(exitEvents))
+}
+
+func TestRegisterTickerEvents(t *testing.T) {
+	sensor := newUnitTestSensor(t)
+	defer sensor.Stop()
+
+	events := []*api.TickerEventFilter{
+		&api.TickerEventFilter{
+			Interval: 24378,
+		},
+		&api.TickerEventFilter{
+			Interval: 374,
+		},
+	}
+
+	s := newTestSubscription(t, sensor)
+	s.registerTickerEvents(events)
+	verifyRegisterTickerEventFilter(t, s, len(events))
+}
 
 func TestNewTelemetryEvent(t *testing.T) {
 	data := TelemetryEventData{
@@ -151,8 +800,7 @@ func TestTranslateEvent(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	s := sensor.NewSubscription()
-	require.NotNil(t, s)
+	s := newTestSubscription(t, sensor)
 
 	type testCase struct {
 		event    TelemetryEvent
@@ -734,6 +1382,16 @@ func TestTranslateEvent(t *testing.T) {
 						Config:    29384756,
 						Value:     20938457,
 					},
+					perf.CounterEventValue{
+						EventType: perf.EventTypeHardwareCache,
+						Config:    928734,
+						Value:     9203784,
+					},
+					perf.CounterEventValue{
+						EventType: perf.EventTypeSoftware,
+						Config:    192873,
+						Value:     495867,
+					},
 				},
 			},
 			expected: &api.TelemetryEvent{
@@ -746,6 +1404,16 @@ func TestTranslateEvent(t *testing.T) {
 								Type:   api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE,
 								Config: 29384756,
 								Value:  20938457,
+							},
+							&api.PerformanceEventValue{
+								Type:   api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE_CACHE,
+								Config: 928734,
+								Value:  9203784,
+							},
+							&api.PerformanceEventValue{
+								Type:   api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_SOFTWARE,
+								Config: 192873,
+								Value:  495867,
 							},
 						},
 					},

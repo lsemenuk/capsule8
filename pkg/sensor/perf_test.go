@@ -28,8 +28,7 @@ func TestDecodePerfCounterEvent(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	s := sensor.NewSubscription()
-	require.NotNil(t, s)
+	s := newTestSubscription(t, sensor)
 
 	sample := &perf.SampleRecord{
 		Time: uint64(sys.CurrentMonotonicRaw()),
@@ -65,17 +64,23 @@ func TestDecodePerfCounterEvent(t *testing.T) {
 	assert.Equal(t, counters, e.Counters)
 }
 
+func verifyRegisterPerformanceEventFilter(t *testing.T, s *Subscription, count int) {
+	if count > 0 {
+		assert.Len(t, s.eventSinks, count)
+	} else {
+		assert.Len(t, s.status, -count)
+		assert.Len(t, s.eventSinks, 0)
+	}
+}
+
 func TestRegisterPerformanceEventFilter(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	s := sensor.NewSubscription()
-	require.NotNil(t, s)
-
 	attr := perf.EventAttr{}
+	s := newTestSubscription(t, sensor)
 	s.RegisterPerformanceEventFilter(attr, nil)
-	assert.Len(t, s.status, 1)
-	assert.Len(t, s.eventSinks, 0)
+	verifyRegisterPerformanceEventFilter(t, s, -1)
 
 	counters := []perf.CounterEventGroupMember{
 		perf.CounterEventGroupMember{
@@ -83,6 +88,7 @@ func TestRegisterPerformanceEventFilter(t *testing.T) {
 			Config:    983745,
 		},
 	}
+	s = newTestSubscription(t, sensor)
 	s.RegisterPerformanceEventFilter(attr, counters)
-	assert.Len(t, s.eventSinks, 1)
+	verifyRegisterPerformanceEventFilter(t, s, 1)
 }

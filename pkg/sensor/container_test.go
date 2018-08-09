@@ -15,6 +15,7 @@
 package sensor
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/capsule8/capsule8/pkg/expression"
@@ -168,31 +169,42 @@ func TestContainerCache(t *testing.T) {
 	assert.Equal(t, ContainerStateExited, info.State)
 }
 
+func verifyContainerEventRegistration(t *testing.T, s *Subscription, count int) {
+	if count > 0 {
+		assert.Len(t, s.eventSinks, count)
+	} else {
+		assert.Len(t, s.status, -count)
+		assert.Len(t, s.eventSinks, 0)
+	}
+}
+
 func TestContainerEventRegistration(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
-
-	s := sensor.NewSubscription()
 
 	e := expression.Equal(expression.Identifier("foo"), expression.Value("bar"))
 	expr, err := expression.NewExpression(e)
 	require.NotNil(t, expr)
 	require.NoError(t, err)
 
-	funcs := []func(*expression.Expression){
-		s.RegisterContainerCreatedEventFilter,
-		s.RegisterContainerRunningEventFilter,
-		s.RegisterContainerExitedEventFilter,
-		s.RegisterContainerDestroyedEventFilter,
-		s.RegisterContainerUpdatedEventFilter,
+	names := []string{
+		"RegisterContainerCreatedEventFilter",
+		"RegisterContainerRunningEventFilter",
+		"RegisterContainerExitedEventFilter",
+		"RegisterContainerDestroyedEventFilter",
+		"RegisterContainerUpdatedEventFilter",
 	}
-	for i, f := range funcs {
-		f(expr)
-		assert.Len(t, s.status, i+1)
-		assert.Len(t, s.eventSinks, i)
+	for _, name := range names {
+		s := newTestSubscription(t, sensor)
+		v := reflect.ValueOf(s)
+		m := v.MethodByName(name)
 
-		f(nil)
-		assert.Len(t, s.eventSinks, i+1)
+		m.Call([]reflect.Value{reflect.ValueOf(expr)})
+		verifyContainerEventRegistration(t, s, -1)
+
+		var nilExpr *expression.Expression
+		m.Call([]reflect.Value{reflect.ValueOf(nilExpr)})
+		verifyContainerEventRegistration(t, s, 1)
 	}
 }
 

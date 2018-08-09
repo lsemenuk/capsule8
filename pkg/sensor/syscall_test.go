@@ -38,8 +38,7 @@ func TestDecodeSyscallTraceEnter(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	s := sensor.NewSubscription()
-	require.NotNil(t, s)
+	s := newTestSubscription(t, sensor)
 
 	sample := &perf.SampleRecord{
 		Time: uint64(sys.CurrentMonotonicRaw()),
@@ -81,8 +80,7 @@ func TestDecodeSysExit(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	s := sensor.NewSubscription()
-	require.NotNil(t, s)
+	s := newTestSubscription(t, sensor)
 
 	sample := &perf.SampleRecord{
 		Time: uint64(sys.CurrentMonotonicRaw()),
@@ -123,7 +121,8 @@ func TestInitSyscallNames(t *testing.T) {
 			perf.WithEventSourceController(perf.NewStubEventSourceController()))
 	require.NoError(t, err)
 
-	sensor := &Sensor{Monitor: monitor}
+	sensor := &Sensor{}
+	sensor.monitor.Store(monitor)
 	s := Subscription{sensor: sensor}
 
 	s.initSyscallNames()
@@ -139,7 +138,8 @@ func TestInitSyscallNames(t *testing.T) {
 			perf.WithEventSourceController(perf.NewStubEventSourceController()))
 	require.NoError(t, err)
 
-	sensor = &Sensor{Monitor: monitor}
+	sensor = &Sensor{}
+	sensor.monitor.Store(monitor)
 	s = Subscription{sensor: sensor}
 
 	s.initSyscallNames()
@@ -151,8 +151,7 @@ func TestRegisterGlobalDummySyscallEvent(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	s := sensor.NewSubscription()
-	require.NotNil(t, s)
+	s := newTestSubscription(t, sensor)
 
 	ok := s.registerGlobalDummySyscallEvent()
 	require.True(t, ok)
@@ -164,25 +163,13 @@ func TestRegisterLocalDummySyscallEvent(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	s := sensor.NewSubscription()
-	require.NotNil(t, s)
+	s := newTestSubscription(t, sensor)
 
 	ok := s.registerLocalDummySyscallEvent()
 	require.True(t, ok)
 }
 
-func TestRegisterSyscallEnterEventFilter(t *testing.T) {
-	sensor := newUnitTestSensor(t)
-	defer sensor.Stop()
-
-	s := sensor.NewSubscription()
-	require.NotNil(t, s)
-
-	e := expression.Equal(expression.Identifier("foo"), expression.Value("bar"))
-	expr, err := expression.NewExpression(e)
-	require.NotNil(t, expr)
-	require.NoError(t, err)
-
+func prepareForRegisterSyscallEnterEventFilter(t *testing.T, s *Subscription) {
 	format := `name: ^^NAME^^
 ID: ^^ID^^
 format:
@@ -201,32 +188,61 @@ format:
 
 print fmt: "id=%d arg0=%d arg1=%d arg2=%d arg3=%d arg4=%d arg5=%d", REC->id, REC->arg0, REC->arg1, REC->arg2, REC->arg3, REC->arg4, REC->arg5`
 
-	newUnitTestKprobe(t, sensor, format)
-	s.RegisterSyscallEnterEventFilter(expr)
-	assert.Len(t, s.status, 1)
-	assert.Len(t, s.eventSinks, 0)
-
-	newUnitTestKprobe(t, sensor, format)
-	s.RegisterSyscallEnterEventFilter(nil)
-	assert.Len(t, s.eventSinks, 1)
+	newUnitTestKprobe(t, s.sensor, 0, format)
 }
 
-func TestRegisterSyscallExitEventFilter(t *testing.T) {
+func verifyRegisterSyscallEnterEventFilter(t *testing.T, s *Subscription, count int) {
+	if count > 0 {
+		assert.Len(t, s.eventSinks, count)
+	} else {
+		assert.Len(t, s.status, -count)
+		assert.Len(t, s.eventSinks, 0)
+	}
+}
+
+func TestRegisterSyscallEnterEventFilter(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
-
-	s := sensor.NewSubscription()
-	require.NotNil(t, s)
 
 	e := expression.Equal(expression.Identifier("foo"), expression.Value("bar"))
 	expr, err := expression.NewExpression(e)
 	require.NotNil(t, expr)
 	require.NoError(t, err)
 
-	s.RegisterSyscallExitEventFilter(expr)
-	assert.Len(t, s.status, 1)
-	assert.Len(t, s.eventSinks, 0)
+	s := newTestSubscription(t, sensor)
+	prepareForRegisterSyscallEnterEventFilter(t, s)
+	s.RegisterSyscallEnterEventFilter(expr)
+	verifyRegisterSyscallEnterEventFilter(t, s, -1)
 
+	s = newTestSubscription(t, sensor)
+	prepareForRegisterSyscallEnterEventFilter(t, s)
+	s.RegisterSyscallEnterEventFilter(nil)
+	verifyRegisterSyscallEnterEventFilter(t, s, 1)
+}
+
+func verifyRegisterSyscallExitEventFilter(t *testing.T, s *Subscription, count int) {
+	if count > 0 {
+		assert.Len(t, s.eventSinks, count)
+	} else {
+		assert.Len(t, s.status, 1)
+		assert.Len(t, s.eventSinks, 0)
+	}
+}
+
+func TestRegisterSyscallExitEventFilter(t *testing.T) {
+	sensor := newUnitTestSensor(t)
+	defer sensor.Stop()
+
+	e := expression.Equal(expression.Identifier("foo"), expression.Value("bar"))
+	expr, err := expression.NewExpression(e)
+	require.NotNil(t, expr)
+	require.NoError(t, err)
+
+	s := newTestSubscription(t, sensor)
+	s.RegisterSyscallExitEventFilter(expr)
+	verifyRegisterSyscallExitEventFilter(t, s, -1)
+
+	s = newTestSubscription(t, sensor)
 	s.RegisterSyscallExitEventFilter(nil)
-	assert.Len(t, s.eventSinks, 1)
+	verifyRegisterSyscallExitEventFilter(t, s, 1)
 }

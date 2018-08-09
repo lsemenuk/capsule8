@@ -59,7 +59,7 @@ func (s *Subscription) RegisterPerformanceEventFilter(
 	counters []perf.CounterEventGroupMember,
 ) {
 	eventName := "Performance Counters"
-	groupID, eventID, err := s.sensor.Monitor.RegisterCounterEventGroup(
+	groupID, eventID, err := s.sensor.Monitor().RegisterCounterEventGroup(
 		eventName, counters, s.decodePerfCounterEvent,
 		perf.WithEventAttr(&attr))
 	if err != nil {

@@ -70,7 +70,8 @@ func (s *Subscription) RegisterTickerEventFilter(
 		return
 	}
 
-	eventID := s.sensor.Monitor.RegisterExternalEvent("ticker",
+	monitor := s.sensor.Monitor()
+	eventID := monitor.RegisterExternalEvent("ticker",
 		s.decodeTickerEvent)
 
 	done := make(chan struct{})
@@ -79,18 +80,15 @@ func (s *Subscription) RegisterTickerEventFilter(
 	if err != nil {
 		s.logStatus(
 			fmt.Sprintf("Invalid filter expression for ticker filter: %v", err))
-		s.sensor.Monitor.UnregisterEvent(eventID)
+		monitor.UnregisterEvent(eventID)
 		return
 	}
 	es.unregister = func(es *eventSink) {
-		if monitor := s.sensor.Monitor; monitor != nil {
-			monitor.UnregisterEvent(es.eventID)
-		}
+		monitor.UnregisterEvent(es.eventID)
 		close(done)
 	}
 
 	go func() {
-		monitor := s.sensor.Monitor
 		ticker := time.NewTicker(time.Duration(interval))
 		for {
 			select {

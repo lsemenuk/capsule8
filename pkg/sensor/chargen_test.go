@@ -30,8 +30,7 @@ func TestDecodeChargenEvent(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	s := sensor.NewSubscription()
-	require.NotNil(t, s)
+	s := newTestSubscription(t, sensor)
 
 	sample := &perf.SampleRecord{}
 	data := perf.TraceEventSampleData{
@@ -69,25 +68,27 @@ func TestGenerateCharacters(t *testing.T) {
 	}
 }
 
+func verifyRegisterChargenEventFilter(t *testing.T, s *Subscription, count int) {
+	if count > 0 {
+		assert.Len(t, s.eventSinks, count)
+	} else {
+		assert.Len(t, s.status, -count)
+		assert.Len(t, s.eventSinks, 0)
+	}
+}
+
 func TestRegisterChargenEventFilter(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	s := sensor.NewSubscription()
-	require.NotNil(t, s)
-
-	// Sanity check
-	assert.Len(t, s.status, 0)
-	assert.Len(t, s.eventSinks, 0)
-
 	// Invalid length should fail
+	s := newTestSubscription(t, sensor)
 	s.RegisterChargenEventFilter(0, nil)
-	assert.Len(t, s.status, 1)
-	assert.Len(t, s.eventSinks, 0)
+	verifyRegisterChargenEventFilter(t, s, -1)
 
+	s = newTestSubscription(t, sensor)
 	s.RegisterChargenEventFilter(1<<16+1, nil)
-	assert.Len(t, s.status, 2)
-	assert.Len(t, s.eventSinks, 0)
+	verifyRegisterChargenEventFilter(t, s, -1)
 
 	// Invalid filter expression should fail
 	e := expression.Equal(expression.Identifier("foo"), expression.Value("bar"))
@@ -95,13 +96,14 @@ func TestRegisterChargenEventFilter(t *testing.T) {
 	require.NotNil(t, expr)
 	require.NoError(t, err)
 
+	s = newTestSubscription(t, sensor)
 	s.RegisterChargenEventFilter(32, expr)
-	assert.Len(t, s.status, 3)
-	assert.Len(t, s.eventSinks, 0)
+	verifyRegisterChargenEventFilter(t, s, -1)
 
 	// This should succeed
+	s = newTestSubscription(t, sensor)
 	s.RegisterChargenEventFilter(32, nil)
-	assert.Len(t, s.eventSinks, 1)
+	verifyRegisterChargenEventFilter(t, s, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s.Run(ctx, nil)

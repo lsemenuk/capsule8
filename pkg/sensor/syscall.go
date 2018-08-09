@@ -137,11 +137,11 @@ func (s *Subscription) initSyscallNames() {
 	// so the tracepoint names are not going to change. So while this might
 	// appear to be a bit shady, it's perfectly safe.
 	syscallEnterName = "raw_syscalls/sys_enter"
-	if s.sensor.Monitor.DoesTracepointExist(syscallEnterName) {
+	if s.sensor.Monitor().DoesTracepointExist(syscallEnterName) {
 		syscallExitName = "raw_syscalls/sys_exit"
 	} else {
 		syscallEnterName = "syscalls/sys_enter"
-		if !s.sensor.Monitor.DoesTracepointExist(syscallEnterName) {
+		if !s.sensor.Monitor().DoesTracepointExist(syscallEnterName) {
 			glog.Fatal("No syscall sys_enter tracepoint exists!")
 		}
 		syscallExitName = "syscalls/sys_exit"
@@ -150,7 +150,7 @@ func (s *Subscription) initSyscallNames() {
 
 func (s *Subscription) registerGlobalDummySyscallEvent() bool {
 	if atomic.AddInt64(&s.sensor.dummySyscallEventCount, 1) == 1 {
-		eventID, err := s.sensor.Monitor.RegisterTracepoint(
+		eventID, err := s.sensor.Monitor().RegisterTracepoint(
 			syscallEnterName, decodeDummySysEnter,
 			perf.WithEventGroup(0),
 			perf.WithFilter("id == 0x7fffffff"))
@@ -174,7 +174,7 @@ func (s *Subscription) registerLocalDummySyscallEvent() bool {
 			fmt.Sprintf("Could not create subscription event group: %v", err))
 		return false
 	}
-	_, err = s.sensor.Monitor.RegisterTracepoint(
+	_, err = s.sensor.Monitor().RegisterTracepoint(
 		syscallEnterName, decodeDummySysEnter,
 		perf.WithEventGroup(s.eventGroupID),
 		perf.WithFilter("id == 0x7fffffff"))
@@ -215,7 +215,7 @@ func (s *Subscription) RegisterSyscallEnterEventFilter(
 		unregister = func(es *eventSink) {
 			eventID := s.sensor.dummySyscallEventID
 			if atomic.AddInt64(&s.sensor.dummySyscallEventCount, -1) == 0 {
-				s.sensor.Monitor.UnregisterEvent(eventID)
+				s.sensor.Monitor().UnregisterEvent(eventID)
 			}
 		}
 	}

@@ -541,21 +541,22 @@ func NewProcessInfoCache(sensor *Sensor) *ProcessInfoCache {
 		cache.cache = newArrayTaskCache(maxPID)
 	}
 
-	cache.ProcessExecEventID = sensor.Monitor.RegisterExternalEvent(
+	monitor := sensor.Monitor()
+	cache.ProcessExecEventID = monitor.RegisterExternalEvent(
 		"PROCESS_EXEC", cache.decodeProcessExecEvent)
 
-	cache.ProcessForkEventID = sensor.Monitor.RegisterExternalEvent(
+	cache.ProcessForkEventID = monitor.RegisterExternalEvent(
 		"PROCESS_FORK", cache.decodeProcessForkEvent)
 
-	cache.ProcessExitEventID = sensor.Monitor.RegisterExternalEvent(
+	cache.ProcessExitEventID = monitor.RegisterExternalEvent(
 		"PROCESS_EXIT", cache.decodeProcessExitEvent)
 
-	cache.ProcessUpdateEventID = sensor.Monitor.RegisterExternalEvent(
+	cache.ProcessUpdateEventID = monitor.RegisterExternalEvent(
 		"PROCESS_UPDATE", cache.decodeProcessUpdateEvent)
 
 	// Register with the sensor's global event monitor...
 	eventName := "task/task_newtask"
-	_, err := sensor.Monitor.RegisterTracepoint(eventName,
+	_, err := monitor.RegisterTracepoint(eventName,
 		cache.decodeNewTask,
 		perf.WithEventEnabled())
 	if err != nil {
@@ -577,7 +578,7 @@ func NewProcessInfoCache(sensor *Sensor) *ProcessInfoCache {
 		}
 
 		eventName = "sched/sched_process_fork"
-		_, err = sensor.Monitor.RegisterTracepoint(eventName,
+		_, err = monitor.RegisterTracepoint(eventName,
 			cache.decodeSchedProcessFork,
 			perf.WithEventEnabled())
 		if err != nil {
@@ -936,7 +937,7 @@ func (pc *ProcessInfoCache) handleSysClone(
 		"fork_child_pid": int32(childTask.PID),
 		"fork_child_id":  childTask.ProcessID,
 	}
-	pc.sensor.Monitor.EnqueueExternalSample(
+	pc.sensor.Monitor().EnqueueExternalSample(
 		pc.ProcessForkEventID,
 		sampleIDFromSample(sample),
 		eventData)
@@ -996,7 +997,7 @@ func (pc *ProcessInfoCache) decodeDoExit(
 		t := pc.LookupTask(pid)
 		t.Update(changes, sample.Time, pc.sensor.ProcFS)
 		eventData["__task__"] = t
-		pc.sensor.Monitor.EnqueueExternalSample(
+		pc.sensor.Monitor().EnqueueExternalSample(
 			pc.ProcessExitEventID,
 			sampleIDFromSample(sample),
 			eventData)
@@ -1052,7 +1053,7 @@ func (pc *ProcessInfoCache) decodeDoSetFsPwd(
 				"__task__": t,
 				"cwd":      t.CWD,
 			}
-			pc.sensor.Monitor.EnqueueExternalSample(
+			pc.sensor.Monitor().EnqueueExternalSample(
 				pc.ProcessUpdateEventID,
 				sampleIDFromSample(sample),
 				eventData)
@@ -1092,7 +1093,7 @@ func (pc *ProcessInfoCache) decodeExecve(
 		t := pc.LookupTask(pid)
 		t.Update(changes, sample.Time, pc.sensor.ProcFS)
 		eventData["__task__"] = t
-		pc.sensor.Monitor.EnqueueExternalSample(
+		pc.sensor.Monitor().EnqueueExternalSample(
 			pc.ProcessExecEventID,
 			sampleIDFromSample(sample),
 			eventData)

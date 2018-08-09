@@ -708,16 +708,17 @@ func (monitor *EventMonitor) removeUprobe(name string) error {
 }
 
 func (monitor *EventMonitor) newProbeName() string {
-	probeName := monitor.NextProbeName()
+	probeName := monitor.NextProbeName(0)
 	monitor.nextProbeID++
 	return probeName
 }
 
 // NextProbeName is used primarily for unit testing. It returns the next probe
-// name that will be used by either RegisterKprobe or RegisterUprobe.
-func (monitor *EventMonitor) NextProbeName() string {
+// name that will be used by either RegisterKprobe or RegisterUprobe. Any delta
+// specified is added to the counter (intended for use by unit testing)
+func (monitor *EventMonitor) NextProbeName(delta uint64) string {
 	return fmt.Sprintf("capsule8/sensor_%d_%d", unix.Getpid(),
-		monitor.nextProbeID+1)
+		monitor.nextProbeID+1+delta)
 }
 
 func (monitor *EventMonitor) newRegisteredEvent(

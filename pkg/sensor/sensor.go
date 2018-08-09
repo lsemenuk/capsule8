@@ -157,7 +157,7 @@ type Sensor struct {
 
 	// A sensor-global event monitor that is used for events to aid in
 	// caching process information
-	Monitor *perf.EventMonitor
+	monitor atomic.Value // *perf.EventMonitor
 
 	// A reference to the host proc filesystem in use.
 	ProcFS proc.FileSystem
@@ -257,8 +257,14 @@ func NewSensor(options ...NewSensorOption) (*Sensor, error) {
 		cleanupFuncs:          opts.cleanupFuncs,
 	}
 	s.dispatchCond = sync.Cond{L: &s.dispatchMutex}
+	s.monitor.Store((*perf.EventMonitor)(nil))
 
 	return s, nil
+}
+
+// Monitor returns a reference to the sensor's EventMonitor instance.
+func (s *Sensor) Monitor() *perf.EventMonitor {
+	return s.monitor.Load().(*perf.EventMonitor)
 }
 
 // Start starts a sensor instance running.
@@ -337,7 +343,7 @@ func (s *Sensor) Start() error {
 
 	// Make sure that all events registered with the sensor's event monitor
 	// are active
-	s.Monitor.EnableGroup(0)
+	s.Monitor().EnableGroup(0)
 
 	// Start dispatch goroutine(s). We'll just spin one up for now, but we
 	// can run multiples if we want. The sensor needs to keep samples in
@@ -366,10 +372,10 @@ func (s *Sensor) Stop() {
 			s.dispatchMutex.Unlock()
 		}
 	}
-	if s.Monitor != nil {
+	if monitor := s.Monitor(); monitor != nil {
 		glog.V(2).Info("Stopping sensor-global EventMonitor")
-		s.Monitor.Close()
-		s.Monitor = nil
+		monitor.Close()
+		s.monitor.Store((*perf.EventMonitor)(nil))
 		glog.V(2).Info("Sensor-global EventMonitor stopped successfully")
 	}
 
@@ -476,7 +482,7 @@ func (s *Sensor) createEventMonitor() error {
 			perf.WithCgroups(cgroups))
 	}
 
-	s.Monitor, err = perf.NewEventMonitor(eventMonitorOptions...)
+	monitor, err := perf.NewEventMonitor(eventMonitorOptions...)
 	if err != nil {
 		// If a cgroup-specific event monitor could not be created,
 		// fall back to a system-wide event monitor.
@@ -487,17 +493,17 @@ func (s *Sensor) createEventMonitor() error {
 				strings.Join(cgroups, ","), err)
 
 			glog.V(1).Info("Creating new system-wide event monitor")
-			s.Monitor, err = perf.NewEventMonitor(optionsWithoutCgroups...)
+			monitor, err = perf.NewEventMonitor(optionsWithoutCgroups...)
 		}
 		if err != nil {
 			glog.V(1).Infof("Couldn't create event monitor: %s", err)
 			return err
 		}
 	}
+	s.monitor.Store(monitor)
 
 	go func() {
-		err := s.Monitor.Run(s.dispatchSamples)
-		if err != nil {
+		if err := monitor.Run(s.dispatchSamples); err != nil {
 			glog.Fatal(err)
 		}
 		glog.V(2).Info("EventMonitor.Run() returned; exiting goroutine")
@@ -593,7 +599,7 @@ func (s *Sensor) RegisterKprobe(
 	if strings.HasPrefix(address, "__x64_sys_") {
 		output = rewriteSyscallFetchargs(output)
 	}
-	return s.Monitor.RegisterKprobe(address, onReturn, output, fn, options...)
+	return s.Monitor().RegisterKprobe(address, onReturn, output, fn, options...)
 }
 
 // NewSubscription creates a new telemetry subscription

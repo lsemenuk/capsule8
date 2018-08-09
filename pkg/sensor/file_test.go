@@ -29,8 +29,7 @@ func TestDecodeDoSysOpen(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	s := sensor.NewSubscription()
-	require.NotNil(t, s)
+	s := newTestSubscription(t, sensor)
 
 	sample := &perf.SampleRecord{
 		Time: uint64(sys.CurrentMonotonicRaw()),
@@ -60,18 +59,7 @@ func TestDecodeDoSysOpen(t *testing.T) {
 	assert.Equal(t, data["mode"], e.Mode)
 }
 
-func TestRegisterFileOpenEventFilter(t *testing.T) {
-	sensor := newUnitTestSensor(t)
-	defer sensor.Stop()
-
-	s := sensor.NewSubscription()
-	require.NotNil(t, s)
-
-	e := expression.Equal(expression.Identifier("foo"), expression.Value("bar"))
-	expr, err := expression.NewExpression(e)
-	require.NotNil(t, expr)
-	require.NoError(t, err)
-
+func prepareForRegisterFileOpenEventFilter(t *testing.T, s *Subscription, delta uint64) {
 	format := `name: ^^NAME^^
 id: ^^ID^^
 format:
@@ -86,12 +74,34 @@ format:
 
 print fmt: "filename=\"%s\" flags=%d mode=%d", __get_str(filename), REC->flags, REC->mode`
 
-	newUnitTestKprobe(t, sensor, format)
-	s.RegisterFileOpenEventFilter(expr)
-	assert.Len(t, s.status, 1)
-	assert.Len(t, s.eventSinks, 0)
+	newUnitTestKprobe(t, s.sensor, delta, format)
+}
 
-	newUnitTestKprobe(t, sensor, format)
+func verifyRegisterFileOpenEventFilter(t *testing.T, s *Subscription, count int) {
+	if count > 0 {
+		assert.Len(t, s.eventSinks, count)
+	} else {
+		assert.Len(t, s.status, -count)
+		assert.Len(t, s.eventSinks, 0)
+	}
+}
+
+func TestRegisterFileOpenEventFilter(t *testing.T) {
+	sensor := newUnitTestSensor(t)
+	defer sensor.Stop()
+
+	e := expression.Equal(expression.Identifier("foo"), expression.Value("bar"))
+	expr, err := expression.NewExpression(e)
+	require.NotNil(t, expr)
+	require.NoError(t, err)
+
+	s := newTestSubscription(t, sensor)
+	prepareForRegisterFileOpenEventFilter(t, s, 0)
+	s.RegisterFileOpenEventFilter(expr)
+	verifyRegisterFileOpenEventFilter(t, s, -1)
+
+	s = newTestSubscription(t, sensor)
+	prepareForRegisterFileOpenEventFilter(t, s, 0)
 	s.RegisterFileOpenEventFilter(nil)
-	assert.Len(t, s.eventSinks, 1)
+	verifyRegisterFileOpenEventFilter(t, s, 1)
 }

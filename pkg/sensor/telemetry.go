@@ -315,6 +315,13 @@ func (t *telemetryServiceServer) GetEvents(
 		}
 	}
 
+	subscr := t.sensor.NewSubscription()
+	subscr.translateTelemetryServiceSubscription(sub)
+	if len(subscr.eventSinks) == 0 && len(subscr.status) == 0 {
+		glog.V(1).Infof("Invalid subscription: %+v", sub)
+		return t.getEventsError(errors.New("Invalid subscription (empty EventFilter)"))
+	}
+
 	events := make(chan TelemetryEvent, config.Sensor.ChannelBufferLength)
 	f := func(e TelemetryEvent) {
 		// Send the event to the data channel, but drop the event if
@@ -329,63 +336,34 @@ func (t *telemetryServiceServer) GetEvents(
 	ctx, cancel := context.WithCancel(stream.Context())
 	defer cancel()
 
-	r := &api.GetEventsResponse{}
-	subscr := t.sensor.NewSubscription()
-
-	if sub.ContainerFilter != nil {
-		cf := NewContainerFilter()
-		for _, id := range sub.ContainerFilter.Ids {
-			cf.AddContainerID(id)
+	statuses, runErr := subscr.Run(ctx, f)
+	if runErr == nil || len(statuses) > 0 {
+		r := &api.GetEventsResponse{}
+		if len(statuses) == 0 {
+			r.Statuses = []*status.Status{
+				&status.Status{Code: int32(code.Code_OK)},
+			}
+		} else {
+			r.Statuses = make([]*status.Status, 0, len(statuses))
+			for _, st := range statuses {
+				r.Statuses = append(r.Statuses,
+					&status.Status{
+						Code:    int32(code.Code_UNKNOWN),
+						Message: st,
+					})
+			}
 		}
-		for _, name := range sub.ContainerFilter.Names {
-			cf.AddContainerName(name)
+		if err = stream.Send(r); err != nil {
+			return t.getEventsError(err)
 		}
-		for _, id := range sub.ContainerFilter.ImageIds {
-			cf.AddImageID(id)
-		}
-		for _, name := range sub.ContainerFilter.ImageNames {
-			cf.AddImageName(name)
-		}
-		if cf.Len() > 0 {
-			subscr.SetContainerFilter(cf)
+		if t.service.options.getEventsResponse != nil {
+			t.service.options.getEventsResponse(r, nil)
 		}
 	}
-
-	subscr.registerChargenEvents(sub.EventFilter.ChargenEvents)
-	subscr.registerContainerEvents(sub.EventFilter.ContainerEvents)
-	subscr.registerFileEvents(sub.EventFilter.FileEvents)
-	subscr.registerKernelFunctionCallEvents(sub.EventFilter.KernelEvents)
-	subscr.registerNetworkEvents(sub.EventFilter.NetworkEvents)
-	subscr.registerPerformanceEvents(sub.EventFilter.PerformanceEvents)
-	subscr.registerProcessEvents(sub.EventFilter.ProcessEvents)
-	subscr.registerSyscallEvents(sub.EventFilter.SyscallEvents)
-	subscr.registerTickerEvents(sub.EventFilter.TickerEvents)
-
-	statuses, err := subscr.Run(ctx, f)
-	if err != nil {
+	if runErr != nil {
 		glog.Errorf("Failed to get events for subscription %+v: %v",
-			sub, err)
-		return t.getEventsError(err)
-	}
-	if len(statuses) == 0 {
-		r.Statuses = []*status.Status{
-			&status.Status{Code: int32(code.Code_OK)},
-		}
-	} else {
-		r.Statuses = make([]*status.Status, 0, len(statuses))
-		for _, st := range statuses {
-			r.Statuses = append(r.Statuses,
-				&status.Status{
-					Code:    int32(code.Code_UNKNOWN),
-					Message: st,
-				})
-		}
-	}
-	if err = stream.Send(r); err != nil {
-		return t.getEventsError(err)
-	}
-	if t.service.options.getEventsResponse != nil {
-		t.service.options.getEventsResponse(r, nil)
+			sub, runErr)
+		return runErr
 	}
 
 	var nEvents int64
@@ -404,7 +382,7 @@ func (t *telemetryServiceServer) GetEvents(
 				nextEventTime = now
 				nextEventTime.Add(throttleDuration)
 			}
-			r = &api.GetEventsResponse{
+			r := &api.GetEventsResponse{
 				Events: []*api.ReceivedTelemetryEvent{
 					&api.ReceivedTelemetryEvent{
 						Event: subscr.translateEvent(e),
@@ -426,6 +404,37 @@ func (t *telemetryServiceServer) GetEvents(
 
 	// unreachable
 	return nil
+}
+
+func (s *Subscription) translateTelemetryServiceSubscription(sub *api.Subscription) {
+	if sub.ContainerFilter != nil {
+		cf := NewContainerFilter()
+		for _, id := range sub.ContainerFilter.Ids {
+			cf.AddContainerID(id)
+		}
+		for _, name := range sub.ContainerFilter.Names {
+			cf.AddContainerName(name)
+		}
+		for _, id := range sub.ContainerFilter.ImageIds {
+			cf.AddImageID(id)
+		}
+		for _, name := range sub.ContainerFilter.ImageNames {
+			cf.AddImageName(name)
+		}
+		if cf.Len() > 0 {
+			s.SetContainerFilter(cf)
+		}
+	}
+
+	s.registerChargenEvents(sub.EventFilter.ChargenEvents)
+	s.registerContainerEvents(sub.EventFilter.ContainerEvents)
+	s.registerFileEvents(sub.EventFilter.FileEvents)
+	s.registerKernelFunctionCallEvents(sub.EventFilter.KernelEvents)
+	s.registerNetworkEvents(sub.EventFilter.NetworkEvents)
+	s.registerPerformanceEvents(sub.EventFilter.PerformanceEvents)
+	s.registerProcessEvents(sub.EventFilter.ProcessEvents)
+	s.registerSyscallEvents(sub.EventFilter.SyscallEvents)
+	s.registerTickerEvents(sub.EventFilter.TickerEvents)
 }
 
 func (s *Subscription) registerChargenEvents(events []*api.ChargenEventFilter) {
@@ -502,7 +511,7 @@ func rewriteFileEventFilter(fef *api.FileEventFilter) {
 			expression.Identifier("filename"),
 			expression.Value(fef.Filename.Value))
 		fef.FilterExpression = expression.LogicalAnd(
-			newExpr, fef.FilterExpression)
+			fef.FilterExpression, newExpr)
 		fef.Filename = nil
 		fef.FilenamePattern = nil
 	} else if fef.FilenamePattern != nil {
@@ -510,25 +519,29 @@ func rewriteFileEventFilter(fef *api.FileEventFilter) {
 			expression.Identifier("filename"),
 			expression.Value(fef.FilenamePattern.Value))
 		fef.FilterExpression = expression.LogicalAnd(
-			newExpr, fef.FilterExpression)
+			fef.FilterExpression, newExpr)
 		fef.FilenamePattern = nil
 	}
 
 	if fef.OpenFlagsMask != nil {
-		newExpr := expression.BitwiseAnd(
-			expression.Identifier("flags"),
-			expression.Value(fef.OpenFlagsMask.Value))
+		newExpr := expression.NotEqual(
+			expression.BitwiseAnd(
+				expression.Identifier("flags"),
+				expression.Value(fef.OpenFlagsMask.Value)),
+			expression.Value(int32(0)))
 		fef.FilterExpression = expression.LogicalAnd(
-			newExpr, fef.FilterExpression)
+			fef.FilterExpression, newExpr)
 		fef.OpenFlagsMask = nil
 	}
 
 	if fef.CreateModeMask != nil {
-		newExpr := expression.BitwiseAnd(
-			expression.Identifier("mode"),
-			expression.Value(fef.CreateModeMask.Value))
+		newExpr := expression.NotEqual(
+			expression.BitwiseAnd(
+				expression.Identifier("mode"),
+				expression.Value(fef.CreateModeMask.Value)),
+			expression.Value(int32(0)))
 		fef.FilterExpression = expression.LogicalAnd(
-			newExpr, fef.FilterExpression)
+			fef.FilterExpression, newExpr)
 		fef.CreateModeMask = nil
 	}
 }
@@ -553,7 +566,7 @@ func (s *Subscription) registerFileEvents(events []*api.FileEventFilter) {
 			wildcard = true
 			filter = nil
 		} else if !wildcard {
-			filter = expression.LogicalOr(filter, e.FilterExpression)
+			filter = expression.LogicalOr(e.FilterExpression, filter)
 		}
 	}
 
@@ -767,7 +780,7 @@ func rewriteProcessEventFilter(pef *api.ProcessEventFilter) {
 				expression.Identifier("filename"),
 				expression.Value(pef.ExecFilename.Value))
 			pef.FilterExpression = expression.LogicalAnd(
-				newExpr, pef.FilterExpression)
+				pef.FilterExpression, newExpr)
 			pef.ExecFilename = nil
 			pef.ExecFilenamePattern = nil
 		} else if pef.ExecFilenamePattern != nil {
@@ -775,7 +788,7 @@ func rewriteProcessEventFilter(pef *api.ProcessEventFilter) {
 				expression.Identifier("filename"),
 				expression.Value(pef.ExecFilenamePattern.Value))
 			pef.FilterExpression = expression.LogicalAnd(
-				newExpr, pef.FilterExpression)
+				pef.FilterExpression, newExpr)
 			pef.ExecFilenamePattern = nil
 		}
 	case api.ProcessEventType_PROCESS_EVENT_TYPE_EXIT:
@@ -784,7 +797,7 @@ func rewriteProcessEventFilter(pef *api.ProcessEventFilter) {
 				expression.Identifier("code"),
 				expression.Value(pef.ExitCode.Value))
 			pef.FilterExpression = expression.LogicalAnd(
-				newExpr, pef.FilterExpression)
+				pef.FilterExpression, newExpr)
 			pef.ExitCode = nil
 		}
 	}
@@ -853,7 +866,7 @@ func rewriteSyscallEventFilter(sef *api.SyscallEventFilter) {
 			expression.Identifier("id"),
 			expression.Value(sef.Id.Value))
 		sef.FilterExpression = expression.LogicalAnd(
-			newExpr, sef.FilterExpression)
+			sef.FilterExpression, newExpr)
 		sef.Id = nil
 	}
 
@@ -863,7 +876,7 @@ func rewriteSyscallEventFilter(sef *api.SyscallEventFilter) {
 				expression.Identifier("arg0"),
 				expression.Value(sef.Arg0.Value))
 			sef.FilterExpression = expression.LogicalAnd(
-				newExpr, sef.FilterExpression)
+				sef.FilterExpression, newExpr)
 			sef.Arg0 = nil
 		}
 
@@ -872,7 +885,7 @@ func rewriteSyscallEventFilter(sef *api.SyscallEventFilter) {
 				expression.Identifier("arg1"),
 				expression.Value(sef.Arg1.Value))
 			sef.FilterExpression = expression.LogicalAnd(
-				newExpr, sef.FilterExpression)
+				sef.FilterExpression, newExpr)
 			sef.Arg1 = nil
 		}
 
@@ -881,7 +894,7 @@ func rewriteSyscallEventFilter(sef *api.SyscallEventFilter) {
 				expression.Identifier("arg2"),
 				expression.Value(sef.Arg2.Value))
 			sef.FilterExpression = expression.LogicalAnd(
-				newExpr, sef.FilterExpression)
+				sef.FilterExpression, newExpr)
 			sef.Arg2 = nil
 		}
 
@@ -890,7 +903,7 @@ func rewriteSyscallEventFilter(sef *api.SyscallEventFilter) {
 				expression.Identifier("arg3"),
 				expression.Value(sef.Arg3.Value))
 			sef.FilterExpression = expression.LogicalAnd(
-				newExpr, sef.FilterExpression)
+				sef.FilterExpression, newExpr)
 			sef.Arg3 = nil
 		}
 
@@ -899,7 +912,7 @@ func rewriteSyscallEventFilter(sef *api.SyscallEventFilter) {
 				expression.Identifier("arg4"),
 				expression.Value(sef.Arg4.Value))
 			sef.FilterExpression = expression.LogicalAnd(
-				newExpr, sef.FilterExpression)
+				sef.FilterExpression, newExpr)
 			sef.Arg4 = nil
 		}
 
@@ -908,7 +921,7 @@ func rewriteSyscallEventFilter(sef *api.SyscallEventFilter) {
 				expression.Identifier("arg5"),
 				expression.Value(sef.Arg5.Value))
 			sef.FilterExpression = expression.LogicalAnd(
-				newExpr, sef.FilterExpression)
+				sef.FilterExpression, newExpr)
 			sef.Arg5 = nil
 		}
 	} else if sef.Type == api.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT {
@@ -917,7 +930,7 @@ func rewriteSyscallEventFilter(sef *api.SyscallEventFilter) {
 				expression.Identifier("ret"),
 				expression.Value(sef.Ret.Value))
 			sef.FilterExpression = expression.LogicalAnd(
-				newExpr, sef.FilterExpression)
+				sef.FilterExpression, newExpr)
 			sef.Ret = nil
 		}
 	}
@@ -983,7 +996,6 @@ func (s *Subscription) registerSyscallEvents(events []*api.SyscallEventFilter) {
 			s.logStatus(
 				fmt.Sprintf("Invalid filter expression for syscall enter filter: %v", err))
 		}
-
 	}
 	if exitFilter != nil {
 		if expr, err := expression.NewExpression(exitFilter); err == nil {
@@ -992,7 +1004,6 @@ func (s *Subscription) registerSyscallEvents(events []*api.SyscallEventFilter) {
 			s.logStatus(
 				fmt.Sprintf("Invalid filter expression for syscall exit filter: %v", err))
 		}
-
 	}
 }
 
