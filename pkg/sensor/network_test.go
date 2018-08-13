@@ -18,6 +18,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/capsule8/capsule8/pkg/expression"
 	"github.com/capsule8/capsule8/pkg/sys"
 	"github.com/capsule8/capsule8/pkg/sys/perf"
 
@@ -31,8 +32,7 @@ func TestNetworkDecoders(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	s := sensor.NewSubscription()
-	require.NotNil(t, s)
+	s := newTestSubscription(t, sensor)
 
 	sample := &perf.SampleRecord{
 		Time: uint64(sys.CurrentMonotonicRaw()),
@@ -201,7 +201,13 @@ func TestNetworkDecoders(t *testing.T) {
 	for x, tc := range testCases {
 		data["sa_family"] = families[x%len(families)]
 
+		data["common_pid"] = int32(sensorPID)
 		i, err := tc.decoder(sample, data)
+		assert.Nil(t, i)
+		assert.NoError(t, err)
+
+		delete(data, "common_pid")
+		i, err = tc.decoder(sample, data)
 		require.NotNil(t, i)
 		require.NoError(t, err)
 
@@ -229,5 +235,94 @@ func TestNetworkDecoders(t *testing.T) {
 				assert.Equal(t, data["sun_path"], value.FieldByName("UnixPath").Interface())
 			}
 		}
+	}
+}
+
+const networkKprobeFormat = `name: ^^NAME^^
+ID: ^^ID^^
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:int fd;	offset:8;	size:4;	signed:1;
+	field:u16 sa_family;	offset:12;	size:2;	signed:0;
+	field:u16 sin_port;	offset:14;	size:2;	signed:0;
+	field:u32 sin_addr;	offset:16;	size:4;	signed:0;
+	field:__data_loc char[] sun_path;	offset:20;	size:4;	signed:1;
+	field:u16 sin6_port;	offset:22;	size:2;	signed:0;
+	field:u64 sin6_addr_high;	offset:24;	size:8;	signed:0;
+	field:u64 sin6_addr_low;	offset:32;	size:8;	signed:0;
+
+print fmt: "fd=%d sa_family=%d sin_port=%d sin_addr=%d sun_path=\"%s\" sin6_port=%d sin6_addr_high=%d sin6_addr_low=%d", REC->fd, REC->sa_family, REC->sin_port, REC->sin_addr, __get_str(sun_path), REC->sin6_port, REC->sin6_addr_high, REC->sin6_addr_low`
+
+func prepareForRegisterNetworkBindAttemptEventFilter(t *testing.T, s *Subscription, delta uint64) {
+	newUnitTestKprobe(t, s.sensor, delta, networkKprobeFormat)
+}
+
+func prepareForRegisterNetworkConnectAttemptEventFilter(t *testing.T, s *Subscription, delta uint64) {
+	newUnitTestKprobe(t, s.sensor, delta, networkKprobeFormat)
+}
+
+func prepareForRegisterNetworkSendtoAttemptEventFilter(t *testing.T, s *Subscription, delta uint64) {
+	newUnitTestKprobe(t, s.sensor, delta, networkKprobeFormat)
+	newUnitTestKprobe(t, s.sensor, delta+1, networkKprobeFormat)
+}
+
+func verifyNetworkEventRegistration(t *testing.T, s *Subscription, name string, count int) {
+	if count > 0 {
+		assert.Len(t, s.eventSinks, count, name)
+	} else {
+		assert.Len(t, s.status, -count, name)
+		assert.Len(t, s.eventSinks, 0, name)
+	}
+}
+
+func TestNetworkEventRegistration(t *testing.T) {
+	sensor := newUnitTestSensor(t)
+	defer sensor.Stop()
+
+	e := expression.Equal(expression.Identifier("foo"), expression.Value("bar"))
+	expr, err := expression.NewExpression(e)
+	require.NotNil(t, expr)
+	require.NoError(t, err)
+
+	type testCase struct {
+		name    string
+		prepare func(*testing.T, *Subscription, uint64)
+		count   int
+	}
+	testCases := []testCase{
+		testCase{"RegisterNetworkAcceptAttemptEventFilter", nil, 2},
+		testCase{"RegisterNetworkAcceptResultEventFilter", nil, 2},
+		testCase{"RegisterNetworkBindAttemptEventFilter", prepareForRegisterNetworkBindAttemptEventFilter, 1},
+		testCase{"RegisterNetworkBindResultEventFilter", nil, 1},
+		testCase{"RegisterNetworkConnectAttemptEventFilter", prepareForRegisterNetworkConnectAttemptEventFilter, 1},
+		testCase{"RegisterNetworkConnectResultEventFilter", nil, 1},
+		testCase{"RegisterNetworkListenAttemptEventFilter", nil, 1},
+		testCase{"RegisterNetworkListenResultEventFilter", nil, 1},
+		testCase{"RegisterNetworkRecvfromAttemptEventFilter", nil, 2},
+		testCase{"RegisterNetworkRecvfromResultEventFilter", nil, 2},
+		testCase{"RegisterNetworkSendtoAttemptEventFilter", prepareForRegisterNetworkSendtoAttemptEventFilter, 2},
+		testCase{"RegisterNetworkSendtoResultEventFilter", nil, 2},
+	}
+	for _, tc := range testCases {
+		s := newTestSubscription(t, sensor)
+		v := reflect.ValueOf(s)
+		m := v.MethodByName(tc.name)
+
+		if tc.prepare != nil {
+			tc.prepare(t, s, 0)
+		}
+		m.Call([]reflect.Value{reflect.ValueOf(expr)})
+		verifyNetworkEventRegistration(t, s, tc.name, -tc.count)
+
+		if tc.prepare != nil {
+			tc.prepare(t, s, 0)
+		}
+		var nilExpr *expression.Expression
+		m.Call([]reflect.Value{reflect.ValueOf(nilExpr)})
+		verifyNetworkEventRegistration(t, s, tc.name, tc.count)
 	}
 }

@@ -15,8 +15,11 @@
 package sensor
 
 import (
+	"context"
 	"testing"
+	"time"
 
+	"github.com/capsule8/capsule8/pkg/expression"
 	"github.com/capsule8/capsule8/pkg/sys/perf"
 
 	"github.com/stretchr/testify/assert"
@@ -27,8 +30,7 @@ func TestDecodeTickerEvent(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	s := sensor.NewSubscription()
-	require.NotNil(t, s)
+	s := newTestSubscription(t, sensor)
 
 	sample := &perf.SampleRecord{}
 	data := perf.TraceEventSampleData{
@@ -45,4 +47,43 @@ func TestDecodeTickerEvent(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, data["seconds"], e.Seconds)
 	assert.Equal(t, data["nanoseconds"], e.Nanoseconds)
+}
+
+func verifyRegisterTickerEventFilter(t *testing.T, s *Subscription, count int) {
+	if count > 0 {
+		assert.Len(t, s.eventSinks, count)
+	} else {
+		assert.Len(t, s.status, -count)
+		assert.Len(t, s.eventSinks, 0)
+	}
+}
+
+func TestRegisterTickerEventFilter(t *testing.T) {
+	sensor := newUnitTestSensor(t)
+	defer sensor.Stop()
+
+	// Invalid interval should fail
+	s := newTestSubscription(t, sensor)
+	s.RegisterTickerEventFilter(0, nil)
+	verifyRegisterTickerEventFilter(t, s, -1)
+
+	// Invalid filter expression should fail
+	e := expression.Equal(expression.Identifier("foo"), expression.Value("bar"))
+	expr, err := expression.NewExpression(e)
+	require.NotNil(t, expr)
+	require.NoError(t, err)
+
+	s = newTestSubscription(t, sensor)
+	s.RegisterTickerEventFilter(50*int64(time.Millisecond), expr)
+	verifyRegisterTickerEventFilter(t, s, -1)
+
+	// This should succeed
+	s = newTestSubscription(t, sensor)
+	s.RegisterTickerEventFilter(50*int64(time.Millisecond), nil)
+	verifyRegisterTickerEventFilter(t, s, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s.Run(ctx, nil)
+	time.Sleep(200 * time.Millisecond)
+	cancel()
 }

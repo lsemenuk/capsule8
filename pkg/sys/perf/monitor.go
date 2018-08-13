@@ -166,6 +166,7 @@ type registerEventOptions struct {
 	filter    string
 	groupID   int32
 	decoderFn TraceEventDecoderFn
+	name      string
 }
 
 // RegisterEventOption is used to implement optional arguments for event
@@ -220,6 +221,14 @@ func WithFilter(filter string) RegisterEventOption {
 func WithEventGroup(groupID int32) RegisterEventOption {
 	return func(o *registerEventOptions) {
 		o.groupID = groupID
+	}
+}
+
+// WithTracingEventName is used to specify the name of a kprobe or uprobe to
+// use for registration instead of an automatically generated one.
+func WithTracingEventName(name string) RegisterEventOption {
+	return func(o *registerEventOptions) {
+		o.name = name
 	}
 }
 
@@ -549,7 +558,7 @@ type EventMonitor struct {
 	hasPendingSamples bool
 
 	// Mutable by the thread on which Stop is called.
-	stopRequested bool
+	stopRequested atomic.Value // bool
 
 	// Immutable once set. Only used by the dispatchSampleLoop goroutine.
 	// Load once there and cache locally to avoid cache misses on this
@@ -574,7 +583,7 @@ type EventMonitor struct {
 	cond sync.Cond
 
 	// Mutable only by the monitor goroutine, but readable by others
-	isRunning bool
+	isRunning atomic.Value // bool
 
 	// Mutable by various goroutines, but not required by the monitor goroutine
 	nextEventID            uint64
@@ -583,6 +592,7 @@ type EventMonitor struct {
 	groups                 map[int32]*eventMonitorGroup
 	externalSamples        externalSampleList
 	nextExternalSampleTime uint64
+	hasExternalSamples     atomic.Value // bool
 
 	// Immutable, used only when adding new tracepoints/probes
 	defaultAttr EventAttr
@@ -698,9 +708,17 @@ func (monitor *EventMonitor) removeUprobe(name string) error {
 }
 
 func (monitor *EventMonitor) newProbeName() string {
+	probeName := monitor.NextProbeName(0)
 	monitor.nextProbeID++
+	return probeName
+}
+
+// NextProbeName is used primarily for unit testing. It returns the next probe
+// name that will be used by either RegisterKprobe or RegisterUprobe. Any delta
+// specified is added to the counter (intended for use by unit testing)
+func (monitor *EventMonitor) NextProbeName(delta uint64) string {
 	return fmt.Sprintf("capsule8/sensor_%d_%d", unix.Getpid(),
-		monitor.nextProbeID)
+		monitor.nextProbeID+1+delta)
 }
 
 func (monitor *EventMonitor) newRegisteredEvent(
@@ -725,7 +743,7 @@ func (monitor *EventMonitor) newRegisteredEvent(
 			eventIDMap[id] = eventid
 		}
 
-		if monitor.isRunning {
+		if monitor.isRunning.Load().(bool) {
 			monitor.eventAttrMap.update(eventAttrMap)
 			monitor.eventIDMap.update(eventIDMap)
 		} else {
@@ -749,12 +767,7 @@ func (monitor *EventMonitor) newRegisteredEvent(
 		group.events[eventid] = event
 	}
 
-	if monitor.isRunning {
-		monitor.events.insert(eventid, event)
-	} else {
-		monitor.events.insertInPlace(eventid, event)
-	}
-
+	monitor.events.insert(eventid, event)
 	return eventid
 }
 
@@ -840,7 +853,7 @@ func (monitor *EventMonitor) newRegisteredTraceEvent(
 func (monitor *EventMonitor) RegisterExternalEvent(
 	name string,
 	decoderFn TraceEventDecoderFn,
-) (uint64, error) {
+) uint64 {
 	monitor.lock.Lock()
 	defer monitor.lock.Unlock()
 
@@ -855,7 +868,7 @@ func (monitor *EventMonitor) RegisterExternalEvent(
 		nil,
 		false)
 
-	return eventid, nil
+	return eventid
 }
 
 // CounterEventGroupMember defines a counter event group member at registration
@@ -994,7 +1007,13 @@ func (monitor *EventMonitor) RegisterKprobe(
 	monitor.lock.Lock()
 	defer monitor.lock.Unlock()
 
-	name := monitor.newProbeName()
+	var name string
+	if opts.name == "" {
+		name = monitor.newProbeName()
+	} else {
+		name = fmt.Sprintf("capsule8/sensor_%d_%s",
+			os.Getpid(), opts.name)
+	}
 	err := monitor.addKprobe(name, address, onReturn, output)
 	if err != nil {
 		return 0, err
@@ -1039,7 +1058,13 @@ func (monitor *EventMonitor) RegisterUprobe(
 	monitor.lock.Lock()
 	defer monitor.lock.Unlock()
 
-	name := monitor.newProbeName()
+	var name string
+	if opts.name == "" {
+		name = monitor.newProbeName()
+	} else {
+		name = fmt.Sprintf("capsule8/sensor_%d_%s",
+			os.Getpid(), opts.name)
+	}
 	err := monitor.addUprobe(name, bin, address, onReturn, output)
 	if err != nil {
 		return 0, err
@@ -1121,11 +1146,7 @@ func (monitor *EventMonitor) resolveSymbol(bin, symbol string) (string, error) {
 func (monitor *EventMonitor) removeRegisteredEvent(event *registeredEvent) {
 	// This should be called with monitor.lock held
 
-	if monitor.isRunning {
-		monitor.events.remove(event.id)
-	} else {
-		monitor.events.removeInPlace(event.id)
-	}
+	monitor.events.remove(event.id)
 
 	// event.sources may legitimately be nil for non-perf_event-based events
 	if event.sources != nil {
@@ -1137,7 +1158,7 @@ func (monitor *EventMonitor) removeRegisteredEvent(event *registeredEvent) {
 			}
 		}
 
-		if monitor.isRunning {
+		if monitor.isRunning.Load().(bool) {
 			monitor.eventAttrMap.remove(ids)
 			monitor.eventIDMap.remove(ids)
 		} else {
@@ -1229,7 +1250,8 @@ func (monitor *EventMonitor) Close() error {
 	for _, event := range eventsList {
 		monitor.removeRegisteredEvent(event)
 	}
-	monitor.events = nil
+	// Do not nil monitor.events, because there could be something out
+	// there still trying to enqueue external events
 
 	if len(monitor.eventAttrMap.getMap()) != 0 {
 		panic("internal error: stray event attrs left after monitor Close")
@@ -1344,11 +1366,16 @@ func (monitor *EventMonitor) SetFilter(eventid uint64, filter string) error {
 	defer monitor.lock.Unlock()
 
 	if event, ok := monitor.events.lookup(eventid); ok {
+		if event.eventType == EventTypeExternal {
+			return errors.New("Cannot set filters for external events")
+		}
 		for _, source := range event.sources {
 			if err := source.SetFilter(filter); err != nil {
 				return err
 			}
 		}
+	} else {
+		return fmt.Errorf("Event %d does not exist", eventid)
 	}
 
 	return nil
@@ -1356,7 +1383,7 @@ func (monitor *EventMonitor) SetFilter(eventid uint64, filter string) error {
 
 func (monitor *EventMonitor) stopWithSignal() {
 	monitor.lock.Lock()
-	monitor.isRunning = false
+	monitor.isRunning.Store(false)
 	monitor.cond.Broadcast()
 	monitor.lock.Unlock()
 }
@@ -1416,15 +1443,16 @@ func (monitor *EventMonitor) EnqueueExternalSample(
 	sampleID SampleID,
 	decodedData TraceEventSampleData,
 ) error {
+	if sampleID.Time == 0 {
+		return fmt.Errorf("Invalid sample time (%d)", sampleID.Time)
+	}
+
 	event, ok := monitor.events.lookup(eventID)
 	if !ok {
 		return fmt.Errorf("Invalid eventID %d", eventID)
 	}
 	if event.eventType != EventTypeExternal {
 		return fmt.Errorf("EventID %d is not an external type", eventID)
-	}
-	if sampleID.Time == 0 {
-		return fmt.Errorf("Invalid sample time (%d)", sampleID.Time)
 	}
 
 	esm := EventMonitorSample{
@@ -1445,15 +1473,19 @@ func (monitor *EventMonitor) EnqueueExternalSample(
 
 	monitor.lock.Lock()
 	monitor.externalSamples = append(monitor.externalSamples, esm)
-	monitor.setNextExternalSampleTime(sampleID.Time)
+	monitor.hasExternalSamples.Store(true)
+	if monitor.isRunning.Load().(bool) {
+		monitor.setNextExternalSampleTime(sampleID.Time)
+	}
 	monitor.lock.Unlock()
 
 	return nil
 }
 
 func (monitor *EventMonitor) processExternalSamples(timeLimit uint64) bool {
-	if monitor.externalSamples != nil {
+	if monitor.hasExternalSamples.Load().(bool) {
 		monitor.lock.Lock()
+		monitor.hasExternalSamples.Store(false)
 		externalSamples := monitor.externalSamples
 		monitor.externalSamples = nil
 		monitor.lock.Unlock()
@@ -1579,8 +1611,8 @@ func (monitor *EventMonitor) dispatchSamples(samples [][]EventMonitorSample) {
 			break
 		}
 
-		if len(monitor.externalSamples) > 0 ||
-			len(monitor.pendingExternalSamples) > 0 {
+		if len(monitor.pendingExternalSamples) > 0 ||
+			monitor.hasExternalSamples.Load().(bool) {
 			if len(batch) > 0 {
 				dispatchFn(batch)
 				batch = make([]EventMonitorSample, 0,
@@ -1627,7 +1659,7 @@ func (monitor *EventMonitor) dispatchSampleLoop() {
 
 	for {
 		monitor.lock.Lock()
-		if !monitor.isRunning {
+		if !monitor.isRunning.Load().(bool) {
 			monitor.lock.Unlock()
 			break
 		}
@@ -1641,8 +1673,8 @@ func (monitor *EventMonitor) dispatchSampleLoop() {
 		if len(samples) > 0 {
 			monitor.dispatchSamples(samples)
 		} else {
-			now := sys.CurrentMonotonicRaw()
-			monitor.processExternalSamples(uint64(now))
+			now := uint64(sys.CurrentMonotonicRaw())
+			monitor.processExternalSamples(now)
 		}
 	}
 }
@@ -1792,13 +1824,13 @@ func (monitor *EventMonitor) flushPendingSamples() {
 // to a function that is specified here.
 func (monitor *EventMonitor) Run(fn SampleDispatchFn) error {
 	monitor.lock.Lock()
-	if monitor.isRunning {
+	if monitor.isRunning.Load().(bool) {
 		monitor.lock.Unlock()
 		return errors.New("monitor is already running")
 	}
 	monitor.dispatchFn = fn
-	monitor.isRunning = true
-	monitor.stopRequested = false
+	monitor.isRunning.Store(true)
+	monitor.stopRequested.Store(false)
 	monitor.lock.Unlock()
 
 	monitor.wg.Add(1)
@@ -1846,7 +1878,7 @@ func (monitor *EventMonitor) Run(fn SampleDispatchFn) error {
 			monitor.stopWithSignal()
 			return err
 		}
-		if monitor.stopRequested {
+		if monitor.stopRequested.Load().(bool) {
 			break
 		}
 	}
@@ -1862,20 +1894,20 @@ func (monitor *EventMonitor) Run(fn SampleDispatchFn) error {
 func (monitor *EventMonitor) Stop(wait bool) {
 	monitor.lock.Lock()
 
-	if !monitor.isRunning {
+	if !monitor.isRunning.Load().(bool) {
 		monitor.lock.Unlock()
 		return
 	}
 
 	// Request a stop by setting the flag and waking up the goroutine that
 	// is handling events from source leaders.
-	monitor.stopRequested = true
+	monitor.stopRequested.Store(true)
 	monitor.eventSourceController.SetTimeoutAt(0)
 
 	if !wait {
 		monitor.lock.Unlock()
 	} else {
-		for monitor.isRunning {
+		for monitor.isRunning.Load().(bool) {
 			// Wait for condition to signal that Run() is done
 			monitor.cond.Wait()
 		}
@@ -1980,7 +2012,7 @@ func (monitor *EventMonitor) registerNewEventGroup(group *eventMonitorGroup) {
 	monitor.nextGroupID++
 	monitor.groups[group.groupID] = group
 
-	if monitor.isRunning {
+	if monitor.isRunning.Load().(bool) {
 		monitor.groupLeaders.update(group.leaders)
 	} else {
 		monitor.groupLeaders.updateInPlace(group.leaders)
@@ -2014,7 +2046,7 @@ func (monitor *EventMonitor) unregisterEventGroup(group *eventMonitorGroup) {
 
 	group.cleanup()
 
-	if !monitor.isRunning {
+	if !monitor.isRunning.Load().(bool) {
 		ids := make(map[uint64]struct{}, len(group.leaders))
 		for _, pgl := range group.leaders {
 			ids[pgl.source.SourceID()] = struct{}{}
@@ -2202,6 +2234,9 @@ func NewEventMonitor(options ...EventMonitorOption) (monitor *EventMonitor, err 
 		perfEventOpenFlags:    opts.flags,
 	}
 	monitor.cond = sync.Cond{L: &monitor.lock}
+	monitor.isRunning.Store(false)
+	monitor.stopRequested.Store(false)
+	monitor.hasExternalSamples.Store(false)
 
 	if len(opts.cgroups) > 0 {
 		cgroups := make(map[string]bool, len(opts.cgroups))

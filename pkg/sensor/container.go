@@ -193,36 +193,21 @@ func NewContainerCache(sensor *Sensor) *ContainerCache {
 		sensor: sensor,
 	}
 
-	var err error
-	cache.ContainerCreatedEventID, err = sensor.Monitor.RegisterExternalEvent(
+	monitor := sensor.Monitor()
+	cache.ContainerCreatedEventID = monitor.RegisterExternalEvent(
 		"CONTAINER_CREATED", cache.decodeContainerCreatedEvent)
-	if err != nil {
-		glog.Fatalf("Failed to register external event: %s", err)
-	}
 
-	cache.ContainerRunningEventID, err = sensor.Monitor.RegisterExternalEvent(
+	cache.ContainerRunningEventID = monitor.RegisterExternalEvent(
 		"CONTAINER_RUNNING", cache.decodeContainerRunningEvent)
-	if err != nil {
-		glog.Fatalf("Failed to register external event: %s", err)
-	}
 
-	cache.ContainerExitedEventID, err = sensor.Monitor.RegisterExternalEvent(
+	cache.ContainerExitedEventID = monitor.RegisterExternalEvent(
 		"CONTAINER_EXITED", cache.decodeContainerExitedEvent)
-	if err != nil {
-		glog.Fatalf("Failed to register external event: %s", err)
-	}
 
-	cache.ContainerDestroyedEventID, err = sensor.Monitor.RegisterExternalEvent(
+	cache.ContainerDestroyedEventID = monitor.RegisterExternalEvent(
 		"CONTAINER_DESTROYED", cache.decodeContainerDestroyedEvent)
-	if err != nil {
-		glog.Fatalf("Failed to register external event: %s", err)
-	}
 
-	cache.ContainerUpdatedEventID, err = sensor.Monitor.RegisterExternalEvent(
+	cache.ContainerUpdatedEventID = monitor.RegisterExternalEvent(
 		"CONTAINER_UPDATED", cache.decodeContainerUpdatedEvent)
-	if err != nil {
-		glog.Fatalf("Failed to register extern event: %s", err)
-	}
 
 	return cache
 }
@@ -282,7 +267,7 @@ func (cc *ContainerCache) enqueueContainerEvent(
 	data := map[string]interface{}{
 		"__container__": *info,
 	}
-	return cc.sensor.Monitor.EnqueueExternalSample(eventID, sampleID, data)
+	return cc.sensor.Monitor().EnqueueExternalSample(eventID, sampleID, data)
 }
 
 func (cc *ContainerCache) decodeContainerCreatedEvent(

@@ -73,9 +73,14 @@ func (s *Subscription) Run(
 	if len(s.eventSinks) == 0 {
 		return status, errors.New("Invalid subscription (no filters specified)")
 	}
+	if dispatchFn != nil {
+		s.dispatchFn = dispatchFn
+	}
 
 	s.sensor.eventMap.subscribe(s)
 	glog.V(2).Infof("Subscription %d registered", s.subscriptionID)
+
+	// Do not return an error after this point!
 
 	go func() {
 		<-ctx.Done()
@@ -85,15 +90,12 @@ func (s *Subscription) Run(
 		s.Close()
 	}()
 
-	if dispatchFn != nil {
-		s.dispatchFn = dispatchFn
-	}
-
+	monitor := s.sensor.Monitor()
 	if s.eventGroupID != 0 {
-		s.sensor.Monitor.EnableGroup(s.eventGroupID)
+		monitor.EnableGroup(s.eventGroupID)
 	}
 	for _, id := range s.counterGroupIDs {
-		s.sensor.Monitor.EnableGroup(id)
+		monitor.EnableGroup(id)
 	}
 
 	return status, nil
@@ -101,11 +103,12 @@ func (s *Subscription) Run(
 
 // Close disables a running subscription.
 func (s *Subscription) Close() {
+	monitor := s.sensor.Monitor()
 	for _, id := range s.counterGroupIDs {
-		s.sensor.Monitor.UnregisterEventGroup(id)
+		monitor.UnregisterEventGroup(id)
 	}
 	if s.eventGroupID != 0 {
-		s.sensor.Monitor.UnregisterEventGroup(s.eventGroupID)
+		monitor.UnregisterEventGroup(s.eventGroupID)
 	}
 	s.sensor.eventMap.unsubscribe(s, nil)
 }
@@ -120,6 +123,11 @@ func (s *Subscription) addEventSink(
 	filterExpression *expression.Expression,
 	filterTypes expression.FieldTypeMap,
 ) (*eventSink, error) {
+	// FIXME
+	// A second registration of an external event for the same subscription
+	// will overwrite the first one. Fixing this correctly is extremely low
+	// priority and requires extensive changes.
+
 	es := &eventSink{
 		subscription: s,
 		eventID:      eventID,
@@ -139,7 +147,7 @@ func (s *Subscription) addEventSink(
 		// what is intended.
 		var err error
 		if err = filterExpression.ValidateKernelFilter(); err == nil {
-			err = s.sensor.Monitor.SetFilter(eventID,
+			err = s.sensor.Monitor().SetFilter(eventID,
 				filterExpression.KernelFilterString())
 		}
 		if err != nil {
@@ -164,7 +172,8 @@ func (s *Subscription) logStatus(st string) {
 
 func (s *Subscription) createEventGroup() error {
 	if s.eventGroupID == 0 {
-		if groupID, err := s.sensor.Monitor.RegisterEventGroup(""); err == nil {
+		monitor := s.sensor.Monitor()
+		if groupID, err := monitor.RegisterEventGroup(""); err == nil {
 			s.eventGroupID = groupID
 		} else {
 			s.logStatus(
@@ -215,8 +224,9 @@ func (s *Subscription) registerKprobe(
 
 	// This is a dynamic kprobe -- determine filterTypes dynamically from
 	// the kernel.
+	monitor := s.sensor.Monitor()
 	if filterExpr != nil && filterTypes == nil {
-		kprobeFields := s.sensor.Monitor.RegisteredEventFields(eventID)
+		kprobeFields := monitor.RegisteredEventFields(eventID)
 		filterTypes = make(expression.FieldTypeMap, len(kprobeFields))
 		for k, v := range kprobeFields {
 			filterTypes[k] = perfTypeMapping[v]
@@ -228,7 +238,7 @@ func (s *Subscription) registerKprobe(
 		s.logStatus(
 			fmt.Sprintf("Could not register kprobe %s: %v",
 				address, err))
-		s.sensor.Monitor.UnregisterEvent(eventID)
+		monitor.UnregisterEvent(eventID)
 		return nil, err
 	}
 
@@ -247,7 +257,8 @@ func (s *Subscription) registerTracepoint(
 	}
 	options = append(options, perf.WithEventGroup(s.eventGroupID))
 
-	eventID, err := s.sensor.Monitor.RegisterTracepoint(name, fn,
+	monitor := s.sensor.Monitor()
+	eventID, err := monitor.RegisterTracepoint(name, fn,
 		options...)
 	if err != nil {
 		s.logStatus(
@@ -261,7 +272,7 @@ func (s *Subscription) registerTracepoint(
 		s.logStatus(
 			fmt.Sprintf("Could not register tracepoint %s: %v",
 				name, err))
-		s.sensor.Monitor.UnregisterEvent(eventID)
+		monitor.UnregisterEvent(eventID)
 		return nil, err
 	}
 

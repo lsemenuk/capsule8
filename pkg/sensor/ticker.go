@@ -70,13 +70,9 @@ func (s *Subscription) RegisterTickerEventFilter(
 		return
 	}
 
-	eventID, err := s.sensor.Monitor.RegisterExternalEvent("ticker",
+	monitor := s.sensor.Monitor()
+	eventID := monitor.RegisterExternalEvent("ticker",
 		s.decodeTickerEvent)
-	if err != nil {
-		s.logStatus(
-			fmt.Sprintf("Could not register ticker event: %v", err))
-		return
-	}
 
 	done := make(chan struct{})
 
@@ -84,11 +80,11 @@ func (s *Subscription) RegisterTickerEventFilter(
 	if err != nil {
 		s.logStatus(
 			fmt.Sprintf("Invalid filter expression for ticker filter: %v", err))
-		s.sensor.Monitor.UnregisterEvent(eventID)
+		monitor.UnregisterEvent(eventID)
 		return
 	}
 	es.unregister = func(es *eventSink) {
-		s.sensor.Monitor.UnregisterEvent(es.eventID)
+		monitor.UnregisterEvent(es.eventID)
 		close(done)
 	}
 
@@ -109,8 +105,9 @@ func (s *Subscription) RegisterTickerEventFilter(
 					"seconds":     int64(now.Unix()),
 					"nanoseconds": int64(now.UnixNano()),
 				}
-				s.sensor.Monitor.EnqueueExternalSample(
+				monitor.EnqueueExternalSample(
 					eventID, sampleID, data)
+
 			}
 		}
 	}()
