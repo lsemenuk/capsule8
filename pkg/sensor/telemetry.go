@@ -28,9 +28,15 @@ import (
 
 	api "github.com/capsule8/capsule8/api/v0"
 	"github.com/capsule8/capsule8/pkg/config"
+	"github.com/capsule8/capsule8/pkg/expression"
+	"github.com/capsule8/capsule8/pkg/sys/perf"
+
 	"github.com/golang/glog"
 
 	"golang.org/x/sys/unix"
+
+	"google.golang.org/genproto/googleapis/rpc/code"
+	"google.golang.org/genproto/googleapis/rpc/status"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -264,6 +270,11 @@ func (t *telemetryServiceServer) GetEvents(
 	sub := req.Subscription
 	glog.V(1).Infof("GetEvents(%+v)", sub)
 
+	if sub.EventFilter == nil {
+		glog.V(1).Infof("Invalid subscription: %+v", sub)
+		return t.getEventsError(errors.New("Invalid subscription (no EventFilter)"))
+	}
+
 	// Validate sub.Modifier
 	var (
 		err              error
@@ -304,9 +315,8 @@ func (t *telemetryServiceServer) GetEvents(
 		}
 	}
 
-	events := make(chan *api.TelemetryEvent,
-		config.Sensor.ChannelBufferLength)
-	f := func(e *api.TelemetryEvent) {
+	events := make(chan TelemetryEvent, config.Sensor.ChannelBufferLength)
+	f := func(e TelemetryEvent) {
 		// Send the event to the data channel, but drop the event if
 		// the channel is full. Do not block the sensor from delivering
 		// telemetry to other subscribers.
@@ -320,10 +330,56 @@ func (t *telemetryServiceServer) GetEvents(
 	defer cancel()
 
 	r := &api.GetEventsResponse{}
-	if r.Statuses, err = t.sensor.NewSubscription(ctx, sub, f); err != nil {
+	subscr := t.sensor.NewSubscription()
+
+	if sub.ContainerFilter != nil {
+		cf := NewContainerFilter()
+		for _, id := range sub.ContainerFilter.Ids {
+			cf.AddContainerID(id)
+		}
+		for _, name := range sub.ContainerFilter.Names {
+			cf.AddContainerName(name)
+		}
+		for _, id := range sub.ContainerFilter.ImageIds {
+			cf.AddImageID(id)
+		}
+		for _, name := range sub.ContainerFilter.ImageNames {
+			cf.AddImageName(name)
+		}
+		if cf.Len() > 0 {
+			subscr.SetContainerFilter(cf)
+		}
+	}
+
+	subscr.registerChargenEvents(sub.EventFilter.ChargenEvents)
+	subscr.registerContainerEvents(sub.EventFilter.ContainerEvents)
+	subscr.registerFileEvents(sub.EventFilter.FileEvents)
+	subscr.registerKernelFunctionCallEvents(sub.EventFilter.KernelEvents)
+	subscr.registerNetworkEvents(sub.EventFilter.NetworkEvents)
+	subscr.registerPerformanceEvents(sub.EventFilter.PerformanceEvents)
+	subscr.registerProcessEvents(sub.EventFilter.ProcessEvents)
+	subscr.registerSyscallEvents(sub.EventFilter.SyscallEvents)
+	subscr.registerTickerEvents(sub.EventFilter.TickerEvents)
+
+	statuses, err := subscr.Run(ctx, f)
+	if err != nil {
 		glog.Errorf("Failed to get events for subscription %+v: %v",
 			sub, err)
 		return t.getEventsError(err)
+	}
+	if len(statuses) == 0 {
+		r.Statuses = []*status.Status{
+			&status.Status{Code: int32(code.Code_OK)},
+		}
+	} else {
+		r.Statuses = make([]*status.Status, 0, len(statuses))
+		for _, st := range statuses {
+			r.Statuses = append(r.Statuses,
+				&status.Status{
+					Code:    int32(code.Code_UNKNOWN),
+					Message: st,
+				})
+		}
 	}
 	if err = stream.Send(r); err != nil {
 		return t.getEventsError(err)
@@ -350,7 +406,9 @@ func (t *telemetryServiceServer) GetEvents(
 			}
 			r = &api.GetEventsResponse{
 				Events: []*api.ReceivedTelemetryEvent{
-					&api.ReceivedTelemetryEvent{Event: e},
+					&api.ReceivedTelemetryEvent{
+						Event: subscr.translateEvent(e),
+					},
 				},
 			}
 			if err = stream.Send(r); err != nil {
@@ -368,4 +426,997 @@ func (t *telemetryServiceServer) GetEvents(
 
 	// unreachable
 	return nil
+}
+
+func (s *Subscription) registerChargenEvents(events []*api.ChargenEventFilter) {
+	for _, e := range events {
+		s.RegisterChargenEventFilter(e.Length, nil)
+	}
+}
+
+func (s *Subscription) registerContainerEvents(events []*api.ContainerEventFilter) {
+	type registerFunc func(*expression.Expression)
+
+	var (
+		filters       [6]*api.Expression
+		subscriptions [6]registerFunc
+		views         [6]bool
+		wildcards     [6]bool
+	)
+
+	for _, e := range events {
+		t := e.GetType()
+		if t < 1 || t > 5 {
+			s.logStatus(
+				fmt.Sprintf("ContainerEventType %d is invalid", t))
+			continue
+		}
+
+		if subscriptions[t] == nil {
+			switch t {
+			case api.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED:
+				subscriptions[t] = s.RegisterContainerCreatedEventFilter
+			case api.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING:
+				subscriptions[t] = s.RegisterContainerRunningEventFilter
+			case api.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED:
+				subscriptions[t] = s.RegisterContainerExitedEventFilter
+			case api.ContainerEventType_CONTAINER_EVENT_TYPE_DESTROYED:
+				subscriptions[t] = s.RegisterContainerDestroyedEventFilter
+			case api.ContainerEventType_CONTAINER_EVENT_TYPE_UPDATED:
+				subscriptions[t] = s.RegisterContainerUpdatedEventFilter
+			}
+		}
+		if e.View == api.ContainerEventView_FULL {
+			views[t] = true
+		}
+		if e.FilterExpression == nil {
+			wildcards[t] = true
+			filters[t] = nil
+		} else if !wildcards[t] {
+			filters[t] = expression.LogicalOr(
+				e.FilterExpression,
+				filters[t])
+		}
+	}
+
+	// FIXME do something with views!
+
+	for i, f := range subscriptions {
+		if f == nil {
+			continue
+		}
+		if wildcards[i] {
+			f(nil)
+		} else if expr, err := expression.NewExpression(filters[i]); err == nil {
+			f(expr)
+		} else {
+			s.logStatus(
+				fmt.Sprintf("Invalid container filter expression: %v", err))
+		}
+	}
+}
+
+func rewriteFileEventFilter(fef *api.FileEventFilter) {
+	if fef.Filename != nil {
+		newExpr := expression.Equal(
+			expression.Identifier("filename"),
+			expression.Value(fef.Filename.Value))
+		fef.FilterExpression = expression.LogicalAnd(
+			newExpr, fef.FilterExpression)
+		fef.Filename = nil
+		fef.FilenamePattern = nil
+	} else if fef.FilenamePattern != nil {
+		newExpr := expression.Like(
+			expression.Identifier("filename"),
+			expression.Value(fef.FilenamePattern.Value))
+		fef.FilterExpression = expression.LogicalAnd(
+			newExpr, fef.FilterExpression)
+		fef.FilenamePattern = nil
+	}
+
+	if fef.OpenFlagsMask != nil {
+		newExpr := expression.BitwiseAnd(
+			expression.Identifier("flags"),
+			expression.Value(fef.OpenFlagsMask.Value))
+		fef.FilterExpression = expression.LogicalAnd(
+			newExpr, fef.FilterExpression)
+		fef.OpenFlagsMask = nil
+	}
+
+	if fef.CreateModeMask != nil {
+		newExpr := expression.BitwiseAnd(
+			expression.Identifier("mode"),
+			expression.Value(fef.CreateModeMask.Value))
+		fef.FilterExpression = expression.LogicalAnd(
+			newExpr, fef.FilterExpression)
+		fef.CreateModeMask = nil
+	}
+}
+
+func (s *Subscription) registerFileEvents(events []*api.FileEventFilter) {
+	var (
+		filter   *api.Expression
+		wildcard bool
+	)
+
+	for _, e := range events {
+		if e.Type != api.FileEventType_FILE_EVENT_TYPE_OPEN {
+			s.logStatus(
+				fmt.Sprintf("FileEventType %d is invalid", e.Type))
+			continue
+		}
+
+		// Translate deprecated fields into an expression
+		rewriteFileEventFilter(e)
+
+		if e.FilterExpression == nil {
+			wildcard = true
+			filter = nil
+		} else if !wildcard {
+			filter = expression.LogicalOr(filter, e.FilterExpression)
+		}
+	}
+
+	if wildcard {
+		s.RegisterFileOpenEventFilter(nil)
+	} else if filter == nil {
+		return
+	} else if expr, err := expression.NewExpression(filter); err == nil {
+		s.RegisterFileOpenEventFilter(expr)
+	} else {
+		s.logStatus(
+			fmt.Sprintf("Invalid filter expression for file open filter: %v", err))
+	}
+}
+
+func (s *Subscription) registerKernelFunctionCallEvents(events []*api.KernelFunctionCallFilter) {
+	for _, e := range events {
+		var onReturn bool
+		switch e.Type {
+		case api.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_ENTER:
+			onReturn = false
+		case api.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_EXIT:
+			onReturn = true
+		default:
+			s.logStatus(
+				fmt.Sprintf("KernelFunctionCallEventType %d is invalid", e.Type))
+			continue
+		}
+
+		var filterExpression *expression.Expression
+		if expr := e.GetFilterExpression(); expr != nil {
+			var err error
+			filterExpression, err = expression.NewExpression(expr)
+			if err != nil {
+				s.logStatus(
+					fmt.Sprintf("Invalid filter expression for kernel function call filter: %v", err))
+				continue
+			}
+		}
+
+		s.RegisterKernelFunctionCallEventFilter(e.Symbol, onReturn,
+			e.Arguments, filterExpression)
+	}
+}
+
+type networkFilterItem struct {
+	filter   *api.Expression
+	wildcard bool
+}
+
+func (nfi *networkFilterItem) add(nef *api.NetworkEventFilter) {
+	if nef.FilterExpression == nil {
+		nfi.wildcard = true
+		nfi.filter = nil
+	} else if nfi.wildcard == false {
+		nfi.filter = expression.LogicalOr(nef.FilterExpression,
+			nfi.filter)
+	}
+}
+
+type networkFilterItemRegisterFunc func(*expression.Expression)
+
+func (nfi *networkFilterItem) register(
+	s *Subscription,
+	f networkFilterItemRegisterFunc,
+) {
+	if nfi != nil {
+		if nfi.wildcard {
+			f(nil)
+		} else if nfi.filter != nil {
+			if expr, err := expression.NewExpression(nfi.filter); err != nil {
+				s.logStatus(
+					fmt.Sprintf("Invalid filter expression for network accept attempt filter: %v", err))
+			} else {
+				f(expr)
+			}
+		}
+	}
+}
+
+type networkFilterSet struct {
+	acceptAttemptFilters   networkFilterItem
+	acceptResultFilters    networkFilterItem
+	bindAttemptFilters     networkFilterItem
+	bindResultFilters      networkFilterItem
+	connectAttemptFilters  networkFilterItem
+	connectResultFilters   networkFilterItem
+	listenAttemptFilters   networkFilterItem
+	listenResultFilters    networkFilterItem
+	recvfromAttemptFilters networkFilterItem
+	recvfromResultFilters  networkFilterItem
+	sendtoAttemptFilters   networkFilterItem
+	sendtoResultFilters    networkFilterItem
+}
+
+func (nfs *networkFilterSet) add(
+	subscr *Subscription,
+	nef *api.NetworkEventFilter,
+) {
+	switch nef.Type {
+	case api.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_ATTEMPT:
+		nfs.acceptAttemptFilters.add(nef)
+	case api.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_RESULT:
+		nfs.acceptResultFilters.add(nef)
+	case api.NetworkEventType_NETWORK_EVENT_TYPE_BIND_ATTEMPT:
+		nfs.bindAttemptFilters.add(nef)
+	case api.NetworkEventType_NETWORK_EVENT_TYPE_BIND_RESULT:
+		nfs.bindResultFilters.add(nef)
+	case api.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_ATTEMPT:
+		nfs.connectAttemptFilters.add(nef)
+	case api.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_RESULT:
+		nfs.connectResultFilters.add(nef)
+	case api.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_ATTEMPT:
+		nfs.listenAttemptFilters.add(nef)
+	case api.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_RESULT:
+		nfs.listenResultFilters.add(nef)
+	case api.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_ATTEMPT:
+		nfs.recvfromAttemptFilters.add(nef)
+	case api.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_RESULT:
+		nfs.recvfromResultFilters.add(nef)
+	case api.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_ATTEMPT:
+		nfs.sendtoAttemptFilters.add(nef)
+	case api.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_RESULT:
+		nfs.sendtoResultFilters.add(nef)
+	default:
+		subscr.logStatus(
+			fmt.Sprintf("Invalid NetworkEventType %d", nef.Type))
+	}
+}
+
+func (s *Subscription) registerNetworkEvents(events []*api.NetworkEventFilter) {
+	nfs := networkFilterSet{}
+	for _, nef := range events {
+		nfs.add(s, nef)
+	}
+
+	nfs.acceptAttemptFilters.register(s, s.RegisterNetworkAcceptAttemptEventFilter)
+	nfs.acceptResultFilters.register(s, s.RegisterNetworkAcceptResultEventFilter)
+
+	nfs.bindAttemptFilters.register(s, s.RegisterNetworkBindAttemptEventFilter)
+	nfs.bindResultFilters.register(s, s.RegisterNetworkBindResultEventFilter)
+	nfs.connectAttemptFilters.register(s, s.RegisterNetworkConnectAttemptEventFilter)
+	nfs.connectResultFilters.register(s, s.RegisterNetworkConnectResultEventFilter)
+	nfs.listenAttemptFilters.register(s, s.RegisterNetworkListenAttemptEventFilter)
+	nfs.listenResultFilters.register(s, s.RegisterNetworkListenResultEventFilter)
+	nfs.recvfromAttemptFilters.register(s, s.RegisterNetworkRecvfromAttemptEventFilter)
+	nfs.recvfromResultFilters.register(s, s.RegisterNetworkRecvfromResultEventFilter)
+	nfs.sendtoAttemptFilters.register(s, s.RegisterNetworkSendtoAttemptEventFilter)
+	nfs.sendtoResultFilters.register(s, s.RegisterNetworkSendtoResultEventFilter)
+}
+
+func (s *Subscription) registerPerformanceEvents(events []*api.PerformanceEventFilter) {
+	for _, e := range events {
+		attr := perf.EventAttr{
+			SampleType: perf.PERF_SAMPLE_CPU | perf.PERF_SAMPLE_RAW,
+		}
+		switch e.SampleRateType {
+		case api.SampleRateType_SAMPLE_RATE_TYPE_PERIOD:
+			if rate, ok := e.SampleRate.(*api.PerformanceEventFilter_Period); !ok {
+				s.logStatus(
+					fmt.Sprintf("Period not properly specified for periodic sample rate"))
+				continue
+			} else {
+				attr.SamplePeriod = rate.Period
+				attr.Freq = false
+			}
+		case api.SampleRateType_SAMPLE_RATE_TYPE_FREQUENCY:
+			if rate, ok := e.SampleRate.(*api.PerformanceEventFilter_Frequency); !ok {
+				s.logStatus(
+					fmt.Sprintf("Frequency not properly specified for frequency sample rate"))
+				continue
+			} else {
+				attr.SampleFreq = rate.Frequency
+				attr.Freq = true
+			}
+		default:
+			s.logStatus(
+				fmt.Sprintf("SampleRateType %d is invalid", e.SampleRateType))
+			continue
+		}
+
+		counters := make([]perf.CounterEventGroupMember, 0, len(e.Events))
+		for _, ev := range e.Events {
+			m := perf.CounterEventGroupMember{
+				Config: ev.Config,
+			}
+			switch ev.Type {
+			case api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE:
+				m.EventType = perf.EventTypeHardware
+			case api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE_CACHE:
+				m.EventType = perf.EventTypeHardwareCache
+			case api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_SOFTWARE:
+				m.EventType = perf.EventTypeSoftware
+			default:
+				s.logStatus(
+					fmt.Sprintf("PerformanceEventType %d is invalid", ev.Type))
+				continue
+			}
+			counters = append(counters, m)
+		}
+
+		s.RegisterPerformanceEventFilter(attr, counters)
+	}
+}
+
+func rewriteProcessEventFilter(pef *api.ProcessEventFilter) {
+	switch pef.Type {
+	case api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC:
+		if pef.ExecFilename != nil {
+			newExpr := expression.Equal(
+				expression.Identifier("filename"),
+				expression.Value(pef.ExecFilename.Value))
+			pef.FilterExpression = expression.LogicalAnd(
+				newExpr, pef.FilterExpression)
+			pef.ExecFilename = nil
+			pef.ExecFilenamePattern = nil
+		} else if pef.ExecFilenamePattern != nil {
+			newExpr := expression.Like(
+				expression.Identifier("filename"),
+				expression.Value(pef.ExecFilenamePattern.Value))
+			pef.FilterExpression = expression.LogicalAnd(
+				newExpr, pef.FilterExpression)
+			pef.ExecFilenamePattern = nil
+		}
+	case api.ProcessEventType_PROCESS_EVENT_TYPE_EXIT:
+		if pef.ExitCode != nil {
+			newExpr := expression.Equal(
+				expression.Identifier("code"),
+				expression.Value(pef.ExitCode.Value))
+			pef.FilterExpression = expression.LogicalAnd(
+				newExpr, pef.FilterExpression)
+			pef.ExitCode = nil
+		}
+	}
+}
+
+func (s *Subscription) registerProcessEvents(events []*api.ProcessEventFilter) {
+	type registerFunc func(*expression.Expression)
+
+	var (
+		filters       [5]*api.Expression
+		subscriptions [5]registerFunc
+		wildcards     [5]bool
+	)
+
+	for _, e := range events {
+		// Translate deprecated fields into an expression
+		rewriteProcessEventFilter(e)
+
+		t := e.GetType()
+		if t < 1 || t > api.ProcessEventType(len(subscriptions)-1) {
+			s.logStatus(
+				fmt.Sprintf("ProcessEventType %d is invalid", t))
+			continue
+		}
+
+		if subscriptions[t] == nil {
+			switch t {
+			case api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC:
+				subscriptions[t] = s.RegisterProcessExecEventFilter
+			case api.ProcessEventType_PROCESS_EVENT_TYPE_FORK:
+				subscriptions[t] = s.RegisterProcessForkEventFilter
+			case api.ProcessEventType_PROCESS_EVENT_TYPE_EXIT:
+				subscriptions[t] = s.RegisterProcessExitEventFilter
+			case api.ProcessEventType_PROCESS_EVENT_TYPE_UPDATE:
+				subscriptions[t] = s.RegisterProcessUpdateEventFilter
+			}
+		}
+		if e.FilterExpression == nil {
+			wildcards[t] = true
+			filters[t] = nil
+		} else if !wildcards[t] {
+			filters[t] = expression.LogicalOr(
+				e.FilterExpression,
+				filters[t])
+		}
+	}
+
+	for i, f := range subscriptions {
+		if f == nil {
+			continue
+		}
+		if wildcards[i] {
+			f(nil)
+		} else if expr, err := expression.NewExpression(filters[i]); err == nil {
+			f(expr)
+		} else {
+			s.logStatus(
+				fmt.Sprintf("Invalid process filter expression: %v", err))
+		}
+	}
+}
+
+func rewriteSyscallEventFilter(sef *api.SyscallEventFilter) {
+	if sef.Id != nil {
+		newExpr := expression.Equal(
+			expression.Identifier("id"),
+			expression.Value(sef.Id.Value))
+		sef.FilterExpression = expression.LogicalAnd(
+			newExpr, sef.FilterExpression)
+		sef.Id = nil
+	}
+
+	if sef.Type == api.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER {
+		if sef.Arg0 != nil {
+			newExpr := expression.Equal(
+				expression.Identifier("arg0"),
+				expression.Value(sef.Arg0.Value))
+			sef.FilterExpression = expression.LogicalAnd(
+				newExpr, sef.FilterExpression)
+			sef.Arg0 = nil
+		}
+
+		if sef.Arg1 != nil {
+			newExpr := expression.Equal(
+				expression.Identifier("arg1"),
+				expression.Value(sef.Arg1.Value))
+			sef.FilterExpression = expression.LogicalAnd(
+				newExpr, sef.FilterExpression)
+			sef.Arg1 = nil
+		}
+
+		if sef.Arg2 != nil {
+			newExpr := expression.Equal(
+				expression.Identifier("arg2"),
+				expression.Value(sef.Arg2.Value))
+			sef.FilterExpression = expression.LogicalAnd(
+				newExpr, sef.FilterExpression)
+			sef.Arg2 = nil
+		}
+
+		if sef.Arg3 != nil {
+			newExpr := expression.Equal(
+				expression.Identifier("arg3"),
+				expression.Value(sef.Arg3.Value))
+			sef.FilterExpression = expression.LogicalAnd(
+				newExpr, sef.FilterExpression)
+			sef.Arg3 = nil
+		}
+
+		if sef.Arg4 != nil {
+			newExpr := expression.Equal(
+				expression.Identifier("arg4"),
+				expression.Value(sef.Arg4.Value))
+			sef.FilterExpression = expression.LogicalAnd(
+				newExpr, sef.FilterExpression)
+			sef.Arg4 = nil
+		}
+
+		if sef.Arg5 != nil {
+			newExpr := expression.Equal(
+				expression.Identifier("arg5"),
+				expression.Value(sef.Arg5.Value))
+			sef.FilterExpression = expression.LogicalAnd(
+				newExpr, sef.FilterExpression)
+			sef.Arg5 = nil
+		}
+	} else if sef.Type == api.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT {
+		if sef.Ret != nil {
+			newExpr := expression.Equal(
+				expression.Identifier("ret"),
+				expression.Value(sef.Ret.Value))
+			sef.FilterExpression = expression.LogicalAnd(
+				newExpr, sef.FilterExpression)
+			sef.Ret = nil
+		}
+	}
+}
+
+func containsIDFilter(expr *api.Expression) bool {
+	if expr != nil {
+		switch expr.GetType() {
+		case api.Expression_LOGICAL_AND:
+			operands := expr.GetBinaryOp()
+			return containsIDFilter(operands.Lhs) ||
+				containsIDFilter(operands.Rhs)
+		case api.Expression_LOGICAL_OR:
+			operands := expr.GetBinaryOp()
+			return containsIDFilter(operands.Lhs) &&
+				containsIDFilter(operands.Rhs)
+		case api.Expression_EQ:
+			operands := expr.GetBinaryOp()
+			if operands.Lhs.GetType() != api.Expression_IDENTIFIER {
+				return false
+			}
+			if operands.Lhs.GetIdentifier() != "id" {
+				return false
+			}
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Subscription) registerSyscallEvents(events []*api.SyscallEventFilter) {
+	var enterFilter, exitFilter *api.Expression
+
+	for _, e := range events {
+		// Translate deprecated fields into an expression
+		rewriteSyscallEventFilter(e)
+
+		if !containsIDFilter(e.FilterExpression) {
+			// No wildcard filters for now
+			s.logStatus(
+				"Wildcard syscall filter ignored")
+			continue
+		}
+
+		switch t := e.GetType(); t {
+		case api.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER:
+			enterFilter = expression.LogicalOr(enterFilter,
+				e.FilterExpression)
+		case api.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT:
+			exitFilter = expression.LogicalOr(exitFilter,
+				e.FilterExpression)
+		default:
+			s.logStatus(
+				fmt.Sprintf("SyscallEventType %d is invalid", t))
+			continue
+		}
+	}
+
+	if enterFilter != nil {
+		if expr, err := expression.NewExpression(enterFilter); err == nil {
+			s.RegisterSyscallEnterEventFilter(expr)
+		} else {
+			s.logStatus(
+				fmt.Sprintf("Invalid filter expression for syscall enter filter: %v", err))
+		}
+
+	}
+	if exitFilter != nil {
+		if expr, err := expression.NewExpression(exitFilter); err == nil {
+			s.RegisterSyscallExitEventFilter(expr)
+		} else {
+			s.logStatus(
+				fmt.Sprintf("Invalid filter expression for syscall exit filter: %v", err))
+		}
+
+	}
+}
+
+func (s *Subscription) registerTickerEvents(events []*api.TickerEventFilter) {
+	for _, e := range events {
+		s.RegisterTickerEventFilter(e.Interval, nil)
+	}
+}
+
+func newTelemetryEvent(e TelemetryEventData) *api.TelemetryEvent {
+	event := &api.TelemetryEvent{
+		Id:                   e.EventID,
+		ProcessId:            e.ProcessID,
+		ProcessPid:           int32(e.PID),
+		ContainerId:          e.Container.ID,
+		SensorId:             e.SensorID,
+		SensorSequenceNumber: e.SequenceNumber,
+		SensorMonotimeNanos:  e.MonotimeNanos,
+		ContainerName:        e.Container.Name,
+		ImageId:              e.Container.ImageID,
+		ImageName:            e.Container.ImageName,
+		Cpu:                  int32(e.CPU),
+		ProcessTgid:          int32(e.TGID),
+	}
+
+	if e.HasCredentials {
+		event.Credentials = &api.Credentials{
+			Uid:   e.Credentials.UID,
+			Gid:   e.Credentials.GID,
+			Euid:  e.Credentials.EUID,
+			Egid:  e.Credentials.EGID,
+			Suid:  e.Credentials.SUID,
+			Sgid:  e.Credentials.SGID,
+			Fsuid: e.Credentials.FSUID,
+			Fsgid: e.Credentials.FSGID,
+		}
+	}
+
+	return event
+}
+
+func translateNetworkAddress(addr NetworkAddressTelemetryEventData) *api.NetworkAddress {
+	switch addr.Family {
+	case unix.AF_LOCAL:
+		return &api.NetworkAddress{
+			Family: api.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_LOCAL,
+			Address: &api.NetworkAddress_LocalAddress{
+				LocalAddress: addr.UnixPath,
+			},
+		}
+	case unix.AF_INET:
+		return &api.NetworkAddress{
+			Family: api.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_INET,
+			Address: &api.NetworkAddress_Ipv4Address{
+				Ipv4Address: &api.IPv4AddressAndPort{
+					Address: &api.IPv4Address{
+						Address: addr.IPv4Address,
+					},
+					Port: uint32(addr.IPv4Port),
+				},
+			},
+		}
+	case unix.AF_INET6:
+		return &api.NetworkAddress{
+			Family: api.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_INET6,
+			Address: &api.NetworkAddress_Ipv6Address{
+				Ipv6Address: &api.IPv6AddressAndPort{
+					Address: &api.IPv6Address{
+						High: addr.IPv6AddressHigh,
+						Low:  addr.IPv6AddressLow,
+					},
+					Port: uint32(addr.IPv6Port),
+				},
+			},
+		}
+	}
+	return nil
+}
+
+func (s *Subscription) translateEvent(ev TelemetryEvent) *api.TelemetryEvent {
+	eventData := ev.CommonTelemetryEventData()
+	if len(eventData.Container.ID) > 0 && len(eventData.Container.Name) == 0 {
+		// We have a container ID without a name. Let's see if
+		// we can refresh that.
+		ci := s.sensor.ContainerCache.LookupContainer(
+			eventData.Container.ID, false)
+		if ci != nil {
+			eventData.Container = *ci
+		}
+	}
+	event := newTelemetryEvent(eventData)
+
+	switch e := ev.(type) {
+	case ChargenTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Chargen{
+			Chargen: &api.ChargenEvent{
+				Index:      e.Index,
+				Characters: e.Characters,
+			},
+		}
+
+	case ContainerCreatedTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Container{
+			Container: &api.ContainerEvent{
+				Type:             api.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
+				Name:             e.Container.Name,
+				ImageId:          e.Container.ImageID,
+				ImageName:        e.Container.ImageName,
+				HostPid:          int32(e.Container.Pid),
+				DockerConfigJson: e.Container.JSONConfig,
+				OciConfigJson:    e.Container.OCIConfig,
+			},
+		}
+
+	case ContainerDestroyedTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Container{
+			Container: &api.ContainerEvent{
+				Type:             api.ContainerEventType_CONTAINER_EVENT_TYPE_DESTROYED,
+				Name:             e.Container.Name,
+				ImageId:          e.Container.ImageID,
+				ImageName:        e.Container.ImageName,
+				HostPid:          int32(e.Container.Pid),
+				DockerConfigJson: e.Container.JSONConfig,
+				OciConfigJson:    e.Container.OCIConfig,
+			},
+		}
+	case ContainerExitedTelemetryEvent:
+		var exitSignal, exitStatus uint32
+		ws := unix.WaitStatus(e.Container.ExitCode)
+		if ws.Exited() {
+			exitStatus = uint32(ws.ExitStatus())
+		}
+		if ws.Signaled() {
+			exitSignal = uint32(ws.Signal())
+		}
+		event.Event = &api.TelemetryEvent_Container{
+			Container: &api.ContainerEvent{
+				Type:             api.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
+				Name:             e.Container.Name,
+				ImageId:          e.Container.ImageID,
+				ImageName:        e.Container.ImageName,
+				HostPid:          int32(e.Container.Pid),
+				ExitCode:         int32(e.Container.ExitCode),
+				ExitStatus:       exitStatus,
+				ExitSignal:       exitSignal,
+				ExitCoreDumped:   ws.CoreDump(),
+				DockerConfigJson: e.Container.JSONConfig,
+				OciConfigJson:    e.Container.OCIConfig,
+			},
+		}
+	case ContainerRunningTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Container{
+			Container: &api.ContainerEvent{
+				Type:             api.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
+				Name:             e.Container.Name,
+				ImageId:          e.Container.ImageID,
+				ImageName:        e.Container.ImageName,
+				HostPid:          int32(e.Container.Pid),
+				DockerConfigJson: e.Container.JSONConfig,
+				OciConfigJson:    e.Container.OCIConfig,
+			},
+		}
+
+	case ContainerUpdatedTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Container{
+			Container: &api.ContainerEvent{
+				Type:             api.ContainerEventType_CONTAINER_EVENT_TYPE_UPDATED,
+				Name:             e.Container.Name,
+				ImageId:          e.Container.ImageID,
+				ImageName:        e.Container.ImageName,
+				HostPid:          int32(e.Container.Pid),
+				DockerConfigJson: e.Container.JSONConfig,
+				OciConfigJson:    e.Container.OCIConfig,
+			},
+		}
+
+	case FileOpenTelemetryEvent:
+		event.Event = &api.TelemetryEvent_File{
+			File: &api.FileEvent{
+				Type:      api.FileEventType_FILE_EVENT_TYPE_OPEN,
+				Filename:  e.Filename,
+				OpenFlags: e.Flags,
+				OpenMode:  e.Mode,
+			},
+		}
+
+	case KernelFunctionCallTelemetryEvent:
+		args := make(map[string]*api.KernelFunctionCallEvent_FieldValue)
+		for k, v := range e.Arguments {
+			value := &api.KernelFunctionCallEvent_FieldValue{}
+			switch v := v.(type) {
+			case []byte:
+				value.FieldType = api.KernelFunctionCallEvent_BYTES
+				value.Value = &api.KernelFunctionCallEvent_FieldValue_BytesValue{BytesValue: v}
+			case string:
+				value.FieldType = api.KernelFunctionCallEvent_STRING
+				value.Value = &api.KernelFunctionCallEvent_FieldValue_StringValue{StringValue: v}
+			case int8:
+				value.FieldType = api.KernelFunctionCallEvent_SINT8
+				value.Value = &api.KernelFunctionCallEvent_FieldValue_SignedValue{SignedValue: int64(v)}
+			case int16:
+				value.FieldType = api.KernelFunctionCallEvent_SINT16
+				value.Value = &api.KernelFunctionCallEvent_FieldValue_SignedValue{SignedValue: int64(v)}
+			case int32:
+				value.FieldType = api.KernelFunctionCallEvent_SINT32
+				value.Value = &api.KernelFunctionCallEvent_FieldValue_SignedValue{SignedValue: int64(v)}
+			case int64:
+				value.FieldType = api.KernelFunctionCallEvent_SINT64
+				value.Value = &api.KernelFunctionCallEvent_FieldValue_SignedValue{SignedValue: v}
+			case uint8:
+				value.FieldType = api.KernelFunctionCallEvent_UINT8
+				value.Value = &api.KernelFunctionCallEvent_FieldValue_UnsignedValue{UnsignedValue: uint64(v)}
+			case uint16:
+				value.FieldType = api.KernelFunctionCallEvent_UINT16
+				value.Value = &api.KernelFunctionCallEvent_FieldValue_UnsignedValue{UnsignedValue: uint64(v)}
+			case uint32:
+				value.FieldType = api.KernelFunctionCallEvent_UINT32
+				value.Value = &api.KernelFunctionCallEvent_FieldValue_UnsignedValue{UnsignedValue: uint64(v)}
+			case uint64:
+				value.FieldType = api.KernelFunctionCallEvent_UINT64
+				value.Value = &api.KernelFunctionCallEvent_FieldValue_UnsignedValue{UnsignedValue: v}
+			}
+			args[k] = value
+		}
+		event.Event = &api.TelemetryEvent_KernelCall{
+			KernelCall: &api.KernelFunctionCallEvent{
+				Arguments: args,
+			},
+		}
+
+	case NetworkAcceptAttemptTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Network{
+			Network: &api.NetworkEvent{
+				Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_ATTEMPT,
+				Sockfd: e.FD,
+			},
+		}
+
+	case NetworkAcceptResultTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Network{
+			Network: &api.NetworkEvent{
+				Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_RESULT,
+				Result: e.Return,
+			},
+		}
+
+	case NetworkBindAttemptTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Network{
+			Network: &api.NetworkEvent{
+				Type:    api.NetworkEventType_NETWORK_EVENT_TYPE_BIND_ATTEMPT,
+				Sockfd:  e.FD,
+				Address: translateNetworkAddress(e.NetworkAddressTelemetryEventData),
+			},
+		}
+
+	case NetworkBindResultTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Network{
+			Network: &api.NetworkEvent{
+				Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_BIND_RESULT,
+				Result: e.Return,
+			},
+		}
+
+	case NetworkConnectAttemptTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Network{
+			Network: &api.NetworkEvent{
+				Type:    api.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_ATTEMPT,
+				Sockfd:  e.FD,
+				Address: translateNetworkAddress(e.NetworkAddressTelemetryEventData),
+			},
+		}
+
+	case NetworkConnectResultTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Network{
+			Network: &api.NetworkEvent{
+				Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_RESULT,
+				Result: e.Return,
+			},
+		}
+
+	case NetworkListenAttemptTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Network{
+			Network: &api.NetworkEvent{
+				Type:    api.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_ATTEMPT,
+				Sockfd:  e.FD,
+				Backlog: e.Backlog,
+			},
+		}
+
+	case NetworkListenResultTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Network{
+			Network: &api.NetworkEvent{
+				Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_RESULT,
+				Result: e.Return,
+			},
+		}
+
+	case NetworkRecvfromAttemptTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Network{
+			Network: &api.NetworkEvent{
+				Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_ATTEMPT,
+				Sockfd: e.FD,
+			},
+		}
+
+	case NetworkRecvfromResultTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Network{
+			Network: &api.NetworkEvent{
+				Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_RESULT,
+				Result: e.Return,
+			},
+		}
+
+	case NetworkSendtoAttemptTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Network{
+			Network: &api.NetworkEvent{
+				Type:    api.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_ATTEMPT,
+				Sockfd:  e.FD,
+				Address: translateNetworkAddress(e.NetworkAddressTelemetryEventData),
+			},
+		}
+
+	case NetworkSendtoResultTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Network{
+			Network: &api.NetworkEvent{
+				Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_RESULT,
+				Result: e.Return,
+			},
+		}
+
+	case PerformanceTelemetryEvent:
+		values := make([]*api.PerformanceEventValue, len(e.Counters))
+		for i, v := range e.Counters {
+			var t api.PerformanceEventType
+			switch v.EventType {
+			case perf.EventTypeHardware:
+				t = api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE
+			case perf.EventTypeHardwareCache:
+				t = api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE_CACHE
+			case perf.EventTypeSoftware:
+				t = api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_SOFTWARE
+			}
+			values[i] = &api.PerformanceEventValue{
+				Type:   t,
+				Config: v.Config,
+				Value:  v.Value,
+			}
+		}
+		event.Event = &api.TelemetryEvent_Performance{
+			Performance: &api.PerformanceEvent{
+				TotalTimeEnabled: e.TotalTimeEnabled,
+				TotalTimeRunning: e.TotalTimeRunning,
+				Values:           values,
+			},
+		}
+
+	case ProcessExecTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Process{
+			Process: &api.ProcessEvent{
+				Type:            api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
+				ExecFilename:    e.Filename,
+				ExecCommandLine: e.CommandLine,
+			},
+		}
+
+	case ProcessExitTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Process{
+			Process: &api.ProcessEvent{
+				Type:           api.ProcessEventType_PROCESS_EVENT_TYPE_EXIT,
+				ExitCode:       e.ExitCode,
+				ExitStatus:     e.ExitStatus,
+				ExitSignal:     e.ExitSignal,
+				ExitCoreDumped: e.ExitCoreDumped,
+			},
+		}
+
+	case ProcessForkTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Process{
+			Process: &api.ProcessEvent{
+				Type:         api.ProcessEventType_PROCESS_EVENT_TYPE_FORK,
+				ForkChildId:  e.ChildProcessID,
+				ForkChildPid: e.ChildPID,
+			},
+		}
+
+	case ProcessUpdateTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Process{
+			Process: &api.ProcessEvent{
+				Type:      api.ProcessEventType_PROCESS_EVENT_TYPE_UPDATE,
+				UpdateCwd: e.CWD,
+			},
+		}
+
+	case SyscallEnterTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Syscall{
+			Syscall: &api.SyscallEvent{
+				Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
+				Id:   e.ID,
+				Arg0: e.Arguments[0],
+				Arg1: e.Arguments[1],
+				Arg2: e.Arguments[2],
+				Arg3: e.Arguments[3],
+				Arg4: e.Arguments[4],
+				Arg5: e.Arguments[5],
+			},
+		}
+
+	case SyscallExitTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Syscall{
+			Syscall: &api.SyscallEvent{
+				Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT,
+				Id:   e.ID,
+				Ret:  e.Return,
+			},
+		}
+
+	case TickerTelemetryEvent:
+		event.Event = &api.TelemetryEvent_Ticker{
+			Ticker: &api.TickerEvent{
+				Seconds:     e.Seconds,
+				Nanoseconds: e.Nanoseconds,
+			},
+		}
+	}
+
+	return event
 }

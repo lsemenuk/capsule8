@@ -17,131 +17,145 @@ package sensor
 import (
 	"testing"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	"github.com/capsule8/capsule8/pkg/sys"
+	"github.com/capsule8/capsule8/pkg/sys/perf"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestFilterContainerId(t *testing.T) {
-	cf, err := newContainerFilter(&api.ContainerFilter{
-		Ids: []string{
-			"alice",
-			"bob",
+func TestContainerDecoders(t *testing.T) {
+	sensor := newUnitTestSensor(t)
+	defer sensor.Stop()
+
+	sample := &perf.SampleRecord{
+		Time: uint64(sys.CurrentMonotonicRaw()),
+	}
+	data := perf.TraceEventSampleData{
+		"__container__": ContainerInfo{
+			ID:         "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ./",
+			Name:       "capsule8-sensor-container",
+			ImageID:    "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz./",
+			ImageName:  "capsule8-sensor-image",
+			Pid:        872364,
+			ExitCode:   255,
+			Runtime:    ContainerRuntimeDocker,
+			State:      ContainerStateRunning,
+			JSONConfig: "This is the JSON config that isn't actually JSON",
+			OCIConfig:  "This is the OCI config that isn't real",
 		},
-	})
-	if err != nil {
-		t.Error(err)
 	}
 
-	if match := cf.match(&api.TelemetryEvent{
-		ContainerId: "alice",
-	}); !match {
-		t.Error("No matching container ID found for alice")
+	type testCase struct {
+		decoder      perf.TraceEventDecoderFn
+		expectedType interface{}
+	}
+	testCases := []testCase{
+		testCase{
+			decoder:      sensor.ContainerCache.decodeContainerCreatedEvent,
+			expectedType: ContainerCreatedTelemetryEvent{},
+		},
+		testCase{
+			decoder:      sensor.ContainerCache.decodeContainerDestroyedEvent,
+			expectedType: ContainerDestroyedTelemetryEvent{},
+		},
+		testCase{
+			decoder:      sensor.ContainerCache.decodeContainerExitedEvent,
+			expectedType: ContainerExitedTelemetryEvent{},
+		},
+		testCase{
+			decoder:      sensor.ContainerCache.decodeContainerRunningEvent,
+			expectedType: ContainerRunningTelemetryEvent{},
+		},
+		testCase{
+			decoder:      sensor.ContainerCache.decodeContainerUpdatedEvent,
+			expectedType: ContainerUpdatedTelemetryEvent{},
+		},
 	}
 
-	if match := cf.match(&api.TelemetryEvent{
-		ContainerId: "bill",
-	}); match {
-		t.Error("Unexpected matching container ID found for bill")
+	for _, tc := range testCases {
+		i, err := tc.decoder(sample, data)
+		require.NotNil(t, i)
+		require.NoError(t, err)
+
+		e, ok := i.(TelemetryEvent)
+		require.True(t, ok)
+		require.IsType(t, tc.expectedType, i)
+
+		ok = testCommonTelemetryEventData(t, sensor, e)
+		require.True(t, ok)
+
+		cted := e.CommonTelemetryEventData()
+		assert.Equal(t, data["__container__"], cted.Container)
 	}
+}
+
+func TestFilterContainerId(t *testing.T) {
+	cf := NewContainerFilter()
+	cf.AddContainerID("alice")
+	cf.AddContainerID("bob")
+
+	pass := ContainerInfo{
+		ID: "alice",
+	}
+	assert.True(t, cf.Match(pass))
+
+	fail := ContainerInfo{
+		ID: "bill",
+	}
+	assert.False(t, cf.Match(fail))
 }
 
 func TestFilterContainerImageId(t *testing.T) {
-	cf, err := newContainerFilter(&api.ContainerFilter{
-		ImageIds: []string{
-			"alice",
-			"bob",
-		},
-	})
-	if err != nil {
-		t.Error(err)
-	}
+	cf := NewContainerFilter()
+	cf.AddImageID("alice")
+	cf.AddImageID("bob")
 
-	if match := cf.match(&api.TelemetryEvent{
-		ContainerId: "pass",
-		Event: &api.TelemetryEvent_Container{
-			Container: &api.ContainerEvent{
-				ImageId: "alice",
-			},
-		},
-	}); !match {
-		t.Error("No matching container image ID found for alice")
+	pass := ContainerInfo{
+		ID:      "pass",
+		ImageID: "alice",
 	}
+	assert.True(t, cf.Match(pass))
 
-	if match := cf.match(&api.TelemetryEvent{
-		ContainerId: "fail",
-		Event: &api.TelemetryEvent_Container{
-			Container: &api.ContainerEvent{
-				ImageId: "bill",
-			},
-		},
-	}); match {
-		t.Error("Unexpected matching container image ID found for bill")
+	fail := ContainerInfo{
+		ID:      "fail",
+		ImageID: "bill",
 	}
+	assert.False(t, cf.Match(fail))
 }
 
 func TestFilterContainerImageNames(t *testing.T) {
-	cf, err := newContainerFilter(&api.ContainerFilter{
-		ImageNames: []string{
-			"alice",
-			"bob",
-		},
-	})
-	if err != nil {
-		t.Error(err)
-	}
+	cf := NewContainerFilter()
+	cf.AddImageName("alice")
+	cf.AddImageName("bob")
 
-	if match := cf.match(&api.TelemetryEvent{
-		ContainerId: "pass",
-		Event: &api.TelemetryEvent_Container{
-			Container: &api.ContainerEvent{
-				ImageName: "alice",
-			},
-		},
-	}); !match {
-		t.Error("No matching image name found for alice")
+	pass := ContainerInfo{
+		ID:        "pass",
+		ImageName: "alice",
 	}
+	assert.True(t, cf.Match(pass))
 
-	if match := cf.match(&api.TelemetryEvent{
-		ContainerId: "fail",
-		Event: &api.TelemetryEvent_Container{
-			Container: &api.ContainerEvent{
-				ImageName: "bill",
-			},
-		},
-	}); match {
-		t.Error("Unexpected matching image name found for bill")
+	fail := ContainerInfo{
+		ID:        "fail",
+		ImageName: "bill",
 	}
+	assert.False(t, cf.Match(fail))
 }
 
 func TestFilterContainerNames(t *testing.T) {
-	cf, err := newContainerFilter(&api.ContainerFilter{
-		Names: []string{
-			"alice",
-			"bob",
-		},
-	})
-	if err != nil {
-		t.Error(err)
-	}
+	cf := NewContainerFilter()
+	cf.AddContainerName("alice")
+	cf.AddContainerName("bob")
 
-	if match := cf.match(&api.TelemetryEvent{
-		ContainerId: "pass",
-		Event: &api.TelemetryEvent_Container{
-			Container: &api.ContainerEvent{
-				Name: "alice",
-			},
-		},
-	}); !match {
-		t.Error("No matching container name found for alice")
+	pass := ContainerInfo{
+		ID:   "pass",
+		Name: "alice",
 	}
+	assert.True(t, cf.Match(pass))
 
-	if match := cf.match(&api.TelemetryEvent{
-		ContainerId: "fail",
-		Event: &api.TelemetryEvent_Container{
-			Container: &api.ContainerEvent{
-				Name: "bill",
-			},
-		},
-	}); match {
-		t.Error("Unexpected matching container name found for bill")
+	fail := ContainerInfo{
+		ID:   "fail",
+		Name: "bill",
 	}
+	assert.False(t, cf.Match(fail))
 }

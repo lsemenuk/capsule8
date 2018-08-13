@@ -22,14 +22,10 @@ import (
 	"os/signal"
 	"strings"
 
-	api "github.com/capsule8/capsule8/api/v0"
-
 	"github.com/capsule8/capsule8/pkg/sensor"
 	"github.com/capsule8/capsule8/pkg/sys/perf"
 
 	"github.com/golang/glog"
-
-	"google.golang.org/genproto/googleapis/rpc/code"
 )
 
 const (
@@ -91,41 +87,31 @@ func main() {
 		counters: make([]eventCounters, ncpu),
 	}
 
-	// Create our subscription to read LL cache accesses and misses
-	//
 	// We ask the kernel to sample every llcLoadSampleSize LLC
 	// loads. During each sample, the LLC load misses are also
 	// recorded, as well as CPU number, PID/TID, and sample time.
-	sub := &api.Subscription{
-		EventFilter: &api.EventFilter{
-			PerformanceEvents: []*api.PerformanceEventFilter{
-				&api.PerformanceEventFilter{
-					SampleRateType: api.SampleRateType_SAMPLE_RATE_TYPE_PERIOD,
-					SampleRate: &api.PerformanceEventFilter_Period{
-						Period: llcLoadSampleSize,
-					},
-					Events: []*api.PerformanceEventCounter{
-						&api.PerformanceEventCounter{
-							Type:   api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE_CACHE,
-							Config: perfConfigLLCLoads,
-						},
-						&api.PerformanceEventCounter{
-							Type:   api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE_CACHE,
-							Config: perfConfigLLCLoadMisses,
-						},
-					},
-				},
-			},
+	attr := perf.EventAttr{
+		SampleType:   perf.PERF_SAMPLE_CPU | perf.PERF_SAMPLE_RAW,
+		SamplePeriod: llcLoadSampleSize,
+	}
+	counters := []perf.CounterEventGroupMember{
+		perf.CounterEventGroupMember{
+			EventType: perf.EventTypeHardwareCache,
+			Config:    perfConfigLLCLoads,
+		},
+		perf.CounterEventGroupMember{
+			EventType: perf.EventTypeHardwareCache,
+			Config:    perfConfigLLCLoadMisses,
 		},
 	}
+	sub := tracker.sensor.NewSubscription()
+	sub.RegisterPerformanceEventFilter(attr, counters)
 
 	glog.Info("Monitoring for cache side channels")
 	ctx, cancel := context.WithCancel(context.Background())
-	status, err := sensor.NewSubscription(ctx, sub, tracker.dispatchEvent)
-	if !(len(status) == 1 && status[0].Code == int32(code.Code_OK)) {
-		for _, s := range status {
-			glog.Infof("%s: %s", code.Code_name[s.Code], s.Message)
-		}
+	status, err := sub.Run(ctx, tracker.dispatchEvent)
+	for _, s := range status {
+		glog.Info(s)
 	}
 	if err != nil {
 		glog.Fatalf("Could not register subscription: %v", err)
@@ -141,16 +127,16 @@ func main() {
 	sensor.Stop()
 }
 
-func (t *counterTracker) dispatchEvent(e *api.TelemetryEvent) {
-	event := e.Event.(*api.TelemetryEvent_Performance).Performance
+func (t *counterTracker) dispatchEvent(e sensor.TelemetryEvent) {
+	event := e.(sensor.PerformanceTelemetryEvent)
 
-	cpu := e.Cpu
+	cpu := event.CPU
 	prevCounters := t.counters[cpu]
 	t.counters[cpu] = eventCounters{}
 
-	for _, v := range event.Values {
-		switch v.Type {
-		case api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE_CACHE:
+	for _, v := range event.Counters {
+		switch v.EventType {
+		case perf.EventTypeHardwareCache:
 			switch v.Config {
 			case perfConfigLLCLoads:
 				t.counters[cpu].LLCLoads += v.Value
@@ -169,7 +155,7 @@ func (t *counterTracker) dispatchEvent(e *api.TelemetryEvent) {
 }
 
 func (t *counterTracker) alarm(
-	event *api.TelemetryEvent,
+	e sensor.TelemetryEvent,
 	counters eventCounters,
 ) {
 	LLCLoadMissRate := float32(counters.LLCLoadMisses) /
@@ -179,15 +165,16 @@ func (t *counterTracker) alarm(
 	}
 
 	var fields []string
+	event := e.(sensor.PerformanceTelemetryEvent)
 	fields = append(fields, fmt.Sprintf("LLCLoadMissRate=%v", LLCLoadMissRate))
-	fields = append(fields, fmt.Sprintf("pid=%v", event.ProcessTgid))
-	fields = append(fields, fmt.Sprintf("tid=%v", event.ProcessPid))
-	fields = append(fields, fmt.Sprintf("cpu=%v", event.Cpu))
-	if event.ContainerId != "" {
-		fields = append(fields, fmt.Sprintf("container_name=%v", event.ContainerName))
-		fields = append(fields, fmt.Sprintf("container_id=%v", event.ContainerId))
-		fields = append(fields, fmt.Sprintf("container_image=%v", event.ImageName))
-		fields = append(fields, fmt.Sprintf("container_image_id=%v", event.ImageId))
+	fields = append(fields, fmt.Sprintf("pid=%v", event.TGID))
+	fields = append(fields, fmt.Sprintf("tid=%v", event.PID))
+	fields = append(fields, fmt.Sprintf("cpu=%v", event.CPU))
+	if event.Container.ID != "" {
+		fields = append(fields, fmt.Sprintf("container_name=%v", event.Container.Name))
+		fields = append(fields, fmt.Sprintf("container_id=%v", event.Container.ID))
+		fields = append(fields, fmt.Sprintf("container_image=%v", event.Container.ImageName))
+		fields = append(fields, fmt.Sprintf("container_image_id=%v", event.Container.ImageID))
 	}
 
 	message := strings.Join(fields, " ")
