@@ -15,11 +15,7 @@
 package sensor
 
 import (
-	"bytes"
-	"context"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -28,8 +24,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-
-	api "github.com/capsule8/capsule8/api/v0"
 
 	"github.com/capsule8/capsule8/pkg/config"
 	"github.com/capsule8/capsule8/pkg/expression"
@@ -41,26 +35,62 @@ import (
 	"github.com/golang/glog"
 
 	"golang.org/x/sys/unix"
-
-	"google.golang.org/genproto/googleapis/rpc/code"
-	google_rpc "google.golang.org/genproto/googleapis/rpc/status"
 )
 
 type newSensorOptions struct {
-	perfEventDir string
-	tracingDir   string
-	procFS       proc.FileSystem
+	runtimeDir            string
+	perfEventDir          string
+	tracingDir            string
+	dockerContainerDir    string
+	ociContainerDir       string
+	procFS                proc.FileSystem
+	eventSourceController perf.EventSourceController
+	cleanupFuncs          []func()
+	cgroupNames           []string
 }
 
 // NewSensorOption is used to implement optional arguments for NewSensor.
 // It must be exported, but it is not typically used directly.
 type NewSensorOption func(*newSensorOptions)
 
+// WithRuntimeDir is used to set the runtime state directory to use for the
+// sensor.
+func WithRuntimeDir(runtimeDir string) NewSensorOption {
+	return func(o *newSensorOptions) {
+		o.runtimeDir = runtimeDir
+	}
+}
+
+// WithDockerContainerDir is used to set the directory to monitor for Docker
+// container activity.
+func WithDockerContainerDir(dockerContainerDir string) NewSensorOption {
+	return func(o *newSensorOptions) {
+		o.dockerContainerDir = dockerContainerDir
+	}
+}
+
+// WithOciContainerDir is used to set the directory to monitor for OCI
+// container activity.
+func WithOciContainerDir(ociContainerDir string) NewSensorOption {
+	return func(o *newSensorOptions) {
+		o.ociContainerDir = ociContainerDir
+	}
+}
+
 // WithProcFileSystem is used to set the proc.FileSystem to use. The system
 // default will be used if one is not specified.
 func WithProcFileSystem(procFS proc.FileSystem) NewSensorOption {
 	return func(o *newSensorOptions) {
 		o.procFS = procFS
+	}
+}
+
+// WithEventSourceController is used to set the perf.EventSourceController to
+// use. This is not used by the sensor itself, but passed through when a new
+// EventMonitor is created.
+func WithEventSourceController(controller perf.EventSourceController) NewSensorOption {
+	return func(o *newSensorOptions) {
+		o.eventSourceController = controller
 	}
 }
 
@@ -78,6 +108,22 @@ func WithPerfEventDir(perfEventDir string) NewSensorOption {
 func WithTracingDir(tracingDir string) NewSensorOption {
 	return func(o *newSensorOptions) {
 		o.tracingDir = tracingDir
+	}
+}
+
+// WithCleanupFunc is used to register a cleanup function that will be called
+// when the sensor is stopped. Multiple cleanup functions may be registered,
+// and will be called in the reverse order in which the were registered.
+func WithCleanupFunc(cleanupFunc func()) NewSensorOption {
+	return func(o *newSensorOptions) {
+		o.cleanupFuncs = append(o.cleanupFuncs, cleanupFunc)
+	}
+}
+
+// WithCgroupName configures a cgroup name to be monitored.
+func WithCgroupName(cgroupName string) NewSensorOption {
+	return func(o *newSensorOptions) {
+		o.cgroupNames = append(o.cgroupNames, cgroupName)
 	}
 }
 
@@ -102,14 +148,16 @@ type Sensor struct {
 	Metrics MetricsCounters
 
 	// If temporary fs mounts are made at startup, they're stored here.
-	perfEventDir        string
-	tracingDir          string
-	perfEventDirMounted bool
-	tracingDirMounted   bool
+	perfEventDir string
+	tracingDir   string
+	/*
+		perfEventDirMounted bool
+		tracingDirMounted   bool
+	*/
 
 	// A sensor-global event monitor that is used for events to aid in
 	// caching process information
-	Monitor *perf.EventMonitor
+	monitor atomic.Value // *perf.EventMonitor
 
 	// A reference to the host proc filesystem in use.
 	ProcFS proc.FileSystem
@@ -141,6 +189,20 @@ type Sensor struct {
 	// argument filters
 	dummySyscallEventID    uint64
 	dummySyscallEventCount int64
+
+	// A reference to the event source controller in use.
+	EventSourceController perf.EventSourceController
+
+	// Runtime options configured during NewSensor, but not used until
+	// later
+	runtimeDir         string
+	dockerContainerDir string
+	ociContainerDir    string
+	cgroupNames        []string
+
+	// Cleanup functions to be run (in reverse order) when the sensor is
+	// stopped.
+	cleanupFuncs []func()
 }
 
 type queuedSamples struct {
@@ -150,7 +212,12 @@ type queuedSamples struct {
 
 // NewSensor creates a new Sensor instance.
 func NewSensor(options ...NewSensorOption) (*Sensor, error) {
-	opts := newSensorOptions{}
+	opts := newSensorOptions{
+		runtimeDir:         config.Global.RunDir,
+		dockerContainerDir: config.Sensor.DockerContainerDir,
+		ociContainerDir:    config.Sensor.OciContainerDir,
+		cgroupNames:        config.Sensor.CgroupName,
+	}
 	for _, option := range options {
 		option(&opts)
 	}
@@ -162,7 +229,7 @@ func NewSensor(options ...NewSensorOption) (*Sensor, error) {
 		}
 		opts.procFS = fs.HostFileSystem()
 		if opts.procFS == nil {
-			return nil, errors.New("Cannot resolve host procfs")
+			return nil, errors.New("Cannot resolve host proc filesystem")
 		}
 	}
 	if len(opts.perfEventDir) == 0 {
@@ -177,16 +244,27 @@ func NewSensor(options ...NewSensorOption) (*Sensor, error) {
 	sensorID := hex.EncodeToString(randomBytes)
 
 	s := &Sensor{
-		ID:                sensorID,
-		bootMonotimeNanos: sys.CurrentMonotonicRaw(),
-		perfEventDir:      opts.perfEventDir,
-		tracingDir:        opts.tracingDir,
-		ProcFS:            opts.procFS,
-		eventMap:          newSafeSubscriptionMap(),
+		ID:                    sensorID,
+		bootMonotimeNanos:     sys.CurrentMonotonicRaw(),
+		perfEventDir:          opts.perfEventDir,
+		tracingDir:            opts.tracingDir,
+		ProcFS:                opts.procFS,
+		eventMap:              newSafeSubscriptionMap(),
+		EventSourceController: opts.eventSourceController,
+		runtimeDir:            opts.runtimeDir,
+		dockerContainerDir:    opts.dockerContainerDir,
+		ociContainerDir:       opts.ociContainerDir,
+		cleanupFuncs:          opts.cleanupFuncs,
 	}
 	s.dispatchCond = sync.Cond{L: &s.dispatchMutex}
+	s.monitor.Store((*perf.EventMonitor)(nil))
 
 	return s, nil
+}
+
+// Monitor returns a reference to the sensor's EventMonitor instance.
+func (s *Sensor) Monitor() *perf.EventMonitor {
+	return s.monitor.Load().(*perf.EventMonitor)
 }
 
 // Start starts a sensor instance running.
@@ -204,9 +282,8 @@ func (s *Sensor) Start() error {
 
 	// We require that our run dir (usually /var/run/capsule8) exists.
 	// Ensure that now before proceeding any further.
-	if err := os.MkdirAll(config.Global.RunDir, 0700); err != nil {
-		glog.Warningf("Couldn't mkdir %s: %s",
-			config.Global.RunDir, err)
+	if err := os.MkdirAll(s.runtimeDir, 0700); err != nil {
+		glog.Warningf("Couldn't mkdir %s: %v", s.runtimeDir, err)
 		return err
 	}
 
@@ -250,24 +327,23 @@ func (s *Sensor) Start() error {
 	s.ProcessCache = NewProcessInfoCache(s)
 	s.ProcessCache.Start()
 
-	if len(config.Sensor.DockerContainerDir) > 0 {
-		s.dockerMonitor = newDockerMonitor(s,
-			config.Sensor.DockerContainerDir)
+	if len(s.dockerContainerDir) > 0 {
+		s.dockerMonitor = newDockerMonitor(s, s.dockerContainerDir)
 		if s.dockerMonitor != nil {
 			s.dockerMonitor.start()
 		}
 	}
 	/* Temporarily disable the OCI monitor until a better means of
 	   supporting it is found.
-	if len(config.Sensor.OciContainerDir) > 0 {
-		s.ociMonitor = newOciMonitor(s, config.Sensor.OciContainerDir)
+	if len(s.ociContainerDir) > 0 {
+		s.ociMonitor = newOciMonitor(s, s.ociContainerDir)
 		s.ociMonitor.start()
 	}
 	*/
 
 	// Make sure that all events registered with the sensor's event monitor
 	// are active
-	s.Monitor.EnableGroup(0)
+	s.Monitor().EnableGroup(0)
 
 	// Start dispatch goroutine(s). We'll just spin one up for now, but we
 	// can run multiples if we want. The sensor needs to keep samples in
@@ -296,156 +372,46 @@ func (s *Sensor) Stop() {
 			s.dispatchMutex.Unlock()
 		}
 	}
-	if s.Monitor != nil {
+	if monitor := s.Monitor(); monitor != nil {
 		glog.V(2).Info("Stopping sensor-global EventMonitor")
-		s.Monitor.Close()
-		s.Monitor = nil
+		monitor.Close()
+		s.monitor.Store((*perf.EventMonitor)(nil))
 		glog.V(2).Info("Sensor-global EventMonitor stopped successfully")
 	}
 
-	if s.tracingDirMounted {
-		s.unmountTraceFS()
-	}
-
-	if s.perfEventDirMounted {
-		s.unmountPerfEventCgroupFS()
+	for x := len(s.cleanupFuncs) - 1; x >= 0; x-- {
+		s.cleanupFuncs[x]()
 	}
 }
 
 func (s *Sensor) mountTraceFS() error {
-	dir := filepath.Join(config.Global.RunDir, "tracing")
+	dir := filepath.Join(s.runtimeDir, "tracing")
 	err := sys.MountTempFS("tracefs", dir, "tracefs", 0, "")
 	if err == nil {
 		s.tracingDir = dir
-		s.tracingDirMounted = true
+		s.cleanupFuncs = append(s.cleanupFuncs, func() {
+			err = sys.UnmountTempFS(dir, "tracefs")
+			if err != nil {
+				glog.V(2).Infof("Could not unmount %s: %v", dir, err)
+			}
+		})
 	}
 	return err
-}
-
-func (s *Sensor) unmountTraceFS() {
-	err := sys.UnmountTempFS(s.tracingDir, "tracefs")
-	if err == nil {
-		s.tracingDir = ""
-		s.tracingDirMounted = false
-	} else {
-		glog.V(2).Infof("Could not unmount %s: %s", s.tracingDir, err)
-	}
 }
 
 func (s *Sensor) mountPerfEventCgroupFS() error {
-	dir := filepath.Join(config.Global.RunDir, "perf_event")
+	dir := filepath.Join(s.runtimeDir, "perf_event")
 	err := sys.MountTempFS("cgroup", dir, "cgroup", 0, "perf_event")
 	if err == nil {
 		s.perfEventDir = dir
-		s.perfEventDirMounted = true
+		s.cleanupFuncs = append(s.cleanupFuncs, func() {
+			err = sys.UnmountTempFS(dir, "cgroup")
+			if err != nil {
+				glog.V(2).Infof("Could not unmount %s: %v", dir, err)
+			}
+		})
 	}
 	return err
-}
-
-func (s *Sensor) unmountPerfEventCgroupFS() {
-	err := sys.UnmountTempFS(s.perfEventDir, "cgroup")
-	if err == nil {
-		s.perfEventDir = ""
-		s.perfEventDirMounted = false
-	} else {
-		glog.V(2).Infof("Could not unmount %s: %s", s.perfEventDir, err)
-	}
-}
-
-// NewEvent creates a new API Event instance with common sensor-specific fields
-// correctly populated.
-func (s *Sensor) NewEvent() *api.TelemetryEvent {
-	monotime := sys.CurrentMonotonicRaw() - s.bootMonotimeNanos
-
-	// The first sequence number is intentionally 1 to disambiguate
-	// from no sequence number being included in the protobuf message.
-	sequenceNumber := atomic.AddUint64(&s.sequenceNumber, 1)
-
-	var b []byte
-	buf := bytes.NewBuffer(b)
-	binary.Write(buf, binary.LittleEndian, s.ID)
-	binary.Write(buf, binary.LittleEndian, sequenceNumber)
-	binary.Write(buf, binary.LittleEndian, monotime)
-
-	h := sha256.Sum256(buf.Bytes())
-	eventID := hex.EncodeToString(h[:])
-
-	atomic.AddUint64(&s.Metrics.Events, 1)
-
-	return &api.TelemetryEvent{
-		Id:                   eventID,
-		SensorId:             s.ID,
-		SensorMonotimeNanos:  monotime,
-		SensorSequenceNumber: sequenceNumber,
-	}
-}
-
-// NewEventFromContainer creates a new API Event instance using a specific
-// container ID.
-func (s *Sensor) NewEventFromContainer(containerID string) *api.TelemetryEvent {
-	e := s.NewEvent()
-	e.ContainerId = containerID
-	return e
-}
-
-// NewEventFromSample creates a new API Event instance using perf_event sample
-// information. If the sample comes from the calling process, no event will be
-// created, and the return will be nil.
-func (s *Sensor) NewEventFromSample(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) *api.TelemetryEvent {
-	var (
-		ok           bool
-		leader, task *Task
-	)
-
-	// Avoid the lookup if we've been given the information.
-	// This happens most commonly with process events.
-	if task, ok = data["__task__"].(*Task); ok {
-		leader = task.Leader()
-	} else if pid, _ := data["common_pid"].(int32); pid != 0 {
-		// When both the sensor and the process generating the sample
-		// are in containers, the sample.Pid and sample.Tid fields will
-		// be zero. Use "common_pid" from the trace event data instead.
-		task, leader = s.ProcessCache.LookupTaskAndLeader(int(pid))
-	}
-	if leader != nil && leader.IsSensor() {
-		return nil
-	}
-
-	e := s.NewEvent()
-	e.SensorMonotimeNanos = int64(sample.Time) - s.bootMonotimeNanos
-	e.Cpu = int32(sample.CPU)
-
-	if task != nil {
-		e.ProcessPid = int32(task.PID)
-		e.ProcessId = task.ProcessID
-		e.ProcessTgid = int32(task.TGID)
-
-		if c := task.Creds; c != nil {
-			e.Credentials = &api.Credentials{
-				Uid:   c.UID,
-				Gid:   c.GID,
-				Euid:  c.EUID,
-				Egid:  c.EGID,
-				Suid:  c.SUID,
-				Sgid:  c.SGID,
-				Fsuid: c.FSUID,
-				Fsgid: c.FSGID,
-			}
-		}
-
-		// if task != nil, leader is also guaranteed != nil
-		if i := s.ProcessCache.LookupTaskContainerInfo(leader); i != nil {
-			e.ContainerId = i.ID
-			e.ContainerName = i.Name
-			e.ImageId = i.ImageID
-			e.ImageName = i.ImageName
-		}
-	}
-
-	return e
 }
 
 func (s *Sensor) buildMonitorGroups() ([]string, []int, error) {
@@ -456,7 +422,7 @@ func (s *Sensor) buildMonitorGroups() ([]string, []int, error) {
 	)
 
 	cgroups := make(map[string]bool)
-	for _, cgroup := range config.Sensor.CgroupName {
+	for _, cgroup := range s.cgroupNames {
 		if len(cgroup) == 0 || cgroup == "/" {
 			system = true
 			continue
@@ -481,6 +447,8 @@ func (s *Sensor) createEventMonitor() error {
 	eventMonitorOptions := []perf.EventMonitorOption{}
 	eventMonitorOptions = append(eventMonitorOptions,
 		perf.WithProcFileSystem(s.ProcFS))
+	eventMonitorOptions = append(eventMonitorOptions,
+		perf.WithEventSourceController(s.EventSourceController))
 
 	if len(s.tracingDir) > 0 {
 		eventMonitorOptions = append(eventMonitorOptions,
@@ -514,7 +482,7 @@ func (s *Sensor) createEventMonitor() error {
 			perf.WithCgroups(cgroups))
 	}
 
-	s.Monitor, err = perf.NewEventMonitor(eventMonitorOptions...)
+	monitor, err := perf.NewEventMonitor(eventMonitorOptions...)
 	if err != nil {
 		// If a cgroup-specific event monitor could not be created,
 		// fall back to a system-wide event monitor.
@@ -525,17 +493,17 @@ func (s *Sensor) createEventMonitor() error {
 				strings.Join(cgroups, ","), err)
 
 			glog.V(1).Info("Creating new system-wide event monitor")
-			s.Monitor, err = perf.NewEventMonitor(optionsWithoutCgroups...)
+			monitor, err = perf.NewEventMonitor(optionsWithoutCgroups...)
 		}
 		if err != nil {
 			glog.V(1).Infof("Couldn't create event monitor: %s", err)
 			return err
 		}
 	}
+	s.monitor.Store(monitor)
 
 	go func() {
-		err := s.Monitor.Run(s.dispatchSamples)
-		if err != nil {
+		if err := monitor.Run(s.dispatchSamples); err != nil {
 			glog.Fatal(err)
 		}
 		glog.V(2).Info("EventMonitor.Run() returned; exiting goroutine")
@@ -549,12 +517,39 @@ func (s *Sensor) createEventMonitor() error {
 func (s *Sensor) IsKernelSymbolAvailable(symbol string) bool {
 	// If the kallsyms mapping is nil, the table could not be
 	// loaded for some reason; assume anything is available
-	if s.kallsyms == nil {
-		return true
+	ok := true
+	if s.kallsyms != nil {
+		_, ok = s.kallsyms[symbol]
 	}
-
-	_, ok := s.kallsyms[symbol]
 	return ok
+}
+
+// ActualKernelSymbol returns the actual kernel symbol to use. For some symbols,
+// the linker does some rewriting and system calls have different prefixes in
+// Linux 4.17+ kernels.
+func (s *Sensor) ActualKernelSymbol(symbol string) (string, error) {
+	if s.kallsyms != nil {
+		if actual, ok := s.kallsyms[symbol]; ok {
+			if actual != symbol {
+				glog.V(2).Infof("Using %q for kprobe symbol %q",
+					actual, symbol)
+				return actual, nil
+			}
+		} else if strings.HasPrefix(symbol, "sys_") {
+			// Linux 4.17 changes how syscall handlers are done. It adds a `__x64_`
+			// prefix and also changes how arguments are handled in the syscall handler.
+			// Automatically try to prepend `__x64_` if we're registering a kprobe
+			// on a syscall handler, and if it succeeds, rewrite the kprobe fetch args.
+			if actual, ok := s.kallsyms["__x64_"+symbol]; ok {
+				glog.V(2).Infof("Using %q for kprobe symbol %q",
+					actual, symbol)
+				return actual, nil
+			}
+		} else {
+			return "", fmt.Errorf("Kernel symbol not found: %s", symbol)
+		}
+	}
+	return symbol, nil
 }
 
 // Map for rewriting kprobe fetch args in kernel 4.17+
@@ -575,6 +570,18 @@ var fetchArgsReplacements = [][2]string{
 	{"%ax", "+0x50(%di)"},
 }
 
+func rewriteSyscallFetchargs(fetchargs string) string {
+	// rewrite `output` (the kprobe fetch args) to account for
+	// the only argument to the syscall handler being `pt_regs *regs`
+	for _, rewritePair := range fetchArgsReplacements {
+		srcReg := rewritePair[0]
+		dstExpr := rewritePair[1]
+		fetchargs = strings.Replace(fetchargs, srcReg, dstExpr, -1)
+	}
+	glog.V(2).Infof("Rewrote kprobe fetch args to %q", fetchargs)
+	return fetchargs
+}
+
 // RegisterKprobe registers a kprobe with the sensor's EventMonitor instance,
 // but before doing so, ensures that the kernel symbol is available and potentially
 // transforms it to account for new kernel changes.
@@ -585,118 +592,31 @@ func (s *Sensor) RegisterKprobe(
 	fn perf.TraceEventDecoderFn,
 	options ...perf.RegisterEventOption,
 ) (uint64, error) {
-	if s.kallsyms != nil {
-		if actual, ok := s.kallsyms[address]; ok {
-			if actual != address {
-				glog.V(2).Infof("Using %q for kprobe symbol %q", actual, address)
-				address = actual
-			}
-		} else {
-			// Linux 4.17 changes how syscall handlers are done. It adds a `__x64_`
-			// prefix and also changes how arguments are handled in the syscall handler.
-			// Automatically try to prepend `__x64_` if we're registering a kprobe
-			// on a syscall handler, and if it succeeds, rewrite the kprobe fetch args.
-			if strings.HasPrefix(address, "sys_") {
-				actual, ok := s.kallsyms["__x64_"+address]
-				if ok {
-					glog.V(2).Infof("Using %q for kprobe symbol %q", actual, address)
-					address = actual
-
-					// rewrite `output` (the kprobe fetch args) to account for
-					// the only argument to the syscall handler being `pt_regs *regs`
-					for _, rewritePair := range fetchArgsReplacements {
-						srcReg := rewritePair[0]
-						dstExpr := rewritePair[1]
-						output = strings.Replace(output, srcReg, dstExpr, -1)
-					}
-					glog.V(2).Infof("Rewrote kprobe fetch args to %q", output)
-				} else {
-					return 0, fmt.Errorf("Kernel symbol not found: %s", address)
-				}
-			} else {
-				return 0, fmt.Errorf("Kernel symbol not found: %s", address)
-			}
-		}
+	address, err := s.ActualKernelSymbol(address)
+	if err != nil {
+		return 0, err
 	}
-	return s.Monitor.RegisterKprobe(address, onReturn, output, fn, options...)
+	if strings.HasPrefix(address, "__x64_sys_") {
+		output = rewriteSyscallFetchargs(output)
+	}
+	return s.Monitor().RegisterKprobe(address, onReturn, output, fn, options...)
 }
 
-// NewSubscription creates a new telemetry subscription from the given
-// api.Subscription descriptor. Canceling the specified context will cancel
-// the subscription. For each event matching the subscription, the specified
-// dispatch functional will be called.
-func (s *Sensor) NewSubscription(
-	ctx context.Context,
-	sub *api.Subscription,
-	dispatchFn eventSinkDispatchFn,
-) ([]*google_rpc.Status, error) {
-	if sub.EventFilter == nil {
-		glog.V(1).Infof("Invalid subscription: %+v", sub)
-		return nil, errors.New("Invalid subscription (no EventFilter)")
+// NewSubscription creates a new telemetry subscription
+func (s *Sensor) NewSubscription() *Subscription {
+	subscriptionID := atomic.AddUint64(&s.Metrics.Subscriptions, 1)
+
+	// Use an empty dispatch function until Subscription.Run is called with
+	// the real dispatch function to use. This is to avoid an extra branch
+	// during dispatch to check for a nil dispatchFn. Since under normal
+	// operation this case is impossible, it's a waste to add the check
+	// when it's so easy to handle otherwise during the subscription
+	// window.
+	return &Subscription{
+		sensor:         s,
+		subscriptionID: subscriptionID,
+		dispatchFn:     func(e TelemetryEvent) {},
 	}
-
-	groupID, err := s.Monitor.RegisterEventGroup("")
-	if err != nil {
-		return nil, err
-	}
-	subscr := newSubscription(s, groupID, dispatchFn)
-	glog.V(1).Infof("Subscription %d: %+v", groupID, sub)
-
-	if sub.ContainerFilter != nil {
-		subscr.containerFilter, err = newContainerFilter(sub.ContainerFilter)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	registerChargenEvents(s, subscr, sub.EventFilter.ChargenEvents)
-	registerContainerEvents(s, subscr, sub.EventFilter.ContainerEvents)
-	registerFileEvents(s, subscr, sub.EventFilter.FileEvents)
-	registerKernelEvents(s, subscr, sub.EventFilter.KernelEvents)
-	registerNetworkEvents(s, subscr, sub.EventFilter.NetworkEvents)
-	registerPerformanceEvents(s, subscr, sub.EventFilter.PerformanceEvents)
-	registerProcessEvents(s, subscr, sub.EventFilter.ProcessEvents)
-	registerSyscallEvents(s, subscr, sub.EventFilter.SyscallEvents)
-	registerTimerEvents(s, subscr, sub.EventFilter.TickerEvents)
-
-	status := subscr.status
-	subscr.status = nil
-	if len(status) > 0 {
-		for _, s := range status {
-			glog.V(1).Infof("Subscription %d: [%s] %s",
-				groupID, code.Code_name[s.Code], s.Message)
-		}
-	} else {
-		status = []*google_rpc.Status{{Code: int32(code.Code_OK)}}
-	}
-
-	if len(subscr.eventSinks) == 0 {
-		return status, errors.New("Invalid subscription (no filters specified)")
-	}
-
-	s.eventMap.subscribe(subscr)
-	glog.V(2).Infof("Subscription %d registered", subscr.eventGroupID)
-
-	go func() {
-		<-ctx.Done()
-		glog.V(2).Infof("Subscription %d control channel closed",
-			subscr.eventGroupID)
-
-		for _, id := range subscr.counterGroupIDs {
-			s.Monitor.UnregisterEventGroup(id)
-		}
-
-		s.Monitor.UnregisterEventGroup(subscr.eventGroupID)
-		s.eventMap.unsubscribe(subscr, nil)
-	}()
-
-	s.Monitor.EnableGroup(groupID)
-	for _, id := range subscr.counterGroupIDs {
-		s.Monitor.EnableGroup(id)
-	}
-
-	atomic.AddInt32(&s.Metrics.Subscriptions, 1)
-	return status, nil
 }
 
 func (s *Sensor) dispatchSamples(samples []perf.EventMonitorSample) {
@@ -747,7 +667,7 @@ func (s *Sensor) dispatchQueuedSamples(samples []perf.EventMonitorSample) {
 			continue
 		}
 
-		event, ok := esm.DecodedSample.(*api.TelemetryEvent)
+		event, ok := esm.DecodedSample.(TelemetryEvent)
 		if !ok || event == nil {
 			continue
 		}
@@ -770,22 +690,12 @@ func (s *Sensor) dispatchQueuedSamples(samples []perf.EventMonitorSample) {
 					continue
 				}
 			}
-			s := es.subscription
-			if s.containerFilter != nil &&
-				!s.containerFilter.match(event) {
+			subscr := es.subscription
+			containerInfo := event.CommonTelemetryEventData().Container
+			if !subscr.containerFilter.Match(containerInfo) {
 				continue
 			}
-			if cef, ok := event.Event.(*api.TelemetryEvent_Container); ok {
-				if es.containerView != api.ContainerEventView_FULL {
-					if len(eventSinks) > 1 {
-						event = copyTelemetryEvent(event)
-						cef = event.Event.(*api.TelemetryEvent_Container)
-					}
-					cef.Container.DockerConfigJson = ""
-					cef.Container.OciConfigJson = ""
-				}
-			}
-			s.dispatchFn(event)
+			subscr.dispatchFn(event)
 		}
 	}
 }
@@ -809,34 +719,4 @@ func (s *Sensor) sampleDispatchLoop() {
 
 	glog.V(2).Info("Sample dispatch loop stopped")
 	s.dispatchWaitGroup.Done()
-}
-
-func copyTelemetryEvent(oldEvent *api.TelemetryEvent) *api.TelemetryEvent {
-	newEvent := *oldEvent
-	switch event := newEvent.Event.(type) {
-	case *api.TelemetryEvent_Chargen:
-		newChargen := *event.Chargen
-		newEvent.Event.(*api.TelemetryEvent_Chargen).Chargen = &newChargen
-	case *api.TelemetryEvent_Container:
-		newContainer := *event.Container
-		newEvent.Event.(*api.TelemetryEvent_Container).Container = &newContainer
-	case *api.TelemetryEvent_File:
-		newFile := *event.File
-		newEvent.Event.(*api.TelemetryEvent_File).File = &newFile
-	case *api.TelemetryEvent_KernelCall:
-		newKernelCall := *event.KernelCall
-		newEvent.Event.(*api.TelemetryEvent_KernelCall).KernelCall = &newKernelCall
-	case *api.TelemetryEvent_Network:
-		newNetwork := *event.Network
-		newEvent.Event.(*api.TelemetryEvent_Network).Network = &newNetwork
-	case *api.TelemetryEvent_Process:
-		newProcess := *event.Process
-		newEvent.Event.(*api.TelemetryEvent_Process).Process = &newProcess
-	case *api.TelemetryEvent_Syscall:
-		newSyscall := *event.Syscall
-		newEvent.Event.(*api.TelemetryEvent_Syscall).Syscall = &newSyscall
-	default:
-		glog.Fatal("Unable to copy event: %+v", oldEvent)
-	}
-	return &newEvent
 }

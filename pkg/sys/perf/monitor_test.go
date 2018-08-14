@@ -122,12 +122,14 @@ func TestRegisterEventOptions(t *testing.T) {
 	expOptions.eventAttr = &EventAttr{}
 	expOptions.filter = "*** filter string ***"
 	expOptions.groupID = 88888
+	expOptions.name = "nnAAmmEE"
 
 	options := []RegisterEventOption{
 		WithEventDisabled(),
 		WithEventAttr(expOptions.eventAttr),
 		WithFilter(expOptions.filter),
 		WithEventGroup(expOptions.groupID),
+		WithTracingEventName(expOptions.name),
 	}
 
 	gotOptions := registerEventOptions{}
@@ -328,11 +330,11 @@ func TestEventMonitorGroup(t *testing.T) {
 			events:       newSafeRegisteredEventMap(),
 			eventAttrMap: newSafeEventAttrMap(),
 			eventIDMap:   newSafeUInt64Map(),
-			isRunning:    x == 1,
 		}
+		monitor.isRunning.Store(x == 1)
 
 		var name string
-		if monitor.isRunning {
+		if monitor.isRunning.Load().(bool) {
 			name = "unit test (running)"
 		} else {
 			name = "unit test"
@@ -535,7 +537,7 @@ func TestEventGroupRegistration(t *testing.T) {
 	equals(t, 1, len(monitor.groups))
 
 	defer func() {
-		monitor.isRunning = false
+		monitor.isRunning.Store(false)
 		monitor.Close()
 	}()
 
@@ -549,7 +551,7 @@ func TestEventGroupRegistration(t *testing.T) {
 	assert(t, err != nil, "Unexpected nil return for UnregisterEventGroup(867)")
 
 	for x := 0; x < 2; x++ {
-		monitor.isRunning = (x == 1)
+		monitor.isRunning.Store(x == 1)
 
 		id, err := monitor.RegisterEventGroup("")
 		ok(t, err)
@@ -708,8 +710,9 @@ print fmt: "pid=%d comm=%s clone_flags=%lx oom_score_adj=%hd", REC->pid, REC->co
 	err = ioutil.WriteFile(formatFile, []byte(formatContent), 0666)
 	ok(t, err)
 
-	for x := 1; x <= 2; x++ {
-		probeName := fmt.Sprintf("capsule8/sensor_%d_%d", unix.Getpid(), x)
+	names := []string{"1", "2", "foo"}
+	for _, name := range names {
+		probeName := fmt.Sprintf("capsule8/sensor_%d_%s", unix.Getpid(), name)
 		eventDir = filepath.Join(tracingDir, "events", probeName)
 		err = os.MkdirAll(eventDir, 0777)
 		ok(t, err)
@@ -763,8 +766,35 @@ print fmt: "pid=%d comm=%s clone_flags=%lx oom_score_adj=%hd", REC->pid, REC->co
 	ok(t, err)
 	equals(t, 0, len(monitor.events.getMap()))
 
+	eventid, err = monitor.RegisterKprobe("address", false, "output", nil,
+		WithTracingEventName("foo"))
+	ok(t, err)
+	equals(t, 1, len(monitor.events.getMap()))
+	e, found = monitor.events.lookup(eventid)
+	equals(t, true, found)
+	equals(t, eventid, e.id)
+	equals(t, EventTypeKprobe, e.eventType)
+
+	err = monitor.UnregisterEvent(eventid)
+	ok(t, err)
+	equals(t, 0, len(monitor.events.getMap()))
+
 	eventid, err = monitor.RegisterUprobe("testdata/uprobe_test",
 		"some_function", false, "string=+0(%di):string", nil)
+	ok(t, err)
+	equals(t, 1, len(monitor.events.getMap()))
+	e, found = monitor.events.lookup(eventid)
+	equals(t, true, found)
+	equals(t, eventid, e.id)
+	equals(t, EventTypeUprobe, e.eventType)
+
+	err = monitor.UnregisterEvent(eventid)
+	ok(t, err)
+	equals(t, 0, len(monitor.events.getMap()))
+
+	eventid, err = monitor.RegisterUprobe("testdata/uprobe_test",
+		"some_function", false, "string=+0(%di):string", nil,
+		WithTracingEventName("foo"))
 	ok(t, err)
 	equals(t, 1, len(monitor.events.getMap()))
 	e, found = monitor.events.lookup(eventid)
@@ -791,8 +821,7 @@ func TestRegisterExternalEvent(t *testing.T) {
 	ok(t, err)
 	defer monitor.Close()
 
-	eventid, err := monitor.RegisterExternalEvent("dummy test", nil)
-	ok(t, err)
+	eventid := monitor.RegisterExternalEvent("dummy test", nil)
 	equals(t, 1, len(monitor.events.getMap()))
 	e, ok := monitor.events.lookup(eventid)
 	equals(t, true, ok)
@@ -936,19 +965,20 @@ func TestEnqueueExternalSample(t *testing.T) {
 	err = monitor.UnregisterEvent(eventid)
 	ok(t, err)
 
-	eventid, err = monitor.RegisterExternalEvent("external event",
+	eventid = monitor.RegisterExternalEvent("external event",
 		func(sample *SampleRecord, data TraceEventSampleData) (interface{}, error) {
 			return sample, nil
 		})
-	ok(t, err)
 
 	err = monitor.EnqueueExternalSample(eventid, SampleID{}, nil)
 	assert(t, err != nil, "expected non-nil for bad sample time")
 
-	received := false
+	received := 0
 	go monitor.Run(func(samples []EventMonitorSample) {
-		received = true
+		received++
 	})
+
+	time.Sleep(50 * time.Millisecond)
 
 	sample := SampleID{Time: uint64(sys.CurrentMonotonicRaw())}
 	err = monitor.EnqueueExternalSample(eventid, sample, nil)
@@ -961,7 +991,7 @@ func TestEnqueueExternalSample(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	monitor.Stop(true)
-	equals(t, true, received)
+	equals(t, 1, received)
 }
 
 func TestEnqueueSamples(t *testing.T) {
