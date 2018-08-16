@@ -32,11 +32,7 @@ func newUInt64Map() uint64Map {
 
 type safeUInt64Map struct {
 	sync.Mutex              // used only by writers
-	active     atomic.Value // map[uint64]uint64
-}
-
-func newSafeUInt64Map() *safeUInt64Map {
-	return &safeUInt64Map{}
+	active     atomic.Value // uint64Map
 }
 
 func (m *safeUInt64Map) getMap() uint64Map {
@@ -119,11 +115,7 @@ func newEventAttrMap() eventAttrMap {
 
 type safeEventAttrMap struct {
 	sync.Mutex              // used only by writers
-	active     atomic.Value // map[uint64]*EventAttr
-}
-
-func newSafeEventAttrMap() *safeEventAttrMap {
-	return &safeEventAttrMap{}
+	active     atomic.Value // eventAttrMap
 }
 
 func (m *safeEventAttrMap) getMap() eventAttrMap {
@@ -206,11 +198,7 @@ func newRegisteredEventMap() registeredEventMap {
 
 type safeRegisteredEventMap struct {
 	sync.Mutex              // used only by writers
-	active     atomic.Value // map[uint64]registeredEvent
-}
-
-func newSafeRegisteredEventMap() *safeRegisteredEventMap {
-	return &safeRegisteredEventMap{}
+	active     atomic.Value // registeredEventMap
 }
 
 func (m *safeRegisteredEventMap) getMap() registeredEventMap {
@@ -295,11 +283,7 @@ func newPerfGroupLeaderMap() perfGroupLeaderMap {
 
 type safePerfGroupLeaderMap struct {
 	sync.Mutex              // used only by writers
-	active     atomic.Value // map[int]*perfGroupLeader
-}
-
-func newSafePerfGroupLeaderMap() *safePerfGroupLeaderMap {
-	return &safePerfGroupLeaderMap{}
+	active     atomic.Value // perfGroupLeaderMap
 }
 
 func (m *safePerfGroupLeaderMap) getMap() perfGroupLeaderMap {
@@ -369,5 +353,82 @@ func (m *safePerfGroupLeaderMap) update(leaders []*perfGroupLeader) {
 	for _, pgl := range leaders {
 		nm[pgl.source.SourceID()] = pgl
 	}
+	m.active.Store(nm)
+}
+
+//
+// safeTraceEventFormatMap
+// map[uint16]TraceEventFormat
+//
+
+type traceEventFormatMap map[uint16]TraceEventFormat
+
+func newTraceEventFormatMap() traceEventFormatMap {
+	return make(traceEventFormatMap)
+}
+
+type safeTraceEventFormatMap struct {
+	sync.Mutex              // used only by writers
+	active     atomic.Value // traceEventFormatMap
+}
+
+func (m *safeTraceEventFormatMap) getMap() traceEventFormatMap {
+	value := m.active.Load()
+	if value == nil {
+		return nil
+	}
+	return value.(traceEventFormatMap)
+}
+
+func (m *safeTraceEventFormatMap) lookup(id uint16) (format TraceEventFormat, found bool) {
+	if om := m.getMap(); om != nil {
+		format, found = om[id]
+	}
+	return
+}
+
+func (m *safeTraceEventFormatMap) removeInPlace(id uint16) {
+	if om := m.getMap(); om != nil {
+		delete(om, id)
+	}
+}
+
+func (m *safeTraceEventFormatMap) remove(id uint16) {
+	m.Lock()
+	defer m.Unlock()
+
+	nm := newTraceEventFormatMap()
+	if om := m.getMap(); om != nil {
+		for k, v := range om {
+			if k != id {
+				nm[k] = v
+			}
+		}
+	}
+
+	m.active.Store(nm)
+}
+
+func (m *safeTraceEventFormatMap) insertInPlace(id uint16, format TraceEventFormat) {
+	nm := m.getMap()
+	if nm == nil {
+		nm = newTraceEventFormatMap()
+		m.active.Store(nm)
+	}
+	nm[id] = format
+}
+
+func (m *safeTraceEventFormatMap) insert(id uint16, format TraceEventFormat) {
+	m.Lock()
+	defer m.Unlock()
+
+	nm := newTraceEventFormatMap()
+	if om := m.getMap(); om != nil {
+		for k, v := range om {
+			nm[k] = v
+		}
+	}
+	nm[id] = format
+
 	m.active.Store(nm)
 }

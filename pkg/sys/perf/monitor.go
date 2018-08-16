@@ -18,6 +18,7 @@ import (
 	"bufio"
 	"bytes"
 	"debug/elf"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -403,17 +404,30 @@ func (d counterEventSampleDecoder) decodeSample(
 	}
 }
 
+// TraceEventDecoderFn is the signature of a function to call to decode a
+// sample. The first argument is the sample to be decoded, and the second
+// is the parsed sample data.
+type TraceEventDecoderFn func(*SampleRecord, TraceEventSampleData) (interface{}, error)
+
 type traceEventSampleDecoder struct {
+	decoderFn TraceEventDecoderFn
 }
 
 func (d traceEventSampleDecoder) decodeSample(
 	esm *EventMonitorSample,
 	monitor *EventMonitor,
 ) {
-	var s interface{}
-	esm.DecodedData, s, esm.Err = monitor.decoders.DecodeSample(
-		esm.RawSample.Record.(*SampleRecord))
-	esm.DecodedSample = unboxNil(s)
+	sample := esm.RawSample.Record.(*SampleRecord)
+	eventType := binary.LittleEndian.Uint16(sample.RawData)
+	format, found := monitor.traceFormats.lookup(eventType)
+	if found {
+		esm.DecodedData, esm.Err = format.DecodeRawData(sample.RawData)
+		if esm.Err == nil {
+			var s interface{}
+			s, esm.Err = d.decoderFn(sample, esm.DecodedData)
+			esm.DecodedSample = unboxNil(s)
+		}
+	}
 }
 
 type registeredEvent struct {
@@ -425,6 +439,7 @@ type registeredEvent struct {
 	eventType EventType
 	group     *eventMonitorGroup
 	leader    bool
+	formatID  uint16
 }
 
 const (
@@ -547,11 +562,11 @@ type EventMonitor struct {
 	// taken. The thread-safe mutation of .decoders is handled elsewhere.
 	// The other safe maps will lock if the monitor goroutine is running;
 	// otherwise, .lock protects in-place writes.
-	groupLeaders *safePerfGroupLeaderMap // fd : group leader data
-	eventAttrMap *safeEventAttrMap       // stream id : event attr
-	eventIDMap   *safeUInt64Map          // stream id : event id
-	decoders     *traceEventDecoderMap
-	events       *safeRegisteredEventMap // event id : event
+	groupLeaders safePerfGroupLeaderMap  // fd : group leader data
+	eventAttrMap safeEventAttrMap        // stream id : event attr
+	eventIDMap   safeUInt64Map           // stream id : event id
+	traceFormats safeTraceEventFormatMap // trace id : trace format
+	events       safeRegisteredEventMap  // event id : event
 
 	// Mutable only by the monitor goroutine while running. No protection
 	// required.
@@ -730,6 +745,7 @@ func (monitor *EventMonitor) newRegisteredEvent(
 	attr EventAttr,
 	group *eventMonitorGroup,
 	leader bool,
+	formatID uint16,
 ) uint64 {
 	eventid := monitor.nextEventID
 	monitor.nextEventID++
@@ -761,6 +777,7 @@ func (monitor *EventMonitor) newRegisteredEvent(
 		eventType: eventType,
 		group:     group,
 		leader:    leader,
+		formatID:  formatID,
 	}
 	// External events don't have groups, so nil check here
 	if group != nil {
@@ -778,6 +795,7 @@ func (monitor *EventMonitor) newRegisteredPerfEvent(
 	opts registerEventOptions,
 	eventType EventType,
 	decoder eventSampleDecoder,
+	formatID uint16,
 ) (uint64, error) {
 	// This should be called with monitor.lock held.
 
@@ -812,7 +830,7 @@ func (monitor *EventMonitor) newRegisteredPerfEvent(
 	}
 
 	eventid := monitor.newRegisteredEvent(name, newsources, fields,
-		eventType, decoder, attr, group, false)
+		eventType, decoder, attr, group, false, formatID)
 	return eventid, nil
 }
 
@@ -823,22 +841,24 @@ func (monitor *EventMonitor) newRegisteredTraceEvent(
 	eventType EventType,
 ) (uint64, error) {
 	// This should be called with monitor.lock held.
-
-	id, err := monitor.decoders.AddDecoder(name, fn)
+	id, format, err := getTraceEventFormat(monitor.tracingDir, name)
 	if err != nil {
 		return 0, err
 	}
+	monitor.traceFormats.insert(id, format)
 
-	decoder := monitor.decoders.getDecoder(id)
-	fields := make(map[string]int32, len(decoder.fields))
-	for k, v := range decoder.fields {
-		fields[k] = v.dataType
+	fields := make(map[string]int32, len(format))
+	for _, v := range format {
+		fields[v.FieldName] = v.dataType
 	}
 
 	eventid, err := monitor.newRegisteredPerfEvent(name, uint64(id),
-		fields, opts, eventType, traceEventSampleDecoder{})
+		fields, opts, eventType, traceEventSampleDecoder{decoderFn: fn},
+		id)
 	if err != nil {
-		monitor.decoders.RemoveDecoder(name)
+		if eventType != EventTypeTracepoint {
+			monitor.traceFormats.remove(id)
+		}
 		return 0, err
 	}
 
@@ -866,7 +886,8 @@ func (monitor *EventMonitor) RegisterExternalEvent(
 		decoder,
 		EventAttr{},
 		nil,
-		false)
+		false,
+		0)
 
 	return eventid
 }
@@ -951,7 +972,7 @@ func (monitor *EventMonitor) RegisterCounterEventGroup(
 		newsources[i] = leader.source
 	}
 	eventID := monitor.newRegisteredEvent(name, newsources, nil,
-		counters[0].EventType, decoder, leaderAttr, group, true)
+		counters[0].EventType, decoder, leaderAttr, group, true, 0)
 	if err != nil {
 		monitor.unregisterEventGroup(group)
 		return 0, 0, err
@@ -960,7 +981,7 @@ func (monitor *EventMonitor) RegisterCounterEventGroup(
 	for i := 1; i < len(counters); i++ {
 		_, err = monitor.newRegisteredPerfEvent(
 			name, counters[i].Config, nil, opts,
-			counters[i].EventType, decoder)
+			counters[i].EventType, decoder, 0)
 		if err != nil {
 			monitor.unregisterEventGroup(group)
 			return 0, 0, err
@@ -1174,14 +1195,12 @@ func (monitor *EventMonitor) removeRegisteredEvent(event *registeredEvent) {
 	}
 
 	switch event.eventType {
-	case EventTypeTracepoint:
-		monitor.decoders.RemoveDecoder(event.name)
 	case EventTypeKprobe:
 		monitor.removeKprobe(event.name)
-		monitor.decoders.RemoveDecoder(event.name)
+		monitor.traceFormats.remove(event.formatID)
 	case EventTypeUprobe:
 		monitor.removeUprobe(event.name)
-		monitor.decoders.RemoveDecoder(event.name)
+		monitor.traceFormats.remove(event.formatID)
 	}
 }
 
@@ -1256,18 +1275,15 @@ func (monitor *EventMonitor) Close() error {
 	if len(monitor.eventAttrMap.getMap()) != 0 {
 		panic("internal error: stray event attrs left after monitor Close")
 	}
-	monitor.eventAttrMap = nil
 
 	if len(monitor.eventIDMap.getMap()) != 0 {
 		panic("internal error: stray event IDs left after monitor Close")
 	}
-	monitor.eventIDMap = nil
 
 	groups := monitor.groupLeaders.getMap()
 	for _, pgl := range groups {
 		pgl.cleanup()
 	}
-	monitor.groupLeaders = nil
 
 	if monitor.cgroups != nil {
 		for _, fd := range monitor.cgroups {
@@ -2219,12 +2235,7 @@ func NewEventMonitor(options ...EventMonitorOption) (monitor *EventMonitor, err 
 		opts.eventSourceController = controller
 	}
 	monitor = &EventMonitor{
-		groupLeaders:          newSafePerfGroupLeaderMap(),
 		eventSourceController: opts.eventSourceController,
-		eventAttrMap:          newSafeEventAttrMap(),
-		eventIDMap:            newSafeUInt64Map(),
-		decoders:              newTraceEventDecoderMap(opts.tracingDir),
-		events:                newSafeRegisteredEventMap(),
 		nextEventID:           1,
 		groups:                make(map[int32]*eventMonitorGroup),
 		defaultAttr:           eventAttr,

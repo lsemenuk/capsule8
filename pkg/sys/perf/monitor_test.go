@@ -254,9 +254,7 @@ func TestCounterEventSampleDecoder(t *testing.T) {
 		},
 	}
 
-	monitor := &EventMonitor{
-		eventAttrMap: newSafeEventAttrMap(),
-	}
+	monitor := &EventMonitor{}
 	monitor.eventAttrMap.updateInPlace(attrMap)
 
 	d.decodeSample(&esm, monitor)
@@ -266,8 +264,7 @@ func TestCounterEventSampleDecoder(t *testing.T) {
 
 func TestTraceEventSampleDecoder(t *testing.T) {
 	monitor := &EventMonitor{
-		decoders:   newTraceEventDecoderMap("testdata"),
-		tracingDir: "testdata/events/valid",
+		tracingDir: "testdata",
 	}
 
 	expDecodedSample := "capsule8"
@@ -282,8 +279,9 @@ func TestTraceEventSampleDecoder(t *testing.T) {
 	fn := func(sample *SampleRecord, data TraceEventSampleData) (interface{}, error) {
 		return expDecodedSample, nil
 	}
-	_, err := monitor.decoders.AddDecoder("valid/valid2", fn)
+	id, format, err := getTraceEventFormat(monitor.tracingDir, "valid/valid2")
 	ok(t, err)
+	monitor.traceFormats.insert(id, format)
 
 	rawData := []byte{
 		0x4e, 0x00, // common_type
@@ -301,7 +299,7 @@ func TestTraceEventSampleDecoder(t *testing.T) {
 		},
 	}
 
-	d := traceEventSampleDecoder{}
+	d := traceEventSampleDecoder{decoderFn: fn}
 	d.decodeSample(&esm, monitor)
 	ok(t, esm.Err)
 	equals(t, expDecodedSample, esm.DecodedSample)
@@ -326,10 +324,7 @@ func TestEventMonitorGroup(t *testing.T) {
 
 	for x := 0; x < 2; x++ {
 		monitor := &EventMonitor{
-			nextEventID:  firstEventID,
-			events:       newSafeRegisteredEventMap(),
-			eventAttrMap: newSafeEventAttrMap(),
-			eventIDMap:   newSafeUInt64Map(),
+			nextEventID: firstEventID,
 		}
 		monitor.isRunning.Store(x == 1)
 
@@ -371,7 +366,7 @@ func TestEventMonitorGroup(t *testing.T) {
 		}
 
 		id := monitor.newRegisteredEvent(name, sources, nil,
-			EventTypeSoftware, nil, attr, group, false)
+			EventTypeSoftware, nil, attr, group, false, 88)
 		equals(t, firstEventID, id)
 		equals(t, len(leaders), len(monitor.eventAttrMap.getMap()))
 		equals(t, len(leaders), len(monitor.eventIDMap.getMap()))
@@ -598,13 +593,14 @@ func TestEventManipulation(t *testing.T) {
 		eventid, err = monitor.newRegisteredPerfEvent(
 			EventTypeNames[eventType], uint64(x),
 			fields, registerEventOptions{disabled: true},
-			eventType, nil)
+			eventType, nil, 88)
 		ok(t, err)
 		equals(t, x+1, len(monitor.events.getMap()))
 		e, ok := monitor.events.lookup(eventid)
 		equals(t, true, ok)
 		equals(t, eventid, e.id)
 		equals(t, eventType, e.eventType)
+		equals(t, uint16(88), e.formatID)
 		ids[x] = eventid
 	}
 
@@ -667,7 +663,7 @@ func TestEventManipulation(t *testing.T) {
 		groupID:   937854,
 	}
 	_, err = monitor.newRegisteredPerfEvent("non-existent group",
-		12345, nil, opts, EventTypeTracepoint, nil)
+		12345, nil, opts, EventTypeTracepoint, nil, 88)
 	assert(t, err != nil, "this should error with non-existent group error")
 
 	eventType, ok := monitor.RegisteredEventType(234987)

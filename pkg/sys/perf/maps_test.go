@@ -20,10 +20,7 @@ import (
 )
 
 func TestSafeUInt64Map(t *testing.T) {
-	sm := newSafeUInt64Map()
-	assert(t, sm != nil, "newSafeUInt64Map returned nil")
-	equals(t, 0, len(sm.getMap()))
-
+	sm := safeUInt64Map{}
 	sm.removeInPlace([]uint64{1, 2, 3, 4, 5})
 	equals(t, 0, len(sm.getMap()))
 
@@ -34,7 +31,7 @@ func TestSafeUInt64Map(t *testing.T) {
 	m[1] = 1001
 	m[2] = 1002
 	m[3] = 1003
-	sm = newSafeUInt64Map()
+	sm = safeUInt64Map{}
 	sm.updateInPlace(m)
 	equals(t, 3, len(sm.getMap()))
 	equals(t, m, sm.getMap())
@@ -44,7 +41,7 @@ func TestSafeUInt64Map(t *testing.T) {
 	equals(t, 2, len(sm.getMap()))
 	equals(t, m, sm.getMap())
 
-	sm = newSafeUInt64Map()
+	sm = safeUInt64Map{}
 	wg := sync.WaitGroup{}
 	for i := uint64(0); i < 8; i++ {
 		wg.Add(1)
@@ -70,10 +67,7 @@ func TestSafeUInt64Map(t *testing.T) {
 }
 
 func TestSafeEventAttrMap(t *testing.T) {
-	sm := newSafeEventAttrMap()
-	assert(t, sm != nil, "newSafeEventAttrMap returned nil")
-	equals(t, 0, len(sm.getMap()))
-
+	sm := safeEventAttrMap{}
 	sm.removeInPlace([]uint64{1, 2, 3, 4, 5})
 	equals(t, 0, len(sm.getMap()))
 
@@ -84,7 +78,7 @@ func TestSafeEventAttrMap(t *testing.T) {
 	m[1] = EventAttr{Type: 1001}
 	m[2] = EventAttr{Type: 1002}
 	m[3] = EventAttr{Type: 1003}
-	sm = newSafeEventAttrMap()
+	sm = safeEventAttrMap{}
 	sm.updateInPlace(m)
 	equals(t, 3, len(sm.getMap()))
 	equals(t, m, sm.getMap())
@@ -94,7 +88,7 @@ func TestSafeEventAttrMap(t *testing.T) {
 	equals(t, 2, len(sm.getMap()))
 	equals(t, m, sm.getMap())
 
-	sm = newSafeEventAttrMap()
+	sm = safeEventAttrMap{}
 	wg := sync.WaitGroup{}
 	for i := uint64(0); i < 8; i++ {
 		wg.Add(1)
@@ -120,10 +114,7 @@ func TestSafeEventAttrMap(t *testing.T) {
 }
 
 func TestSafeRegisteredEventMap(t *testing.T) {
-	sm := newSafeRegisteredEventMap()
-	assert(t, sm != nil, "newSafeRegisteredEventMap returned nil")
-	equals(t, 0, len(sm.getMap()))
-
+	sm := safeRegisteredEventMap{}
 	_, f := sm.lookup(8)
 	equals(t, false, f)
 
@@ -137,7 +128,7 @@ func TestSafeRegisteredEventMap(t *testing.T) {
 	m[1] = &registeredEvent{id: 1001}
 	m[2] = &registeredEvent{id: 1002}
 	m[3] = &registeredEvent{id: 1003}
-	sm = newSafeRegisteredEventMap()
+	sm = safeRegisteredEventMap{}
 	for k, v := range m {
 		sm.insertInPlace(k, v)
 	}
@@ -149,7 +140,7 @@ func TestSafeRegisteredEventMap(t *testing.T) {
 	equals(t, 2, len(sm.getMap()))
 	equals(t, m, sm.getMap())
 
-	sm = newSafeRegisteredEventMap()
+	sm = safeRegisteredEventMap{}
 	wg := sync.WaitGroup{}
 	for i := uint64(0); i < 8; i++ {
 		wg.Add(1)
@@ -210,10 +201,7 @@ func (s *dummyPerfGroupLeaderEventSourceLeader) Read(
 }
 
 func TestSafePerfGroupLeaderMap(t *testing.T) {
-	sm := newSafePerfGroupLeaderMap()
-	assert(t, sm != nil, "newSafePerfGroupLeaderMap returned nil")
-	equals(t, 0, len(sm.getMap()))
-
+	sm := safePerfGroupLeaderMap{}
 	_, p := sm.lookup(8)
 	equals(t, false, p)
 
@@ -227,7 +215,7 @@ func TestSafePerfGroupLeaderMap(t *testing.T) {
 	m[1] = &perfGroupLeader{source: &dummyPerfGroupLeaderEventSourceLeader{id: 1}}
 	m[2] = &perfGroupLeader{source: &dummyPerfGroupLeaderEventSourceLeader{id: 2}}
 	m[3] = &perfGroupLeader{source: &dummyPerfGroupLeaderEventSourceLeader{id: 3}}
-	sm = newSafePerfGroupLeaderMap()
+	sm = safePerfGroupLeaderMap{}
 	var leaders []*perfGroupLeader
 	for _, v := range m {
 		leaders = append(leaders, v)
@@ -241,7 +229,7 @@ func TestSafePerfGroupLeaderMap(t *testing.T) {
 	equals(t, 2, len(sm.getMap()))
 	equals(t, m, sm.getMap())
 
-	sm = newSafePerfGroupLeaderMap()
+	sm = safePerfGroupLeaderMap{}
 	wg := sync.WaitGroup{}
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
@@ -256,6 +244,50 @@ func TestSafePerfGroupLeaderMap(t *testing.T) {
 					_, _ = sm.lookup(x)
 				case 2:
 					sm.remove(map[uint64]struct{}{x: struct{}{}})
+				}
+			}
+			wg.Done()
+		}(i)
+	}
+	wg.Wait()
+}
+
+func TestSafeTraceEventFormatMap(t *testing.T) {
+	sm := safeTraceEventFormatMap{}
+	sm.removeInPlace(5)
+	equals(t, 0, len(sm.getMap()))
+
+	sm.remove(5)
+	equals(t, 0, len(sm.getMap()))
+
+	sm = safeTraceEventFormatMap{}
+	m := make(TraceEventFormat, 0)
+	sm.insertInPlace(1001, m)
+	equals(t, 1, len(sm.getMap()))
+	format, found := sm.lookup(1001)
+	equals(t, m, format)
+	equals(t, true, found)
+
+	sm.removeInPlace(1001)
+	equals(t, 0, len(sm.getMap()))
+	format, found = sm.lookup(1001)
+	equals(t, TraceEventFormat(nil), format)
+	equals(t, false, found)
+
+	sm = safeTraceEventFormatMap{}
+	wg := sync.WaitGroup{}
+	for i := uint16(0); i < 8; i++ {
+		wg.Add(1)
+		go func(i uint16) {
+			for x := uint16(0); x < 1000; x++ {
+				switch x % 3 {
+				case 0:
+					sm.insert(x, make(TraceEventFormat, 0))
+				case 1:
+					lm := sm.getMap()
+					_, _ = lm[i]
+				case 2:
+					sm.remove((i + x) % 8)
 				}
 			}
 			wg.Done()
