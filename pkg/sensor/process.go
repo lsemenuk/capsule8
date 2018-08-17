@@ -168,14 +168,12 @@ const (
 
 	execveArgCount = 6
 
-	doExecveAddress    = "do_execve"
-	doExecveArgs       = "filename=+0(+0(%di)):string "
-	doExecveatAddress  = "do_execveat"
-	doExecveatArgs     = "filename=+0(+0(%si)):string "
-	sysExecveAddress   = "sys_execve"
-	sysExecveArgs      = "filename=+0(%di):string "
-	sysExecveatAddress = "sys_execveat"
-	sysExecveatArgs    = "filename=+0(%si):string "
+	doExecveatCommonAddress = "do_execveat_common"
+	doExecveatCommonArgs    = "filename=+0(+0(%si)):string "
+	doExecveCommonAddress   = "do_execve_common"
+	doExecveCommonArgs      = "filename=+0(%di):string "
+	doExecveAddress         = "do_execve"
+	doExecveArgs            = "filename=+0(%di):string "
 
 	doExitAddress = "do_exit"
 	doExitArgs    = "code=%di:s64"
@@ -608,39 +606,46 @@ func NewProcessInfoCache(sensor *Sensor) *ProcessInfoCache {
 		perf.WithTracingEventName("setfspwd"),
 		perf.WithEventEnabled())
 
-	// Attach a probe to capture exec events in the kernel. Different
-	// kernel versions require different probe attachments, so try to do
-	// the best that we can here. We may end up getting duplicate events,
-	// which is ok.
-	_, err = sensor.RegisterKprobe(
-		sysExecveAddress, false,
-		sysExecveArgs+makeExecveFetchArgs("si"),
-		cache.decodeExecve,
-		perf.WithTracingEventName("execve1"),
-		perf.WithEventEnabled())
-	if err != nil {
-		glog.Fatalf("Couldn't register event %s: %s",
-			sysExecveAddress, err)
+	// Attach a probe to capture exec events in the kernel. There are three
+	// possibilities, in descending order of preference:
+	//      do_execveat_common (Linux 3.19+)
+	//      do_execve_common (Linux 3.0-3.18)
+	//	do_execve
+	//
+	var execveProbes = []struct {
+		address          string
+		args             string
+		compatRegister   string
+		nocompatRegister string
+	}{
+		{doExecveatCommonAddress, doExecveatCommonArgs, "cx", "dx"},
+		{doExecveCommonAddress, doExecveCommonArgs, "dx", "di"},
+		{doExecveAddress, doExecveArgs, "si", "si"},
 	}
-	_, _ = sensor.RegisterKprobe(
-		doExecveAddress, false,
-		doExecveArgs+makeExecveFetchArgs("si"),
-		cache.decodeExecve,
-		perf.WithTracingEventName("execve2"),
-		perf.WithEventEnabled())
+	compatMode := sensor.IsKernelSymbolAvailable("compat_sys_execve") ||
+		sensor.IsKernelSymbolAvailable("__ia32_compat_sys_execve")
+	for i, probe := range execveProbes {
+		var execveArgs string
+		if compatMode {
+			execveArgs = makeExecveFetchArgs(probe.compatRegister)
+		} else {
+			execveArgs = makeExecveFetchArgs(probe.nocompatRegister)
+		}
 
-	_, err = sensor.RegisterKprobe(
-		sysExecveatAddress, false,
-		sysExecveatArgs+makeExecveFetchArgs("dx"),
-		cache.decodeExecve,
-		perf.WithTracingEventName("execveat1"),
-		perf.WithEventEnabled())
-	if err == nil {
-		_, _ = sensor.RegisterKprobe(
-			doExecveatAddress, false,
-			makeExecveFetchArgs("dx"), cache.decodeExecve,
-			perf.WithTracingEventName("execveat2"),
+		eventName := fmt.Sprintf("execve%d", i+1)
+		_, err = sensor.RegisterKprobe(probe.address, false,
+			probe.args+execveArgs,
+			cache.decodeExecve,
+			perf.WithTracingEventName(eventName),
 			perf.WithEventEnabled())
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		glog.Fatalf("Could not install exec kprobe (tried %s, %s, %s)",
+			doExecveatCommonAddress, doExecveCommonAddress,
+			doExecveAddress)
 	}
 
 	if err = cache.installCgroupMonitor(); err != nil {
