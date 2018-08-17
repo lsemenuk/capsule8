@@ -264,12 +264,12 @@ if [ ! -d "${TRACEFS_MOUNT}/events/task/task_newtask" ]; then
 fi
 
 if [ -z "$(lookup_kernel_symbol do_execveat_common)" ]; then
-    if [ -z "$(lookup_kernel_symbol sys_execve)" ]; then
-        echo -e "[ ${RED} FAIL ${NC} ] Required kernel symbol sys_execve is not present."
-        exit 1
+    if [ -z "$(lookup_kernel_symbol do_execve_common)" ]; then
+        if [ -z "$(lookup_kernel_symbol do_execve)" ]; then
+            echo -e "[ ${RED} FAIL ${NC} ] Required kernel symbol sys_execve is not present."
+            exit 1
+        fi
     fi
-    # There are other symbols we'll attempt to attach kprobes to, but they're
-    # not required: do_execve, do_execveat, sys_execveat
 fi
 
 if [ -z "$(lookup_kernel_symbol syscall_trace_enter_phase1)" ]; then

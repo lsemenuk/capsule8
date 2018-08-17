@@ -139,7 +139,7 @@ format:
 	field:__data_loc char[] argv5;	offset:40;	size:4;	signed:1;
 
 print fmt: "(%lx) filename=\"%s\" argv0=\"%s\" argv1=\"%s\" argv2=\"%s\" argv3=\"%s\" argv4=\"%s\" argv5=\"%s\"", REC->__probe_ip, __get_str(filename), __get_str(argv0), __get_str(argv1), __get_str(argv2), __get_str(argv3), __get_str(argv4), __get_str(argv5)`,
-	"execveat1": `name: sensor_^^PID^^_execveat1
+	"execve3": `name: sensor_^^PID^^_execve3
 ID: 1623
 format:
 	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
@@ -157,23 +157,6 @@ format:
 	field:__data_loc char[] argv5;	offset:40;	size:4;	signed:1;
 
 print fmt: "(%lx) filename=\"%s\" argv0=\"%s\" argv1=\"%s\" argv2=\"%s\" argv3=\"%s\" argv4=\"%s\" argv5=\"%s\"", REC->__probe_ip, __get_str(filename), __get_str(argv0), __get_str(argv1), __get_str(argv2), __get_str(argv3), __get_str(argv4), __get_str(argv5)`,
-	"execveat2": `name: sensor_^^PID^^_execveat2
-ID: 1624
-format:
-	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
-	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
-	field:unsigned char common_preempt_count;	offset:3;	size:1;signed:0;
-	field:int common_pid;	offset:4;	size:4;	signed:1;
-
-	field:unsigned long __probe_ip;	offset:8;	size:8;	signed:0;
-	field:__data_loc char[] argv0;	offset:16;	size:4;	signed:1;
-	field:__data_loc char[] argv1;	offset:20;	size:4;	signed:1;
-	field:__data_loc char[] argv2;	offset:24;	size:4;	signed:1;
-	field:__data_loc char[] argv3;	offset:28;	size:4;	signed:1;
-	field:__data_loc char[] argv4;	offset:32;	size:4;	signed:1;
-	field:__data_loc char[] argv5;	offset:36;	size:4;	signed:1;
-
-print fmt: "(%lx) argv0=\"%s\" argv1=\"%s\" argv2=\"%s\" argv3=\"%s\" argv4=\"%s\" argv5=\"%s\"", REC->__probe_ip, __get_str(argv0), __get_str(argv1), __get_str(argv2), __get_str(argv3), __get_str(argv4), __get_str(argv5)`,
 	"cgroups1": `name: sensor_^^PID^^_cgroups1
 ID: 1625
 format:
