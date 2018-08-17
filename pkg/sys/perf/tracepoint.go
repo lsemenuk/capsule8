@@ -16,7 +16,9 @@ package perf
 
 import (
 	"bufio"
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -26,6 +28,13 @@ import (
 
 	"github.com/golang/glog"
 )
+
+// TraceEventSampleData is a type alias for map[string]interface{}, which is
+// the representation of sample data parsed from a Linux kernel sample.
+type TraceEventSampleData map[string]interface{}
+
+// TraceEventFormat represents the format of a kernel tracing event.
+type TraceEventFormat []traceEventField
 
 const (
 	_ int32 = iota
@@ -376,11 +385,9 @@ func (field *traceEventField) parseTypeAndName(s string) (bool, error) {
 	return false, nil
 }
 
-func parseTraceEventField(line string) (*traceEventField, error) {
-	var err error
+func parseTraceEventField(line string) (field traceEventField, err error) {
 	var fieldString string
 
-	field := traceEventField{}
 	fields := strings.Split(strings.TrimSpace(line), ";")
 	for i := 0; i < len(fields); i++ {
 		if fields[i] == "" {
@@ -388,7 +395,8 @@ func parseTraceEventField(line string) (*traceEventField, error) {
 		}
 		parts := strings.Split(fields[i], ":")
 		if len(parts) != 2 {
-			return nil, errors.New("malformed format field")
+			err = errors.New("malformed format field")
+			return
 		}
 
 		switch strings.TrimSpace(parts[0]) {
@@ -402,15 +410,12 @@ func parseTraceEventField(line string) (*traceEventField, error) {
 			field.IsSigned, err = strconv.ParseBool(parts[1])
 		}
 		if err != nil {
-			return nil, err
+			return
 		}
 	}
 
 	skip, err := field.parseTypeAndName(fieldString)
-	if err != nil {
-		return nil, err
-	}
-	if skip {
+	if err == nil && skip {
 		// If a field is marked as skip, treat it as an array of bytes
 		field.dataTypeSize = 1
 		field.arraySize = field.Size
@@ -420,10 +425,11 @@ func parseTraceEventField(line string) (*traceEventField, error) {
 			field.dataType = TraceEventFieldTypeUnsignedInt8
 		}
 	}
-	return &field, nil
+
+	return
 }
 
-func getTraceEventFormat(tracingDir, name string) (uint16, map[string]traceEventField, error) {
+func getTraceEventFormat(tracingDir, name string) (uint16, TraceEventFormat, error) {
 	filename := filepath.Join(tracingDir, "events", name, "format")
 	file, err := os.OpenFile(filename, os.O_RDONLY, 0)
 	if err != nil {
@@ -434,11 +440,13 @@ func getTraceEventFormat(tracingDir, name string) (uint16, map[string]traceEvent
 	return readTraceEventFormat(name, file)
 }
 
-func readTraceEventFormat(name string, reader io.Reader) (uint16, map[string]traceEventField, error) {
-	var eventID uint16
+func readTraceEventFormat(name string, reader io.Reader) (uint16, TraceEventFormat, error) {
+	var (
+		eventID  uint16
+		fields   TraceEventFormat
+		inFormat bool
+	)
 
-	inFormat := false
-	fields := make(map[string]traceEventField)
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		rawLine := scanner.Text()
@@ -447,35 +455,111 @@ func readTraceEventFormat(name string, reader io.Reader) (uint16, map[string]tra
 			continue
 		}
 
-		if inFormat {
+		switch {
+		case inFormat:
 			if !unicode.IsSpace(rune(rawLine[0])) {
 				inFormat = false
 				continue
 			}
-			field, err := parseTraceEventField(line)
-			if err != nil {
+			if field, err := parseTraceEventField(line); err == nil {
+				fields = append(fields, field)
+			} else {
 				glog.Infof("Couldn't parse trace event format: %v", err)
 				return 0, nil, err
 			}
-			if field != nil {
-				fields[field.FieldName] = *field
-			}
-		} else if strings.HasPrefix(line, "format:") {
+		case strings.HasPrefix(line, "format:"):
 			inFormat = true
-		} else if strings.HasPrefix(line, "ID:") {
+		case strings.HasPrefix(line, "ID:"):
 			value := strings.TrimSpace(line[3:])
-			parsedValue, err := strconv.Atoi(value)
-			if err != nil {
+			if parsedValue, err := strconv.Atoi(value); err == nil {
+				eventID = uint16(parsedValue)
+			} else {
 				glog.Infof("Couldn't parse trace event ID: %v", err)
 				return 0, nil, err
 			}
-			eventID = uint16(parsedValue)
 		}
 	}
-	err := scanner.Err()
-	if err != nil {
+	if err := scanner.Err(); err != nil {
 		return 0, nil, err
 	}
 
-	return eventID, fields, err
+	return eventID, fields, nil
+}
+
+func decodeDataType(dataType int32, rawData []byte) (interface{}, error) {
+	switch dataType {
+	case TraceEventFieldTypeString:
+		return nil, errors.New("internal error; got unexpected TraceEventFieldTypeString")
+	case TraceEventFieldTypeSignedInt8:
+		return int8(rawData[0]), nil
+	case TraceEventFieldTypeSignedInt16:
+		return int16(binary.LittleEndian.Uint16(rawData)), nil
+	case TraceEventFieldTypeSignedInt32:
+		return int32(binary.LittleEndian.Uint32(rawData)), nil
+	case TraceEventFieldTypeSignedInt64:
+		return int64(binary.LittleEndian.Uint64(rawData)), nil
+	case TraceEventFieldTypeUnsignedInt8:
+		return uint8(rawData[0]), nil
+	case TraceEventFieldTypeUnsignedInt16:
+		return binary.LittleEndian.Uint16(rawData), nil
+	case TraceEventFieldTypeUnsignedInt32:
+		return binary.LittleEndian.Uint32(rawData), nil
+	case TraceEventFieldTypeUnsignedInt64:
+		return binary.LittleEndian.Uint64(rawData), nil
+	}
+	return nil, errors.New("internal error; undefined dataType")
+}
+
+// DecodeRawData decodes a buffer of raw bytes according to the kernel defined
+// format that has been parsed from the tracing filesystem.
+func (f TraceEventFormat) DecodeRawData(rawData []byte) (TraceEventSampleData, error) {
+	data := make(TraceEventSampleData)
+	for _, field := range f {
+		var arraySize, dataLength, dataOffset int
+		var err error
+
+		if field.dataLocSize > 0 {
+			switch field.dataLocSize {
+			case 4:
+				dataOffset = int(binary.LittleEndian.Uint16(rawData[field.Offset:]))
+				dataLength = int(binary.LittleEndian.Uint16(rawData[field.Offset+2:]))
+			case 8:
+				dataOffset = int(binary.LittleEndian.Uint32(rawData[field.Offset:]))
+				dataLength = int(binary.LittleEndian.Uint32(rawData[field.Offset+4:]))
+			default:
+				return nil, fmt.Errorf("__data_loc size is neither 4 nor 8 (got %d)", field.dataLocSize)
+			}
+
+			if field.dataType == TraceEventFieldTypeString {
+				if dataLength > 0 && rawData[dataOffset+dataLength-1] == 0 {
+					dataLength--
+				}
+				data[field.FieldName] = string(rawData[dataOffset : dataOffset+dataLength])
+				continue
+			}
+			arraySize = dataLength / field.dataTypeSize
+		} else if field.arraySize == 0 {
+			data[field.FieldName], err = decodeDataType(field.dataType, rawData[field.Offset:])
+			if err != nil {
+				return nil, err
+			}
+			continue
+		} else {
+			arraySize = field.arraySize
+			dataOffset = field.Offset
+			dataLength = arraySize * field.dataTypeSize
+		}
+
+		var array = make([]interface{}, arraySize)
+		for i := 0; i < arraySize; i++ {
+			array[i], err = decodeDataType(field.dataType, rawData[dataOffset:])
+			if err != nil {
+				return nil, err
+			}
+			dataOffset += field.dataTypeSize
+		}
+		data[field.FieldName] = array
+	}
+
+	return data, nil
 }

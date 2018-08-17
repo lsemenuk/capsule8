@@ -16,6 +16,7 @@ package perf
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 )
 
@@ -148,35 +149,8 @@ func TestGetTraceEventFormat(t *testing.T) {
 		assert(t, err != nil, "unexpected nil error result for %s", name)
 	}
 
-	expectedFields := map[string]traceEventField{
-		"common_flags": traceEventField{
-			FieldName:    "common_flags",
-			TypeName:     "unsigned char",
-			Offset:       2,
-			Size:         1,
-			IsSigned:     false,
-			dataType:     TraceEventFieldTypeUnsignedInt8,
-			dataTypeSize: 1,
-		},
-		"common_pid": traceEventField{
-			FieldName:    "common_pid",
-			TypeName:     "int",
-			Offset:       4,
-			Size:         4,
-			IsSigned:     true,
-			dataType:     TraceEventFieldTypeSignedInt32,
-			dataTypeSize: 4,
-		},
-		"common_preempt_count": traceEventField{
-			FieldName:    "common_preempt_count",
-			TypeName:     "unsigned char",
-			Offset:       3,
-			Size:         1,
-			IsSigned:     false,
-			dataType:     TraceEventFieldTypeUnsignedInt8,
-			dataTypeSize: 1,
-		},
-		"common_type": traceEventField{
+	expectedFormat := TraceEventFormat{
+		traceEventField{
 			FieldName:    "common_type",
 			TypeName:     "unsigned short",
 			Offset:       0,
@@ -185,7 +159,34 @@ func TestGetTraceEventFormat(t *testing.T) {
 			dataType:     TraceEventFieldTypeUnsignedInt16,
 			dataTypeSize: 2,
 		},
-		"name": traceEventField{
+		traceEventField{
+			FieldName:    "common_flags",
+			TypeName:     "unsigned char",
+			Offset:       2,
+			Size:         1,
+			IsSigned:     false,
+			dataType:     TraceEventFieldTypeUnsignedInt8,
+			dataTypeSize: 1,
+		},
+		traceEventField{
+			FieldName:    "common_preempt_count",
+			TypeName:     "unsigned char",
+			Offset:       3,
+			Size:         1,
+			IsSigned:     false,
+			dataType:     TraceEventFieldTypeUnsignedInt8,
+			dataTypeSize: 1,
+		},
+		traceEventField{
+			FieldName:    "common_pid",
+			TypeName:     "int",
+			Offset:       4,
+			Size:         4,
+			IsSigned:     true,
+			dataType:     TraceEventFieldTypeSignedInt32,
+			dataTypeSize: 4,
+		},
+		traceEventField{
 			FieldName:    "name",
 			TypeName:     "char",
 			Offset:       8,
@@ -195,7 +196,7 @@ func TestGetTraceEventFormat(t *testing.T) {
 			dataTypeSize: 1,
 			dataLocSize:  4,
 		},
-		"longs": traceEventField{
+		traceEventField{
 			FieldName:    "longs",
 			TypeName:     "long",
 			Offset:       12,
@@ -206,7 +207,7 @@ func TestGetTraceEventFormat(t *testing.T) {
 			dataLocSize:  4,
 		},
 		// Skips are turned into arrays of bytes
-		"signed_skip": traceEventField{
+		traceEventField{
 			FieldName:    "signed_skip",
 			TypeName:     "gid_t",
 			Offset:       16,
@@ -216,7 +217,7 @@ func TestGetTraceEventFormat(t *testing.T) {
 			dataTypeSize: 1,
 			arraySize:    64,
 		},
-		"unsigned_skip": traceEventField{
+		traceEventField{
 			FieldName:    "unsigned_skip",
 			TypeName:     "gid_t",
 			Offset:       80,
@@ -228,8 +229,180 @@ func TestGetTraceEventFormat(t *testing.T) {
 		},
 	}
 
-	id, actualFields, err := getTraceEventFormat("testdata", "valid/valid")
+	id, actualFormat, err := getTraceEventFormat("testdata", "valid/valid")
 	ok(t, err)
 	equals(t, uint16(31337), id)
-	equals(t, expectedFields, actualFields)
+	equals(t, expectedFormat, actualFormat)
+}
+
+func TestDecodeDataType(t *testing.T) {
+	type testCase struct {
+		dataType      int32
+		rawData       []byte
+		expectedValue interface{}
+		expectedErr   bool
+	}
+	testCases := []testCase{
+		testCase{
+			dataType:      TraceEventFieldTypeString,
+			rawData:       nil,
+			expectedValue: nil,
+			expectedErr:   true,
+		},
+		testCase{
+			dataType:      TraceEventFieldTypeSignedInt8,
+			rawData:       []byte{8},
+			expectedValue: int8(8),
+			expectedErr:   false,
+		},
+		testCase{
+			dataType:      TraceEventFieldTypeSignedInt16,
+			rawData:       []byte{0x34, 0x12},
+			expectedValue: int16(0x1234),
+			expectedErr:   false,
+		},
+		testCase{
+			dataType:      TraceEventFieldTypeSignedInt32,
+			rawData:       []byte{0x11, 0x22, 0x33, 0x44},
+			expectedValue: int32(0x44332211),
+			expectedErr:   false,
+		},
+		testCase{
+			dataType:      TraceEventFieldTypeSignedInt64,
+			rawData:       []byte{0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11},
+			expectedValue: int64(0x1122334455667788),
+			expectedErr:   false,
+		},
+		testCase{
+			dataType:      TraceEventFieldTypeUnsignedInt8,
+			rawData:       []byte{0x56},
+			expectedValue: uint8(0x56),
+			expectedErr:   false,
+		},
+		testCase{
+			dataType:      TraceEventFieldTypeUnsignedInt16,
+			rawData:       []byte{0x34, 0x12},
+			expectedValue: uint16(0x1234),
+			expectedErr:   false,
+		},
+		testCase{
+			dataType:      TraceEventFieldTypeUnsignedInt32,
+			rawData:       []byte{0x11, 0x22, 0x33, 0x44},
+			expectedValue: uint32(0x44332211),
+			expectedErr:   false,
+		},
+		testCase{
+			dataType:      TraceEventFieldTypeUnsignedInt64,
+			rawData:       []byte{0x12, 0x23, 0x34, 0x45, 0x56, 0x67, 0x78, 0x89},
+			expectedValue: uint64(0x8978675645342312),
+			expectedErr:   false,
+		},
+		testCase{
+			dataType:      29384756,
+			rawData:       nil,
+			expectedValue: nil,
+			expectedErr:   true,
+		},
+	}
+	for _, tc := range testCases {
+		actualValue, err := decodeDataType(tc.dataType, tc.rawData)
+		if tc.expectedErr {
+			assert(t, err != nil, "expected error for dataType %d", tc.dataType)
+		} else {
+			assert(t, err == nil, "unexpected error for dataType %d", tc.dataType)
+		}
+		assert(t, reflect.DeepEqual(tc.expectedValue, actualValue),
+			"Result does not match for dataType %d\n\n\texp: %#v\n\n\tgot: %#v",
+			tc.dataType, tc.expectedValue, actualValue)
+	}
+}
+
+func TestDecodeRawData(t *testing.T) {
+	rawData := []byte{
+		0x1c, 0x00, 0x06, 0x00, // name4
+		0x22, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, // name8
+		0x11, 0x22, 0x33, 0x44, // pid
+		0x01, 0x01, 0x01, 0x01, 0x02, 0x02, 0x02, 0x02, // args
+		0x28, 0x00, 0x04, 0x00, // foo
+
+		'N', 'A', 'M', 'E', '4', 0,
+		'N', 'A', 'M', 'E', '8', 0,
+		0x11, 0x22, 0x33, 0x44,
+	}
+
+	format := TraceEventFormat{
+		traceEventField{
+			FieldName:    "name4",
+			Offset:       0,
+			dataType:     TraceEventFieldTypeString,
+			dataTypeSize: 1,
+			dataLocSize:  4,
+		},
+		traceEventField{
+			FieldName:    "name8",
+			Offset:       4,
+			dataType:     TraceEventFieldTypeString,
+			dataTypeSize: 1,
+			dataLocSize:  8,
+		},
+		traceEventField{
+			FieldName: "pid",
+			Offset:    12,
+			dataType:  TraceEventFieldTypeSignedInt32,
+		},
+		traceEventField{
+			FieldName:    "args",
+			Offset:       16,
+			dataType:     TraceEventFieldTypeUnsignedInt32,
+			dataTypeSize: 4,
+			arraySize:    2,
+		},
+		traceEventField{
+			FieldName:    "foo",
+			Offset:       24,
+			dataType:     TraceEventFieldTypeUnsignedInt8,
+			dataTypeSize: 1,
+			dataLocSize:  4,
+		},
+	}
+
+	e := TraceEventSampleData{
+		"name4": "NAME4",
+		"name8": "NAME8",
+		"pid":   int32(0x44332211),
+		"args":  []interface{}{uint32(0x01010101), uint32(0x02020202)},
+		"foo":   []interface{}{uint8(0x11), uint8(0x22), uint8(0x33), uint8(0x44)},
+	}
+
+	data, err := format.DecodeRawData(rawData)
+	ok(t, err)
+	equals(t, e, data)
+
+	format = TraceEventFormat{
+		traceEventField{
+			FieldName:   "error",
+			dataLocSize: 16,
+		},
+	}
+	_, err = format.DecodeRawData(rawData)
+	assert(t, err != nil, "Expected error")
+
+	format = TraceEventFormat{
+		traceEventField{
+			FieldName: "error",
+			dataType:  TraceEventFieldTypeString,
+		},
+	}
+	_, err = format.DecodeRawData(rawData)
+	assert(t, err != nil, "Expected error")
+
+	format = TraceEventFormat{
+		traceEventField{
+			FieldName: "error",
+			dataType:  TraceEventFieldTypeString,
+			arraySize: 4,
+		},
+	}
+	_, err = format.DecodeRawData(rawData)
+	assert(t, err != nil, "Expected error")
 }

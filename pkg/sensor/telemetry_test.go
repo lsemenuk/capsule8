@@ -307,15 +307,15 @@ func TestRegisterFileEvents(t *testing.T) {
 	eventSet1 := []*api.FileEventFilter{
 		&api.FileEventFilter{
 			Type:           api.FileEventType_FILE_EVENT_TYPE_OPEN,
-			Filename:       &wrappers.StringValue{"/etc/passwd"},
-			OpenFlagsMask:  &wrappers.Int32Value{823467},
-			CreateModeMask: &wrappers.Int32Value{234},
+			Filename:       &wrappers.StringValue{Value: "/etc/passwd"},
+			OpenFlagsMask:  &wrappers.Int32Value{Value: 823467},
+			CreateModeMask: &wrappers.Int32Value{Value: 234},
 		},
 	}
 	eventSet2 := []*api.FileEventFilter{
 		&api.FileEventFilter{
 			Type:            api.FileEventType_FILE_EVENT_TYPE_OPEN,
-			FilenamePattern: &wrappers.StringValue{"/bin/*"},
+			FilenamePattern: &wrappers.StringValue{Value: "/bin/*"},
 		},
 	}
 	eventSet3 := []*api.FileEventFilter{
@@ -513,11 +513,11 @@ func TestRegisterProcessEvents(t *testing.T) {
 	eventSet1 := []*api.ProcessEventFilter{
 		&api.ProcessEventFilter{
 			Type:         api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
-			ExecFilename: &wrappers.StringValue{"/bin/bash"},
+			ExecFilename: &wrappers.StringValue{Value: "/bin/bash"},
 		},
 		&api.ProcessEventFilter{
 			Type:     api.ProcessEventType_PROCESS_EVENT_TYPE_EXIT,
-			ExitCode: &wrappers.Int32Value{88},
+			ExitCode: &wrappers.Int32Value{Value: 88},
 		},
 		&api.ProcessEventFilter{
 			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_FORK,
@@ -607,26 +607,26 @@ func TestRegisterSyscallEvents(t *testing.T) {
 	enterEvents := []*api.SyscallEventFilter{
 		&api.SyscallEventFilter{
 			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
-			Id:   &wrappers.Int64Value{8},
-			Arg0: &wrappers.UInt64Value{11},
-			Arg1: &wrappers.UInt64Value{22},
-			Arg2: &wrappers.UInt64Value{33},
-			Arg3: &wrappers.UInt64Value{44},
-			Arg4: &wrappers.UInt64Value{55},
-			Arg5: &wrappers.UInt64Value{66},
+			Id:   &wrappers.Int64Value{Value: 8},
+			Arg0: &wrappers.UInt64Value{Value: 11},
+			Arg1: &wrappers.UInt64Value{Value: 22},
+			Arg2: &wrappers.UInt64Value{Value: 33},
+			Arg3: &wrappers.UInt64Value{Value: 44},
+			Arg4: &wrappers.UInt64Value{Value: 55},
+			Arg5: &wrappers.UInt64Value{Value: 66},
 		},
 	}
 	exitEvents := []*api.SyscallEventFilter{
 		&api.SyscallEventFilter{
 			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT,
-			Id:   &wrappers.Int64Value{8},
-			Ret:  &wrappers.Int64Value{0},
+			Id:   &wrappers.Int64Value{Value: 8},
+			Ret:  &wrappers.Int64Value{Value: 0},
 		},
 	}
 	invalidEvents := []*api.SyscallEventFilter{
 		&api.SyscallEventFilter{
 			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_UNKNOWN,
-			Id:   &wrappers.Int64Value{8},
+			Id:   &wrappers.Int64Value{Value: 8},
 		},
 		&api.SyscallEventFilter{
 			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
@@ -636,14 +636,14 @@ func TestRegisterSyscallEvents(t *testing.T) {
 		},
 		&api.SyscallEventFilter{
 			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
-			Id:   &wrappers.Int64Value{8},
+			Id:   &wrappers.Int64Value{Value: 8},
 			FilterExpression: expression.Equal(
 				expression.Identifier("asdf"),
 				expression.Value(make(chan bool))),
 		},
 		&api.SyscallEventFilter{
 			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT,
-			Id:   &wrappers.Int64Value{8},
+			Id:   &wrappers.Int64Value{Value: 8},
 			FilterExpression: expression.Equal(
 				expression.Identifier("asdf"),
 				expression.Value(make(chan bool))),
@@ -651,11 +651,17 @@ func TestRegisterSyscallEvents(t *testing.T) {
 	}
 
 	s := newTestSubscription(t, sensor)
+	prepareForRegisterSyscallEnterEventFilter(t, s)
 	s.registerSyscallEvents(enterEvents)
-	s.registerSyscallEvents(exitEvents)
-	s.registerSyscallEvents(invalidEvents)
 	verifyRegisterSyscallEnterEventFilter(t, s, len(enterEvents))
+
+	s = newTestSubscription(t, sensor)
+	s.registerSyscallEvents(exitEvents)
 	verifyRegisterSyscallExitEventFilter(t, s, len(exitEvents))
+
+	s = newTestSubscription(t, sensor)
+	s.registerSyscallEvents(invalidEvents)
+	assert.Len(t, s.eventSinks, 0)
 }
 
 func TestRegisterTickerEvents(t *testing.T) {
