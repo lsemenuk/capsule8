@@ -3,9 +3,8 @@
 
 Capsule8 performs advanced behavioral monitoring for cloud-native,
 containers, and traditional Linux-based servers. This repository
-contains the open-source components of the Capsule8 platform,
-including the Sensor, example API client code, and command-line
-interface.
+contains the open-source core of the Capsule8-Sensor, which is based on KProbes.
+It also contains example Sensor API client code.
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/capsule8/capsule8)](https://goreportcard.com/report/github.com/capsule8/capsule8)
 [![GoDoc](https://godoc.org/github.com/capsule8/capsule8?status.svg)](https://godoc.org/github.com/capsule8/capsule8)
@@ -15,7 +14,7 @@ interface.
 
 ## Status
 
-Capsule8 is currently in alpha and under active development. The gRPC
+The Kprobe based sensor is currently under active development. The gRPC
 API is v0 and subject to change at any time, but we strive to keep the
 sample code in `examples/` updated with any changes to the API.
 
