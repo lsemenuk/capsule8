@@ -1335,7 +1335,7 @@ func (pc *ProcessInfoCache) handleCgroupProcsWrite(_ uint64, sample *perf.Sample
 			// want to know about it so that we can deal with it. Use a
 			// high logging level to ensure that.
 			glog.Warningf("Error parsing pid written to cgroup.procs: %v", err)
-			return nil, nil
+			return
 		}
 	} else if vu64, err = sample.GetUnsignedInt64("tgid"); err == nil {
 		pid = int(vu64)
