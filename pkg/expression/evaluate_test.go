@@ -15,9 +15,12 @@
 package expression
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 type compareFunc func(lhs, rhs interface{}) bool
@@ -127,37 +130,30 @@ func TestSimpleComparisons(t *testing.T) {
 		name := funcNames[i]
 		for j := range lhs {
 			if v := rhsTrue[i][j]; reflect.ValueOf(v).Kind() != reflect.Invalid {
-				if r, err := compare(f, lhs[j], v); err != nil {
-					t.Errorf("Unexpected error for %s(%v, %v): %v",
-						name, lhs[j], v, err)
-				} else if !r {
-					t.Errorf("Unexpected false for %s(%v, %v)",
-						name, lhs[j], v)
+				testCase := fmt.Sprintf("%s(%v, %v)", name, lhs[j], v)
+				r, err := compare(f, lhs[j], v)
+				if assert.NoError(t, err, testCase) {
+					assert.True(t, r, testCase)
 				}
 			} else {
-				if _, err := compare(f, lhs[j], lhs[j]); err == nil {
-					t.Errorf("Expected error for %s(%v, %v)",
-						name, lhs[j], lhs[j])
-				}
+				testCase := fmt.Sprintf("%s(%v, %v)", name, lhs[j], lhs[j])
+				_, err := compare(f, lhs[j], lhs[j])
+				assert.Error(t, err, testCase)
 			}
 			if v := rhsFalse[i][j]; reflect.ValueOf(v).Kind() != reflect.Invalid {
-				if r, err := compare(f, lhs[j], v); err != nil {
-					t.Errorf("Unexpected error for %s(%v, %v): %v",
-						name, lhs[j], v, err)
-				} else if r {
-					t.Errorf("Unexpected true for %s(%v, %v)",
-						name, lhs[j], v)
+				testCase := fmt.Sprintf("%s(%v, %v)", name, lhs[j], v)
+				r, err := compare(f, lhs[j], v)
+				if assert.NoError(t, err, testCase) {
+					assert.False(t, r, testCase)
 				}
 			} else {
-				if _, err := compare(f, lhs[j], lhs[j]); err == nil {
-					t.Errorf("Expected error for %s(%v, %v)",
-						name, lhs[j], lhs[j])
-				}
+				testCase := fmt.Sprintf("%s(%v, %v)", name, lhs[j], lhs[j])
+				_, err := compare(f, lhs[j], lhs[j])
+				assert.Error(t, err, testCase)
 			}
 		}
-		if _, err := compare(f, invalidValue, invalidValue); err == nil {
-			t.Errorf("Expected error for %s with invalid type", name)
-		}
+		_, err := compare(f, invalidValue, invalidValue)
+		assert.Error(t, err, name)
 	}
 }
 
@@ -181,20 +177,16 @@ func TestCompareLike(t *testing.T) {
 
 	for i := range truePatterns {
 		tp := truePatterns[i]
-		if r, err := compare(compareLike, lhs, tp); err != nil {
-			t.Errorf("Unexpected error for compareLike(%q, %q): %v",
-				lhs, tp, err)
-		} else if !r {
-			t.Errorf("Unexpected false for compareLike(%q, %q)",
-				lhs, tp)
+		testCase := fmt.Sprintf("compareLike(%q, %q)", lhs, tp)
+		r, err := compare(compareLike, lhs, tp)
+		if assert.NoError(t, err, testCase) {
+			assert.True(t, r, testCase)
 		}
 		fp := falsePatterns[i]
-		if r, err := compare(compareLike, lhs, fp); err != nil {
-			t.Errorf("Unexpected error for compareLike(%q, %q): %v",
-				lhs, fp, err)
-		} else if r {
-			t.Errorf("Unexpected true for compareLike(%q, %q)",
-				lhs, fp)
+		testCase = fmt.Sprintf("compareLike(%q, %q)", lhs, fp)
+		r, err = compare(compareLike, lhs, fp)
+		if assert.NoError(t, err, testCase) {
+			assert.False(t, r, testCase)
 		}
 	}
 
@@ -207,10 +199,8 @@ func TestCompareLike(t *testing.T) {
 		make(chan interface{}),
 	}
 	for _, v := range invalidValues {
-		if _, err := compare(compareLike, v, v); err == nil {
-			t.Errorf("Expected error for compareLike with invalid type %s",
-				reflect.TypeOf(v))
-		}
+		_, err := compare(compareLike, v, v)
+		assert.Error(t, err, reflect.TypeOf(v))
 	}
 }
 
@@ -228,6 +218,9 @@ func TestEvaluateExpression(t *testing.T) {
 		"b":   ValueTypeBool,
 		"d":   ValueTypeDouble,
 		"t":   ValueTypeTimestamp,
+
+		"_d": ValueTypeDouble,    // value will be missing
+		"_t": ValueTypeTimestamp, // value will be wrong type
 	}
 	values := FieldValueMap{
 		"s":   "string",
@@ -240,47 +233,47 @@ func TestEvaluateExpression(t *testing.T) {
 		"u32": uint32(8),
 		"u64": uint64(8),
 		"b":   true,
-		//"d":   8.0,         << this is intentionally omitted! >>
-		"t": "wrong type", // << this is intentionally the wrong type! >>
+		"d":   float64(8.0),
+		"t":   time.Now(),
+
+		//"_d":   8.0,         << this is intentionally omitted! >>
+		"_t": "wrong type", // << this is intentionally the wrong type! >>
 	}
 
 	//
 	// identExpr
 	//
 
-	ie := identExpr{name: "foo"}
-	if _, err := evaluateExpression(ie, types, values); err == nil {
-		t.Error("evaluateExpression failure")
+	ie := &identExpr{name: "_d", t: ValueTypeDouble}
+	v, err := evaluateExpression(ie, types, values)
+	if assert.NoError(t, err) {
+		assert.Nil(t, v)
 	}
 
-	ie = identExpr{name: "d"}
-	if v, err := evaluateExpression(ie, types, values); err != nil {
-		t.Errorf("evaluateExpression failure: %v", err)
-	} else if v != nil {
-		t.Errorf("evaluateExpression failure: got %v", v)
-	}
+	ie = &identExpr{name: "_t", t: ValueTypeTimestamp}
+	_, err = evaluateExpression(ie, types, values)
+	assert.Error(t, err)
 
-	ie = identExpr{name: "t"}
-	if _, err := evaluateExpression(ie, types, values); err == nil {
-		t.Errorf("evaluateExpression failure")
-	}
-
-	ie = identExpr{name: "s"}
-	if v, err := evaluateExpression(ie, types, values); err != nil {
-		t.Errorf("evaluateExpression failure: %v", err)
-	} else if v != "string" {
-		t.Errorf("evaluateExpression failure: got %v", v)
+	for k, v := range types {
+		if k[0] == '_' {
+			continue
+		}
+		ie = &identExpr{name: k, t: v}
+		var i interface{}
+		i, err = evaluateExpression(ie, types, values)
+		if assert.NoError(t, err) {
+			assert.Equal(t, values[k], i)
+		}
 	}
 
 	//
 	// valueExpr
 	//
 
-	ve := valueExpr{v: int32(8)}
-	if v, err := evaluateExpression(ve, types, values); err != nil {
-		t.Errorf("evaluateExpression failure: %v", err)
-	} else if v != int32(8) {
-		t.Errorf("evaluateExpression failure: got %v", v)
+	ve := &valueExpr{v: int32(8)}
+	v, err = evaluateExpression(ve, types, values)
+	if assert.NoError(t, err) {
+		assert.Equal(t, int32(8), v)
 	}
 
 	//
@@ -291,39 +284,32 @@ func TestEvaluateExpression(t *testing.T) {
 		binaryOpLogicalAnd, binaryOpLogicalOr,
 	}
 	for _, op := range logicalOps {
-		be := binaryExpr{
-			x:  valueExpr{v: "string"},
+		be := &binaryExpr{
+			x:  &valueExpr{v: "string"},
 			op: op,
 		}
-		if _, err := evaluateExpression(be, types, values); err == nil {
-			t.Errorf("evaluateExpression failure for %s", binaryOpStrings[op])
-		}
+		_, err = evaluateExpression(be, types, values)
+		assert.Error(t, err, binaryOpStrings[op])
 	}
 
-	be := binaryExpr{
-		x:  identExpr{name: "b"},
-		y:  valueExpr{v: false},
+	be := &binaryExpr{
+		x:  &identExpr{name: "b", t: ValueTypeBool},
+		y:  &valueExpr{v: false},
 		op: binaryOpLogicalAnd,
 	}
-	if r, err := evaluateExpression(be, types, values); err != nil {
-		t.Errorf("evaluateExpression failure: %v", err)
-	} else if v, ok := r.(bool); !ok {
-		t.Errorf("evaluateExpression failure: expected false; got %v", r)
-	} else if v != false {
-		t.Errorf("evaluateExpression failure: expected false; got %v", r)
+	r, err := evaluateExpression(be, types, values)
+	if assert.NoError(t, err) && assert.IsType(t, true, r) {
+		assert.False(t, r.(bool))
 	}
 
-	be = binaryExpr{
-		x:  valueExpr{v: false},
-		y:  identExpr{name: "b"},
+	be = &binaryExpr{
+		x:  &valueExpr{v: false},
+		y:  &identExpr{name: "b", t: ValueTypeBool},
 		op: binaryOpLogicalOr,
 	}
-	if r, err := evaluateExpression(be, types, values); err != nil {
-		t.Errorf("evaluateExpression failure: %v", err)
-	} else if v, ok := r.(bool); !ok {
-		t.Errorf("evaluateExpression failure: expected true; got %v", r)
-	} else if v != true {
-		t.Errorf("evaluateExpression failure: expected true; got %v", r)
+	r, err = evaluateExpression(be, types, values)
+	if assert.NoError(t, err) && assert.IsType(t, true, r) {
+		assert.True(t, r.(bool))
 	}
 
 	binaryOps := map[binaryOp]bool{
@@ -336,75 +322,63 @@ func TestEvaluateExpression(t *testing.T) {
 		binaryOpLike: false,
 	}
 	for op, expected := range binaryOps {
-		be = binaryExpr{
-			x:  identExpr{name: "d"},
-			y:  valueExpr{v: 8.0},
+		opname := binaryOpStrings[op]
+		be = &binaryExpr{
+			x:  &identExpr{name: "_d", t: ValueTypeDouble},
+			y:  &valueExpr{v: 8.0},
 			op: op,
 		}
 		// This should be false because: d IS NULL
-		if r, err := evaluateExpression(be, types, values); err != nil {
-			t.Errorf("evaluateExpression failure: %v", err)
-		} else if v, ok := r.(bool); !ok {
-			t.Errorf("evaluateExpression failure: expected false; got %v", r)
-		} else if v != false {
-			t.Errorf("evaluateExpression failure: expected false; got %v", r)
+		r, err = evaluateExpression(be, types, values)
+		if assert.NoError(t, err, opname) && assert.IsType(t, true, r, opname) {
+			assert.False(t, r.(bool), opname)
 		}
 
 		// This should generate a type mismatch error
-		be = binaryExpr{
-			x:  identExpr{name: "u64"},
-			y:  valueExpr{v: "string"},
+		be = &binaryExpr{
+			x:  &identExpr{name: "u64", t: ValueTypeUnsignedInt64},
+			y:  &valueExpr{v: "string"},
 			op: op,
 		}
-		if _, err := evaluateExpression(be, types, values); err == nil {
-			t.Errorf("evaluateExpression failure for %s (expected type mismatch error)",
-				binaryOpStrings[op])
-		}
+		_, err = evaluateExpression(be, types, values)
+		assert.Error(t, err, opname)
 
 		if op == binaryOpLike {
-			be = binaryExpr{
-				x:  identExpr{name: "s"},
-				y:  valueExpr{v: "foobarbaz"},
+			be = &binaryExpr{
+				x:  &identExpr{name: "s", t: ValueTypeString},
+				y:  &valueExpr{v: "foobarbaz"},
 				op: op,
 			}
 		} else {
-			be = binaryExpr{
-				x:  identExpr{name: "i16"},
-				y:  valueExpr{v: int16(8)},
+			be = &binaryExpr{
+				x:  &identExpr{name: "i16", t: ValueTypeSignedInt16},
+				y:  &valueExpr{v: int16(8)},
 				op: op,
 			}
 		}
-		if r, err := evaluateExpression(be, types, values); err != nil {
-			t.Errorf("evaluateExpression failure for %s: %v",
-				binaryOpStrings[op], err)
-		} else if v, ok := r.(bool); !ok {
-			t.Errorf("evaluateExpresion failure for %s: expected %v; got %v",
-				binaryOpStrings[op], expected, r)
-		} else if expected != v {
-			t.Errorf("evaluateExpresion failure for %s: expected %v; got %v",
-				binaryOpStrings[op], expected, r)
+		r, err = evaluateExpression(be, types, values)
+		if assert.NoError(t, err, opname) {
+			assert.Equal(t, expected, r, opname)
 		}
 	}
 
-	be = binaryExpr{
-		x:  identExpr{name: "i8"},
-		y:  identExpr{name: "u8"},
+	be = &binaryExpr{
+		x:  &identExpr{name: "i8", t: ValueTypeSignedInt8},
+		y:  &identExpr{name: "u8", t: ValueTypeUnsignedInt8},
 		op: binaryOpBitwiseAnd,
 	}
 	// This should generate a type mismatch error
-	if _, err := evaluateExpression(be, types, values); err == nil {
-		t.Errorf("evaluateExpression failure (expected type mismatch error)")
-	}
+	_, err = evaluateExpression(be, types, values)
+	assert.Error(t, err)
 
-	be = binaryExpr{
-		x:  identExpr{name: "s"},
-		y:  valueExpr{v: "string"},
+	be = &binaryExpr{
+		x:  &identExpr{name: "s", t: ValueTypeString},
+		y:  &valueExpr{v: "string"},
 		op: binaryOpBitwiseAnd,
 	}
 	// This should generate an integer required error
-	if _, err := evaluateExpression(be, types, values); err == nil {
-		t.Errorf("evaluateExpression failure (expected type must be integer error)")
-	}
+	_, err = evaluateExpression(be, types, values)
+	assert.Error(t, err)
 
 	testCases := map[string]interface{}{
 		"i8":  int8(8),
@@ -417,17 +391,15 @@ func TestEvaluateExpression(t *testing.T) {
 		"u64": uint64(8),
 	}
 	for name, value := range testCases {
-		be = binaryExpr{
-			x:  identExpr{name: name},
-			y:  valueExpr{v: value},
+		be = &binaryExpr{
+			x:  &identExpr{name: name, t: ValueTypeOf(value)},
+			y:  &valueExpr{v: value},
 			op: binaryOpBitwiseAnd,
 		}
-		if r, err := evaluateExpression(be, types, values); err != nil {
-			t.Errorf("evaluateExpression failure for %s: %v",
-				reflect.TypeOf(value), err)
-		} else if !reflect.DeepEqual(r, value) {
-			t.Errorf("evaluateExpression failure for %s: want %v; got %v",
-				reflect.TypeOf(value), value, r)
+		testCase := reflect.TypeOf(value)
+		r, err = evaluateExpression(be, types, values)
+		if assert.NoError(t, err, testCase) {
+			assert.Equal(t, value, r, testCase)
 		}
 	}
 
@@ -435,91 +407,72 @@ func TestEvaluateExpression(t *testing.T) {
 	// unaryExpr
 	//
 
-	ue := unaryExpr{
-		x:  identExpr{name: "s"},
+	ue := &unaryExpr{
+		x:  &identExpr{name: "s", t: ValueTypeString},
 		op: unaryOpIsNull,
 	}
-	if r, err := evaluateExpression(ue, types, values); err != nil {
-		t.Errorf("evaluateExpression failure: %v", err)
-	} else if v, ok := r.(bool); !ok {
-		t.Errorf("evaluateExpression failure: expected false; got %v", r)
-	} else if v != false {
-		t.Errorf("evaluateExpression failure: expected false; got %v", r)
+	r, err = evaluateExpression(ue, types, values)
+	if assert.NoError(t, err) && assert.IsType(t, true, r) {
+		assert.False(t, r.(bool))
 	}
 	ue.op = unaryOpIsNotNull
-	if r, err := evaluateExpression(ue, types, values); err != nil {
-		t.Errorf("evaluateExpression failure: %v", err)
-	} else if v, ok := r.(bool); !ok {
-		t.Errorf("evaluateExpression failure: expected true; got %v", r)
-	} else if v != true {
-		t.Errorf("evaluateExpression failure: expected true; got %v", r)
+	r, err = evaluateExpression(ue, types, values)
+	if assert.NoError(t, err) && assert.IsType(t, true, r) {
+		assert.True(t, r.(bool))
 	}
 
-	ue = unaryExpr{
-		x:  identExpr{name: "d"},
+	ue = &unaryExpr{
+		x:  &identExpr{name: "_d", t: ValueTypeDouble},
 		op: unaryOpIsNull,
 	}
-	if r, err := evaluateExpression(ue, types, values); err != nil {
-		t.Errorf("evaluateExpression failure: %v", err)
-	} else if v, ok := r.(bool); !ok {
-		t.Errorf("evaluateExpression failure: expected true; got %v", r)
-	} else if v != true {
-		t.Errorf("evaluateExpression failure: expected true; got %v", r)
+	r, err = evaluateExpression(ue, types, values)
+	if assert.NoError(t, err) && assert.IsType(t, true, r) {
+		assert.True(t, r.(bool))
 	}
 	ue.op = unaryOpIsNotNull
-	if r, err := evaluateExpression(ue, types, values); err != nil {
-		t.Errorf("evaluateExpression failure: %v", err)
-	} else if v, ok := r.(bool); !ok {
-		t.Errorf("evaluateExpression failure: expected false; got %v", r)
-	} else if v != false {
-		t.Errorf("evaluateExpression failure: expected false; got %v", r)
+	r, err = evaluateExpression(ue, types, values)
+	if assert.NoError(t, err) && assert.IsType(t, true, r) {
+		assert.False(t, r.(bool))
+	}
+
+	ue = &unaryExpr{
+		op: unaryOpNot,
+		x:  &identExpr{name: "b", t: ValueTypeBool},
+	}
+	r, err = evaluateExpression(ue, types, values)
+	if assert.NoError(t, err) && assert.IsType(t, true, r) {
+		assert.False(t, r.(bool))
 	}
 }
 
 func TestEvaluateBadStackPanic(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("evalContext.evaluateExpression did not panic as expected")
+	assert.Panics(t, func() {
+		// This should leave the stack with three elements instead of just 1
+		// since the initialization is creating a stack of len 2 initially.
+		c := evalContext{
+			stack: make([]interface{}, 2),
 		}
-	}()
-
-	// This should leave the stack with three elements instead of just 1
-	// since the initialization is creating a stack of len 2 initially.
-	c := evalContext{
-		stack: make([]interface{}, 2),
-	}
-	c.evaluateExpression(valueExpr{v: "string"})
+		c.evaluateExpression(&valueExpr{v: "string"})
+	})
 }
 
 func TestEvaluateNodePanic(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("evalContext.evaluateNode did not panic as expected")
-		}
-	}()
-
-	c := evalContext{}
-	c.evaluateNode(invalidExpr{})
+	assert.Panics(t, func() {
+		c := evalContext{}
+		c.evaluateNode(&invalidExpr{})
+	})
 }
 
 func TestEvaluateBinaryExprPanic(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("evalContext.evaluateUnaryExpr did not panic as expected")
-		}
-	}()
-
-	c := evalContext{}
-	c.evaluateBinaryExpr(binaryExpr{op: 239487})
+	assert.Panics(t, func() {
+		c := evalContext{}
+		c.evaluateBinaryExpr(&binaryExpr{op: 239487})
+	})
 }
 
 func TestEvaluateUnaryExprPanic(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("evalContext.evaluateUnaryExpr did not panic as expected")
-		}
-	}()
-
-	c := evalContext{}
-	c.evaluateUnaryExpr(unaryExpr{op: 239487})
+	assert.Panics(t, func() {
+		c := evalContext{}
+		c.evaluateUnaryExpr(&unaryExpr{op: 239487})
+	})
 }

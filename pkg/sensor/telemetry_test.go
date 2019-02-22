@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 
 	"github.com/capsule8/capsule8/pkg/config"
 	"github.com/capsule8/capsule8/pkg/expression"
@@ -58,11 +58,11 @@ func dialer(addr string, timeout time.Duration) (net.Conn, error) {
 
 func newTelemetryStream(
 	t *testing.T,
-	client api.TelemetryServiceClient,
-	sub *api.Subscription,
-) (api.TelemetryService_GetEventsClient, context.CancelFunc, error) {
+	client telemetryAPI.TelemetryServiceClient,
+	sub *telemetryAPI.Subscription,
+) (telemetryAPI.TelemetryService_GetEventsClient, context.CancelFunc, error) {
 	streamContext, streamCancel := context.WithCancel(context.Background())
-	stream, err := client.GetEvents(streamContext, &api.GetEventsRequest{
+	stream, err := client.GetEvents(streamContext, &telemetryAPI.GetEventsRequest{
 		Subscription: sub,
 	})
 	require.NoError(t, err)
@@ -76,8 +76,8 @@ func TestTelemetryService(t *testing.T) {
 	options := []TelemetryServiceOption{
 		WithStartFunc(func() { start = true }),
 		WithStopFunc(func() { stop = true }),
-		WithGetEventsRequestFunc(func(request *api.GetEventsRequest) { getEventsRequest = true }),
-		WithGetEventsResponseFunc(func(response *api.GetEventsResponse, err error) { getEventsResponse = true }),
+		WithGetEventsRequestFunc(func(request *telemetryAPI.GetEventsRequest) { getEventsRequest = true }),
+		WithGetEventsResponseFunc(func(response *telemetryAPI.GetEventsResponse, err error) { getEventsResponse = true }),
 	}
 
 	sensor := newUnitTestSensor(t)
@@ -99,39 +99,39 @@ func TestTelemetryService(t *testing.T) {
 		grpc.WithTimeout(1*time.Second),
 		grpc.WithInsecure())
 	require.NoError(t, err)
-	client := api.NewTelemetryServiceClient(conn)
+	client := telemetryAPI.NewTelemetryServiceClient(conn)
 
 	// These subscription requests should all return errors immediately.
-	badSubscriptions := []*api.Subscription{
+	badSubscriptions := []*telemetryAPI.Subscription{
 		// Invalid subscription (no EventFilter)
-		&api.Subscription{},
+		&telemetryAPI.Subscription{},
 		// Invalid subscription (empty EventFilter)
-		&api.Subscription{
-			EventFilter: &api.EventFilter{},
+		&telemetryAPI.Subscription{
+			EventFilter: &telemetryAPI.EventFilter{},
 		},
 		// LimitModifier is invalid (0)
-		&api.Subscription{
-			EventFilter: &api.EventFilter{},
-			Modifier: &api.Modifier{
-				Limit: &api.LimitModifier{
+		&telemetryAPI.Subscription{
+			EventFilter: &telemetryAPI.EventFilter{},
+			Modifier: &telemetryAPI.Modifier{
+				Limit: &telemetryAPI.LimitModifier{
 					Limit: 0,
 				},
 			},
 		},
 		// ThrottleModifier interval is invalid (0)
-		&api.Subscription{
-			EventFilter: &api.EventFilter{},
-			Modifier: &api.Modifier{
-				Throttle: &api.ThrottleModifier{
+		&telemetryAPI.Subscription{
+			EventFilter: &telemetryAPI.EventFilter{},
+			Modifier: &telemetryAPI.Modifier{
+				Throttle: &telemetryAPI.ThrottleModifier{
 					Interval: 0,
 				},
 			},
 		},
 		// ThrottleModifier interval type is invalid (8888)
-		&api.Subscription{
-			EventFilter: &api.EventFilter{},
-			Modifier: &api.Modifier{
-				Throttle: &api.ThrottleModifier{
+		&telemetryAPI.Subscription{
+			EventFilter: &telemetryAPI.EventFilter{},
+			Modifier: &telemetryAPI.Modifier{
+				Throttle: &telemetryAPI.ThrottleModifier{
 					IntervalType: 8888,
 					Interval:     8,
 				},
@@ -140,7 +140,7 @@ func TestTelemetryService(t *testing.T) {
 	}
 	for _, sub := range badSubscriptions {
 		var (
-			stream       api.TelemetryService_GetEventsClient
+			stream       telemetryAPI.TelemetryService_GetEventsClient
 			streamCancel context.CancelFunc
 		)
 		stream, streamCancel, err = newTelemetryStream(t, client, sub)
@@ -153,11 +153,11 @@ func TestTelemetryService(t *testing.T) {
 
 	// This should return a response with status information and then an
 	// error after that.
-	sub := &api.Subscription{
-		EventFilter: &api.EventFilter{
-			KernelEvents: []*api.KernelFunctionCallFilter{
-				&api.KernelFunctionCallFilter{
-					Type:   api.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_EXIT,
+	sub := &telemetryAPI.Subscription{
+		EventFilter: &telemetryAPI.EventFilter{
+			KernelEvents: []*telemetryAPI.KernelFunctionCallFilter{
+				&telemetryAPI.KernelFunctionCallFilter{
+					Type:   telemetryAPI.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_EXIT,
 					Symbol: "alksdfjha",
 					Arguments: map[string]string{
 						"ret": "$retval:u64",
@@ -165,7 +165,7 @@ func TestTelemetryService(t *testing.T) {
 				},
 			},
 		},
-		ContainerFilter: &api.ContainerFilter{
+		ContainerFilter: &telemetryAPI.ContainerFilter{
 			Ids:        []string{"abc", "def", "ghi"},
 			Names:      []string{"jkl", "mno", "pqrs"},
 			ImageIds:   []string{"tuv", "wxyz"},
@@ -174,7 +174,7 @@ func TestTelemetryService(t *testing.T) {
 	}
 	stream, streamCancel, err := newTelemetryStream(t, client, sub)
 	if assert.NoErrorf(t, err, "%#v", sub) {
-		var response *api.GetEventsResponse
+		var response *telemetryAPI.GetEventsResponse
 		response, err = stream.Recv()
 		if assert.NoError(t, err) {
 			assert.NotZero(t, response.Statuses)
@@ -189,23 +189,23 @@ func TestTelemetryService(t *testing.T) {
 	// This should be successful! The first event returned should just be
 	// a status indicating OK. Then there should be 8 events that follow.
 	// And finally, the last stream.Recv() should be an error.
-	sub = &api.Subscription{
-		EventFilter: &api.EventFilter{
-			ChargenEvents: []*api.ChargenEventFilter{
-				&api.ChargenEventFilter{
+	sub = &telemetryAPI.Subscription{
+		EventFilter: &telemetryAPI.EventFilter{
+			ChargenEvents: []*telemetryAPI.ChargenEventFilter{
+				&telemetryAPI.ChargenEventFilter{
 					Length: 10,
 				},
 			},
 		},
-		Modifier: &api.Modifier{
-			Limit: &api.LimitModifier{
+		Modifier: &telemetryAPI.Modifier{
+			Limit: &telemetryAPI.LimitModifier{
 				Limit: 8,
 			},
 		},
 	}
 	stream, streamCancel, err = newTelemetryStream(t, client, sub)
 	if assert.NoErrorf(t, err, "%#v", sub) {
-		var response *api.GetEventsResponse
+		var response *telemetryAPI.GetEventsResponse
 		response, err = stream.Recv()
 		require.NoError(t, err)
 		if assert.NotZero(t, len(response.Statuses)) {
@@ -213,7 +213,7 @@ func TestTelemetryService(t *testing.T) {
 		}
 
 		gotError := false
-		var events []*api.ReceivedTelemetryEvent
+		var events []*telemetryAPI.ReceivedTelemetryEvent
 		for len(events) < 10 {
 			response, err = stream.Recv()
 			if err != nil {
@@ -242,14 +242,14 @@ func TestRegisterChargenEvents(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	events := []*api.ChargenEventFilter{
-		&api.ChargenEventFilter{
+	events := []*telemetryAPI.ChargenEventFilter{
+		&telemetryAPI.ChargenEventFilter{
 			Length: 32,
 		},
-		&api.ChargenEventFilter{
+		&telemetryAPI.ChargenEventFilter{
 			Length: 4,
 		},
-		&api.ChargenEventFilter{
+		&telemetryAPI.ChargenEventFilter{
 			Length: 57,
 		},
 	}
@@ -263,31 +263,31 @@ func TestRegisterContainerEvents(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	events := []*api.ContainerEventFilter{
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
-			View: api.ContainerEventView_FULL,
+	events := []*telemetryAPI.ContainerEventFilter{
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
+			View: telemetryAPI.ContainerEventView_FULL,
 		},
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
-			View: api.ContainerEventView_FULL,
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
+			View: telemetryAPI.ContainerEventView_FULL,
 		},
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
 			FilterExpression: expression.Equal(
 				expression.Identifier("exit_signal"),
 				expression.Value(uint32(11))),
 		},
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_DESTROYED,
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_DESTROYED,
 		},
 	}
-	invalidEvents := []*api.ContainerEventFilter{
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_UNKNOWN,
+	invalidEvents := []*telemetryAPI.ContainerEventFilter{
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_UNKNOWN,
 		},
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_UPDATED,
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_UPDATED,
 			FilterExpression: expression.BitwiseAnd(
 				expression.Identifier("asdfa"),
 				expression.Value(make(chan bool))),
@@ -304,31 +304,55 @@ func TestRegisterFileEvents(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	eventSet1 := []*api.FileEventFilter{
-		&api.FileEventFilter{
-			Type:           api.FileEventType_FILE_EVENT_TYPE_OPEN,
+	eventSet1 := []*telemetryAPI.FileEventFilter{
+		&telemetryAPI.FileEventFilter{
+			Type:           telemetryAPI.FileEventType_FILE_EVENT_TYPE_OPEN,
 			Filename:       &wrappers.StringValue{Value: "/etc/passwd"},
 			OpenFlagsMask:  &wrappers.Int32Value{Value: 823467},
 			CreateModeMask: &wrappers.Int32Value{Value: 234},
 		},
 	}
-	eventSet2 := []*api.FileEventFilter{
-		&api.FileEventFilter{
-			Type:            api.FileEventType_FILE_EVENT_TYPE_OPEN,
+	eventSet2 := []*telemetryAPI.FileEventFilter{
+		&telemetryAPI.FileEventFilter{
+			Type:            telemetryAPI.FileEventType_FILE_EVENT_TYPE_OPEN,
 			FilenamePattern: &wrappers.StringValue{Value: "/bin/*"},
 		},
 	}
-	eventSet3 := []*api.FileEventFilter{
-		&api.FileEventFilter{
-			Type: api.FileEventType_FILE_EVENT_TYPE_OPEN,
+	eventSet3 := []*telemetryAPI.FileEventFilter{
+		&telemetryAPI.FileEventFilter{
+			Type: telemetryAPI.FileEventType_FILE_EVENT_TYPE_OPEN,
+		},
+		&telemetryAPI.FileEventFilter{
+			Type: telemetryAPI.FileEventType_FILE_EVENT_TYPE_CREATE,
+		},
+		&telemetryAPI.FileEventFilter{
+			Type: telemetryAPI.FileEventType_FILE_EVENT_TYPE_DELETE,
+		},
+		&telemetryAPI.FileEventFilter{
+			Type: telemetryAPI.FileEventType_FILE_EVENT_TYPE_LINK,
+		},
+		&telemetryAPI.FileEventFilter{
+			Type: telemetryAPI.FileEventType_FILE_EVENT_TYPE_OPEN_FOR_MODIFY,
+		},
+		&telemetryAPI.FileEventFilter{
+			Type: telemetryAPI.FileEventType_FILE_EVENT_TYPE_RENAME,
+		},
+		&telemetryAPI.FileEventFilter{
+			Type: telemetryAPI.FileEventType_FILE_EVENT_TYPE_MODIFY,
+		},
+		&telemetryAPI.FileEventFilter{
+			Type: telemetryAPI.FileEventType_FILE_EVENT_TYPE_CLOSE_FOR_MODIFY,
+		},
+		&telemetryAPI.FileEventFilter{
+			Type: telemetryAPI.FileEventType_FILE_EVENT_TYPE_ATTRIBUTE_CHANGE,
 		},
 	}
-	invalidEvents := []*api.FileEventFilter{
-		&api.FileEventFilter{
-			Type: api.FileEventType_FILE_EVENT_TYPE_UNKNOWN,
+	invalidEvents := []*telemetryAPI.FileEventFilter{
+		&telemetryAPI.FileEventFilter{
+			Type: telemetryAPI.FileEventType_FILE_EVENT_TYPE_UNKNOWN,
 		},
-		&api.FileEventFilter{
-			Type: api.FileEventType_FILE_EVENT_TYPE_OPEN,
+		&telemetryAPI.FileEventFilter{
+			Type: telemetryAPI.FileEventType_FILE_EVENT_TYPE_OPEN,
 			FilterExpression: expression.Equal(
 				expression.Identifier("asdf"),
 				expression.Value(make(chan bool))),
@@ -339,33 +363,41 @@ func TestRegisterFileEvents(t *testing.T) {
 	prepareForRegisterFileOpenEventFilter(t, s, 0)
 	prepareForRegisterFileOpenEventFilter(t, s, 1)
 	prepareForRegisterFileOpenEventFilter(t, s, 2)
+	prepareForRegisterFileCreateEventFilter(t, s, 3)
+	prepareForRegisterFileDeleteEventFilter(t, s, 6)
+	prepareForRegisterFileLinkEventFilter(t, s, 8)
+	prepareForRegisterFileOpenForModifyEventFilter(t, s, 10)
+	prepareForRegisterFileRenameEventFilter(t, s, 11)
+	prepareForRegisterFileModifyEventFilter(t, s, 12)
+	prepareForRegisterFileCloseForModifyEventFilter(t, s, 13)
+	prepareForRegisterFileAttributeChangeEventFilter(t, s, 14)
 	s.registerFileEvents(eventSet1)
 	s.registerFileEvents(eventSet2)
 	s.registerFileEvents(eventSet3)
 	s.registerFileEvents(invalidEvents)
-	verifyRegisterFileOpenEventFilter(t, s, len(eventSet1)+len(eventSet2)+len(eventSet3))
+	verifyRegisterFileEventRegistration(t, s, len(eventSet1)+len(eventSet2)+len(eventSet3)+1)
 }
 
 func TestRegisterKernelFunctionCallEvents(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	events := []*api.KernelFunctionCallFilter{
-		&api.KernelFunctionCallFilter{
-			Type:   api.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_ENTER,
+	events := []*telemetryAPI.KernelFunctionCallFilter{
+		&telemetryAPI.KernelFunctionCallFilter{
+			Type:   telemetryAPI.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_ENTER,
 			Symbol: "sys_connect",
 		},
-		&api.KernelFunctionCallFilter{
-			Type:   api.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_EXIT,
+		&telemetryAPI.KernelFunctionCallFilter{
+			Type:   telemetryAPI.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_EXIT,
 			Symbol: "sys_connect",
 		},
 	}
-	invalidEvents := []*api.KernelFunctionCallFilter{
-		&api.KernelFunctionCallFilter{
-			Type: api.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_UNKNOWN,
+	invalidEvents := []*telemetryAPI.KernelFunctionCallFilter{
+		&telemetryAPI.KernelFunctionCallFilter{
+			Type: telemetryAPI.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_UNKNOWN,
 		},
-		&api.KernelFunctionCallFilter{
-			Type: api.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_EXIT,
+		&telemetryAPI.KernelFunctionCallFilter{
+			Type: telemetryAPI.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_EXIT,
 			FilterExpression: expression.Equal(
 				expression.Identifier("asdfasdf"),
 				expression.Value(make(chan bool))),
@@ -386,53 +418,53 @@ func TestRegisterNetworkEvents(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	events := []*api.NetworkEventFilter{
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_ATTEMPT,
+	events := []*telemetryAPI.NetworkEventFilter{
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_ATTEMPT,
 		},
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_RESULT,
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_RESULT,
 		},
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_BIND_ATTEMPT,
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_BIND_ATTEMPT,
 		},
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_BIND_RESULT,
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_BIND_RESULT,
 		},
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_ATTEMPT,
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_ATTEMPT,
 		},
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_RESULT,
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_RESULT,
 		},
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_ATTEMPT,
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_ATTEMPT,
 			FilterExpression: expression.Equal(
 				expression.Identifier("backlog"),
 				expression.Value(uint64(1024))),
 		},
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_RESULT,
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_RESULT,
 		},
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_ATTEMPT,
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_ATTEMPT,
 		},
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_RESULT,
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_RESULT,
 		},
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_ATTEMPT,
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_ATTEMPT,
 		},
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_RESULT,
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_RESULT,
 		},
 	}
-	invalidEvents := []*api.NetworkEventFilter{
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_UNKNOWN,
+	invalidEvents := []*telemetryAPI.NetworkEventFilter{
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_UNKNOWN,
 		},
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_ATTEMPT,
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_ATTEMPT,
 			FilterExpression: expression.Equal(
 				expression.Identifier("asdf"),
 				expression.Value(make(chan bool))),
@@ -452,48 +484,48 @@ func TestRegisterPerformanceEvents(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	events := []*api.PerformanceEventFilter{
-		&api.PerformanceEventFilter{
-			SampleRateType: api.SampleRateType_SAMPLE_RATE_TYPE_PERIOD,
-			SampleRate:     &api.PerformanceEventFilter_Period{345},
-			Events: []*api.PerformanceEventCounter{
-				&api.PerformanceEventCounter{
-					Type:   api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE,
+	events := []*telemetryAPI.PerformanceEventFilter{
+		&telemetryAPI.PerformanceEventFilter{
+			SampleRateType: telemetryAPI.SampleRateType_SAMPLE_RATE_TYPE_PERIOD,
+			SampleRate:     &telemetryAPI.PerformanceEventFilter_Period{Period: 345},
+			Events: []*telemetryAPI.PerformanceEventCounter{
+				&telemetryAPI.PerformanceEventCounter{
+					Type:   telemetryAPI.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE,
 					Config: 394857,
 				},
-				&api.PerformanceEventCounter{
-					Type:   api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE_CACHE,
+				&telemetryAPI.PerformanceEventCounter{
+					Type:   telemetryAPI.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE_CACHE,
 					Config: 32478,
 				},
 			},
 		},
-		&api.PerformanceEventFilter{
-			SampleRateType: api.SampleRateType_SAMPLE_RATE_TYPE_FREQUENCY,
-			SampleRate:     &api.PerformanceEventFilter_Frequency{345},
-			Events: []*api.PerformanceEventCounter{
-				&api.PerformanceEventCounter{
-					Type:   api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_SOFTWARE,
+		&telemetryAPI.PerformanceEventFilter{
+			SampleRateType: telemetryAPI.SampleRateType_SAMPLE_RATE_TYPE_FREQUENCY,
+			SampleRate:     &telemetryAPI.PerformanceEventFilter_Frequency{Frequency: 345},
+			Events: []*telemetryAPI.PerformanceEventCounter{
+				&telemetryAPI.PerformanceEventCounter{
+					Type:   telemetryAPI.PerformanceEventType_PERFORMANCE_EVENT_TYPE_SOFTWARE,
 					Config: 394857,
 				},
 			},
 		},
 	}
-	invalidEvents := []*api.PerformanceEventFilter{
-		&api.PerformanceEventFilter{
-			SampleRateType: api.SampleRateType_SAMPLE_RATE_TYPE_PERIOD,
+	invalidEvents := []*telemetryAPI.PerformanceEventFilter{
+		&telemetryAPI.PerformanceEventFilter{
+			SampleRateType: telemetryAPI.SampleRateType_SAMPLE_RATE_TYPE_PERIOD,
 		},
-		&api.PerformanceEventFilter{
-			SampleRateType: api.SampleRateType_SAMPLE_RATE_TYPE_FREQUENCY,
+		&telemetryAPI.PerformanceEventFilter{
+			SampleRateType: telemetryAPI.SampleRateType_SAMPLE_RATE_TYPE_FREQUENCY,
 		},
-		&api.PerformanceEventFilter{
-			SampleRateType: api.SampleRateType_SAMPLE_RATE_TYPE_UNKNOWN,
+		&telemetryAPI.PerformanceEventFilter{
+			SampleRateType: telemetryAPI.SampleRateType_SAMPLE_RATE_TYPE_UNKNOWN,
 		},
-		&api.PerformanceEventFilter{
-			SampleRateType: api.SampleRateType_SAMPLE_RATE_TYPE_FREQUENCY,
-			SampleRate:     &api.PerformanceEventFilter_Frequency{345},
-			Events: []*api.PerformanceEventCounter{
-				&api.PerformanceEventCounter{
-					Type:   api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_UNKNOWN,
+		&telemetryAPI.PerformanceEventFilter{
+			SampleRateType: telemetryAPI.SampleRateType_SAMPLE_RATE_TYPE_FREQUENCY,
+			SampleRate:     &telemetryAPI.PerformanceEventFilter_Frequency{Frequency: 345},
+			Events: []*telemetryAPI.PerformanceEventCounter{
+				&telemetryAPI.PerformanceEventCounter{
+					Type:   telemetryAPI.PerformanceEventType_PERFORMANCE_EVENT_TYPE_UNKNOWN,
 					Config: 394857,
 				},
 			},
@@ -510,41 +542,41 @@ func TestRegisterProcessEvents(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	eventSet1 := []*api.ProcessEventFilter{
-		&api.ProcessEventFilter{
-			Type:         api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
+	eventSet1 := []*telemetryAPI.ProcessEventFilter{
+		&telemetryAPI.ProcessEventFilter{
+			Type:         telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
 			ExecFilename: &wrappers.StringValue{Value: "/bin/bash"},
 		},
-		&api.ProcessEventFilter{
-			Type:     api.ProcessEventType_PROCESS_EVENT_TYPE_EXIT,
+		&telemetryAPI.ProcessEventFilter{
+			Type:     telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXIT,
 			ExitCode: &wrappers.Int32Value{Value: 88},
 		},
-		&api.ProcessEventFilter{
-			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_FORK,
+		&telemetryAPI.ProcessEventFilter{
+			Type: telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_FORK,
 		},
-		&api.ProcessEventFilter{
-			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_UPDATE,
+		&telemetryAPI.ProcessEventFilter{
+			Type: telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_UPDATE,
 		},
 	}
-	eventSet2 := []*api.ProcessEventFilter{
+	eventSet2 := []*telemetryAPI.ProcessEventFilter{
 		/*	FIXME
 			A second registration of an external event for the same
 			subscription will overwrite the first one. Fixing this
 			correctly is extremely low priority and requires
 			extensive changes.
 
-			&api.ProcessEventFilter{
-				Type:                api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
+			&telemetryAPI.ProcessEventFilter{
+				Type:                telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
 				ExecFilenamePattern: &wrappers.StringValue{"/sbin/*"},
 			},
 		*/
 	}
-	invalidEvents := []*api.ProcessEventFilter{
-		&api.ProcessEventFilter{
-			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_UNKNOWN,
+	invalidEvents := []*telemetryAPI.ProcessEventFilter{
+		&telemetryAPI.ProcessEventFilter{
+			Type: telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_UNKNOWN,
 		},
-		&api.ProcessEventFilter{
-			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
+		&telemetryAPI.ProcessEventFilter{
+			Type: telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
 			FilterExpression: expression.Equal(
 				expression.Identifier("asdf"),
 				expression.Value(make(chan bool))),
@@ -604,9 +636,9 @@ func TestRegisterSyscallEvents(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	enterEvents := []*api.SyscallEventFilter{
-		&api.SyscallEventFilter{
-			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
+	enterEvents := []*telemetryAPI.SyscallEventFilter{
+		&telemetryAPI.SyscallEventFilter{
+			Type: telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
 			Id:   &wrappers.Int64Value{Value: 8},
 			Arg0: &wrappers.UInt64Value{Value: 11},
 			Arg1: &wrappers.UInt64Value{Value: 22},
@@ -616,33 +648,33 @@ func TestRegisterSyscallEvents(t *testing.T) {
 			Arg5: &wrappers.UInt64Value{Value: 66},
 		},
 	}
-	exitEvents := []*api.SyscallEventFilter{
-		&api.SyscallEventFilter{
-			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT,
+	exitEvents := []*telemetryAPI.SyscallEventFilter{
+		&telemetryAPI.SyscallEventFilter{
+			Type: telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT,
 			Id:   &wrappers.Int64Value{Value: 8},
 			Ret:  &wrappers.Int64Value{Value: 0},
 		},
 	}
-	invalidEvents := []*api.SyscallEventFilter{
-		&api.SyscallEventFilter{
-			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_UNKNOWN,
+	invalidEvents := []*telemetryAPI.SyscallEventFilter{
+		&telemetryAPI.SyscallEventFilter{
+			Type: telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_UNKNOWN,
 			Id:   &wrappers.Int64Value{Value: 8},
 		},
-		&api.SyscallEventFilter{
-			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
+		&telemetryAPI.SyscallEventFilter{
+			Type: telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
 		},
-		&api.SyscallEventFilter{
-			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT,
+		&telemetryAPI.SyscallEventFilter{
+			Type: telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT,
 		},
-		&api.SyscallEventFilter{
-			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
+		&telemetryAPI.SyscallEventFilter{
+			Type: telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
 			Id:   &wrappers.Int64Value{Value: 8},
 			FilterExpression: expression.Equal(
 				expression.Identifier("asdf"),
 				expression.Value(make(chan bool))),
 		},
-		&api.SyscallEventFilter{
-			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT,
+		&telemetryAPI.SyscallEventFilter{
+			Type: telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT,
 			Id:   &wrappers.Int64Value{Value: 8},
 			FilterExpression: expression.Equal(
 				expression.Identifier("asdf"),
@@ -668,11 +700,11 @@ func TestRegisterTickerEvents(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	events := []*api.TickerEventFilter{
-		&api.TickerEventFilter{
+	events := []*telemetryAPI.TickerEventFilter{
+		&telemetryAPI.TickerEventFilter{
 			Interval: 24378,
 		},
-		&api.TickerEventFilter{
+		&telemetryAPI.TickerEventFilter{
 			Interval: 374,
 		},
 	}
@@ -680,6 +712,56 @@ func TestRegisterTickerEvents(t *testing.T) {
 	s := newTestSubscription(t, sensor)
 	s.registerTickerEvents(events)
 	verifyRegisterTickerEventFilter(t, s, len(events))
+}
+
+func TestRegisterUserFunctionCallEvents(t *testing.T) {
+	sensor := newUnitTestSensor(t)
+	defer sensor.Stop()
+
+	events := []*telemetryAPI.UserFunctionCallFilter{
+		&telemetryAPI.UserFunctionCallFilter{
+			Type:       telemetryAPI.UserFunctionCallEventType_USER_FUNCTION_CALL_EVENT_TYPE_ENTER,
+			Executable: "/bin/bash",
+			Symbol:     "readline",
+		},
+		&telemetryAPI.UserFunctionCallFilter{
+			Type:       telemetryAPI.UserFunctionCallEventType_USER_FUNCTION_CALL_EVENT_TYPE_EXIT,
+			Executable: "/bin/bash",
+			Symbol:     "readline",
+		},
+	}
+	invalidEvents := []*telemetryAPI.UserFunctionCallFilter{
+		&telemetryAPI.UserFunctionCallFilter{
+			Type: telemetryAPI.UserFunctionCallEventType_USER_FUNCTION_CALL_EVENT_TYPE_UNKNOWN,
+		},
+		&telemetryAPI.UserFunctionCallFilter{
+			Type: telemetryAPI.UserFunctionCallEventType_USER_FUNCTION_CALL_EVENT_TYPE_EXIT,
+			FilterExpression: expression.Equal(
+				expression.Identifier("asdfasdf"),
+				expression.Value(make(chan bool))),
+		},
+	}
+
+	format := `name: ^^NAME^^
+ID: ^^ID^^
+format:
+	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+	field:unsigned char common_preempt_count;	offset:3;	size:1;signed:0;
+	field:int common_pid;	offset:4;	size:4;	signed:1;
+
+	field:__data_loc char[] s;	offset:16;	size:4;	signed:1;
+
+print fmt: "s=\"%s\"", __get_str(s)`
+
+	for x := range events {
+		newUnitTestUprobe(t, sensor, uint64(x), format)
+	}
+
+	s := newTestSubscription(t, sensor)
+	s.registerUserFunctionCallEvents(events)
+	s.registerUserFunctionCallEvents(invalidEvents)
+	verifyRegisterUserFunctionCallEventFilter(t, s, len(events))
 }
 
 func TestNewTelemetryEvent(t *testing.T) {
@@ -707,7 +789,7 @@ func TestNewTelemetryEvent(t *testing.T) {
 		},
 	}
 
-	e := newTelemetryEvent(data)
+	e := NewTelemetryEvent(data)
 	assert.Equal(t, data.EventID, e.Id)
 	assert.Equal(t, data.ProcessID, e.ProcessId)
 	assert.Equal(t, data.PID, int(e.ProcessPid))
@@ -734,7 +816,7 @@ func TestNewTelemetryEvent(t *testing.T) {
 func TestTranslateNetworkAddress(t *testing.T) {
 	type testCase struct {
 		data     NetworkAddressTelemetryEventData
-		expected *api.NetworkAddress
+		expected *telemetryAPI.NetworkAddress
 	}
 
 	testCases := []testCase{
@@ -743,9 +825,9 @@ func TestTranslateNetworkAddress(t *testing.T) {
 				Family:   unix.AF_LOCAL,
 				UnixPath: "/tmp/capsule8/local.socket",
 			},
-			expected: &api.NetworkAddress{
-				Family: api.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_LOCAL,
-				Address: &api.NetworkAddress_LocalAddress{
+			expected: &telemetryAPI.NetworkAddress{
+				Family: telemetryAPI.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_LOCAL,
+				Address: &telemetryAPI.NetworkAddress_LocalAddress{
 					LocalAddress: "/tmp/capsule8/local.socket",
 				},
 			},
@@ -756,11 +838,11 @@ func TestTranslateNetworkAddress(t *testing.T) {
 				IPv4Address: 0x7f000001,
 				IPv4Port:    0x1f90,
 			},
-			expected: &api.NetworkAddress{
-				Family: api.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_INET,
-				Address: &api.NetworkAddress_Ipv4Address{
-					Ipv4Address: &api.IPv4AddressAndPort{
-						Address: &api.IPv4Address{
+			expected: &telemetryAPI.NetworkAddress{
+				Family: telemetryAPI.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_INET,
+				Address: &telemetryAPI.NetworkAddress_Ipv4Address{
+					Ipv4Address: &telemetryAPI.IPv4AddressAndPort{
+						Address: &telemetryAPI.IPv4Address{
 							Address: 0x7f000001,
 						},
 						Port: 0x1f90,
@@ -775,11 +857,11 @@ func TestTranslateNetworkAddress(t *testing.T) {
 				IPv6AddressLow:  0x9900aabbccddeeff,
 				IPv6Port:        0x01bb,
 			},
-			expected: &api.NetworkAddress{
-				Family: api.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_INET6,
-				Address: &api.NetworkAddress_Ipv6Address{
-					Ipv6Address: &api.IPv6AddressAndPort{
-						Address: &api.IPv6Address{
+			expected: &telemetryAPI.NetworkAddress{
+				Family: telemetryAPI.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_INET6,
+				Address: &telemetryAPI.NetworkAddress_Ipv6Address{
+					Ipv6Address: &telemetryAPI.IPv6AddressAndPort{
+						Address: &telemetryAPI.IPv6Address{
 							High: 0x1122334455667788,
 							Low:  0x9900aabbccddeeff,
 						},
@@ -810,7 +892,7 @@ func TestTranslateEvent(t *testing.T) {
 
 	type testCase struct {
 		event    TelemetryEvent
-		expected *api.TelemetryEvent
+		expected *telemetryAPI.TelemetryEvent
 	}
 
 	testCases := []testCase{
@@ -820,9 +902,9 @@ func TestTranslateEvent(t *testing.T) {
 				Index:      65,
 				Characters: "abcdefghijklmnopqrstuvwxyz",
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Chargen{
-					Chargen: &api.ChargenEvent{
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Chargen{
+					Chargen: &telemetryAPI.ChargenEvent{
 						Index:      65,
 						Characters: "abcdefghijklmnopqrstuvwxyz",
 					},
@@ -847,14 +929,14 @@ func TestTranslateEvent(t *testing.T) {
 					},
 				},
 			},
-			expected: &api.TelemetryEvent{
+			expected: &telemetryAPI.TelemetryEvent{
 				ContainerId:   "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ./",
 				ContainerName: "capsule8-sensor-container",
 				ImageId:       "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz./",
 				ImageName:     "capsule8-sensor-image",
-				Event: &api.TelemetryEvent_Container{
-					Container: &api.ContainerEvent{
-						Type:             api.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
+				Event: &telemetryAPI.TelemetryEvent_Container{
+					Container: &telemetryAPI.ContainerEvent{
+						Type:             telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
 						Name:             "capsule8-sensor-container",
 						ImageId:          "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz./",
 						ImageName:        "capsule8-sensor-image",
@@ -883,14 +965,14 @@ func TestTranslateEvent(t *testing.T) {
 					},
 				},
 			},
-			expected: &api.TelemetryEvent{
+			expected: &telemetryAPI.TelemetryEvent{
 				ContainerId:   "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ./",
 				ContainerName: "capsule8-sensor-container",
 				ImageId:       "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz./",
 				ImageName:     "capsule8-sensor-image",
-				Event: &api.TelemetryEvent_Container{
-					Container: &api.ContainerEvent{
-						Type:             api.ContainerEventType_CONTAINER_EVENT_TYPE_DESTROYED,
+				Event: &telemetryAPI.TelemetryEvent_Container{
+					Container: &telemetryAPI.ContainerEvent{
+						Type:             telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_DESTROYED,
 						Name:             "capsule8-sensor-container",
 						ImageId:          "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz./",
 						ImageName:        "capsule8-sensor-image",
@@ -919,14 +1001,14 @@ func TestTranslateEvent(t *testing.T) {
 					},
 				},
 			},
-			expected: &api.TelemetryEvent{
+			expected: &telemetryAPI.TelemetryEvent{
 				ContainerId:   "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ./",
 				ContainerName: "capsule8-sensor-container",
 				ImageId:       "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz./",
 				ImageName:     "capsule8-sensor-image",
-				Event: &api.TelemetryEvent_Container{
-					Container: &api.ContainerEvent{
-						Type:             api.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
+				Event: &telemetryAPI.TelemetryEvent_Container{
+					Container: &telemetryAPI.ContainerEvent{
+						Type:             telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
 						Name:             "capsule8-sensor-container",
 						ImageId:          "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz./",
 						ImageName:        "capsule8-sensor-image",
@@ -957,14 +1039,14 @@ func TestTranslateEvent(t *testing.T) {
 					},
 				},
 			},
-			expected: &api.TelemetryEvent{
+			expected: &telemetryAPI.TelemetryEvent{
 				ContainerId:   "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ./",
 				ContainerName: "capsule8-sensor-container",
 				ImageId:       "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz./",
 				ImageName:     "capsule8-sensor-image",
-				Event: &api.TelemetryEvent_Container{
-					Container: &api.ContainerEvent{
-						Type:             api.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
+				Event: &telemetryAPI.TelemetryEvent_Container{
+					Container: &telemetryAPI.ContainerEvent{
+						Type:             telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
 						Name:             "capsule8-sensor-container",
 						ImageId:          "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz./",
 						ImageName:        "capsule8-sensor-image",
@@ -996,14 +1078,14 @@ func TestTranslateEvent(t *testing.T) {
 					},
 				},
 			},
-			expected: &api.TelemetryEvent{
+			expected: &telemetryAPI.TelemetryEvent{
 				ContainerId:   "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ./",
 				ContainerName: "capsule8-sensor-container",
 				ImageId:       "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz./",
 				ImageName:     "capsule8-sensor-image",
-				Event: &api.TelemetryEvent_Container{
-					Container: &api.ContainerEvent{
-						Type:             api.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
+				Event: &telemetryAPI.TelemetryEvent_Container{
+					Container: &telemetryAPI.ContainerEvent{
+						Type:             telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
 						Name:             "capsule8-sensor-container",
 						ImageId:          "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz./",
 						ImageName:        "capsule8-sensor-image",
@@ -1032,20 +1114,82 @@ func TestTranslateEvent(t *testing.T) {
 					},
 				},
 			},
-			expected: &api.TelemetryEvent{
+			expected: &telemetryAPI.TelemetryEvent{
 				ContainerId:   "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ./",
 				ContainerName: "capsule8-sensor-container",
 				ImageId:       "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz./",
 				ImageName:     "capsule8-sensor-image",
-				Event: &api.TelemetryEvent_Container{
-					Container: &api.ContainerEvent{
-						Type:             api.ContainerEventType_CONTAINER_EVENT_TYPE_UPDATED,
+				Event: &telemetryAPI.TelemetryEvent_Container{
+					Container: &telemetryAPI.ContainerEvent{
+						Type:             telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_UPDATED,
 						Name:             "capsule8-sensor-container",
 						ImageId:          "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz./",
 						ImageName:        "capsule8-sensor-image",
 						HostPid:          872364,
 						DockerConfigJson: "This is the JSON config that isn't actually JSON",
 						OciConfigJson:    "This is the OCI config that isn't real",
+					},
+				},
+			},
+		},
+		// FileCreate
+		testCase{
+			event: FileCreateTelemetryEvent{
+				Filename: "/path/to/foo.bar",
+				Mode:     0644,
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_File{
+					File: &telemetryAPI.FileEvent{
+						Type:     telemetryAPI.FileEventType_FILE_EVENT_TYPE_CREATE,
+						Filename: "/path/to/foo.bar",
+						OpenMode: 0644,
+					},
+				},
+			},
+		},
+		// FileDelete
+		testCase{
+			event: FileDeleteTelemetryEvent{
+				Filename: "/path/to/foo.bar",
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_File{
+					File: &telemetryAPI.FileEvent{
+						Type:     telemetryAPI.FileEventType_FILE_EVENT_TYPE_DELETE,
+						Filename: "/path/to/foo.bar",
+					},
+				},
+			},
+		},
+		// FileLink
+		testCase{
+			event: FileLinkTelemetryEvent{
+				SourceFile: "/path/to/source.foo.bar",
+				TargetFile: "/path/to/target.foo.bar",
+				Symlink:    true,
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_File{
+					File: &telemetryAPI.FileEvent{
+						Type:       telemetryAPI.FileEventType_FILE_EVENT_TYPE_LINK,
+						SourceFile: "/path/to/source.foo.bar",
+						TargetFile: "/path/to/target.foo.bar",
+						Symlink:    true,
+					},
+				},
+			},
+		},
+		// FileModify
+		testCase{
+			event: FileModifyTelemetryEvent{
+				Filename: "/path/to/foo.bar",
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_File{
+					File: &telemetryAPI.FileEvent{
+						Type:     telemetryAPI.FileEventType_FILE_EVENT_TYPE_MODIFY,
+						Filename: "/path/to/foo.bar",
 					},
 				},
 			},
@@ -1057,10 +1201,10 @@ func TestTranslateEvent(t *testing.T) {
 				Flags:    8276354,
 				Mode:     0644,
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_File{
-					File: &api.FileEvent{
-						Type:      api.FileEventType_FILE_EVENT_TYPE_OPEN,
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_File{
+					File: &telemetryAPI.FileEvent{
+						Type:      telemetryAPI.FileEventType_FILE_EVENT_TYPE_OPEN,
 						Filename:  "/path/to/foo.bar",
 						OpenFlags: 8276354,
 						OpenMode:  0644,
@@ -1068,10 +1212,68 @@ func TestTranslateEvent(t *testing.T) {
 				},
 			},
 		},
+		// FileRename
+		testCase{
+			event: FileRenameTelemetryEvent{
+				Oldname: "/path/to/old.foo.bar",
+				Newname: "/path/to/new.foo.bar",
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_File{
+					File: &telemetryAPI.FileEvent{
+						Type:    telemetryAPI.FileEventType_FILE_EVENT_TYPE_RENAME,
+						Oldname: "/path/to/old.foo.bar",
+						Newname: "/path/to/new.foo.bar",
+					},
+				},
+			},
+		},
+		// FileOpenForModifyEvent
+		testCase{
+			event: FileOpenForModifyTelemetryEvent{
+				Filename: "/path/to/file.txt",
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_File{
+					File: &telemetryAPI.FileEvent{
+						Type:     telemetryAPI.FileEventType_FILE_EVENT_TYPE_OPEN_FOR_MODIFY,
+						Filename: "/path/to/file.txt",
+					},
+				},
+			},
+		},
+		// FileCloseForModifyEvent
+		testCase{
+			event: FileCloseForModifyTelemetryEvent{
+				Filename: "/path/to/file.txt",
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_File{
+					File: &telemetryAPI.FileEvent{
+						Type:     telemetryAPI.FileEventType_FILE_EVENT_TYPE_CLOSE_FOR_MODIFY,
+						Filename: "/path/to/file.txt",
+					},
+				},
+			},
+		},
+		// FileAttributeChangeEvent
+		testCase{
+			event: FileAttributeChangeTelemetryEvent{
+				Filename: "/path/to/file.txt",
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_File{
+					File: &telemetryAPI.FileEvent{
+						Type:     telemetryAPI.FileEventType_FILE_EVENT_TYPE_ATTRIBUTE_CHANGE,
+						Filename: "/path/to/file.txt",
+					},
+				},
+			},
+		},
 		// KernelFunctionCall
 		testCase{
 			event: KernelFunctionCallTelemetryEvent{
-				Arguments: perf.TraceEventSampleData{
+				Arguments: expression.FieldValueMap{
 					"bytes":  []byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66},
 					"string": "string_value",
 					"sint8":  int8(-8),
@@ -1084,71 +1286,254 @@ func TestTranslateEvent(t *testing.T) {
 					"uint64": uint64(64),
 				},
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_KernelCall{
-					KernelCall: &api.KernelFunctionCallEvent{
-						Arguments: map[string]*api.KernelFunctionCallEvent_FieldValue{
-							"bytes": &api.KernelFunctionCallEvent_FieldValue{
-								FieldType: api.KernelFunctionCallEvent_BYTES,
-								Value: &api.KernelFunctionCallEvent_FieldValue_BytesValue{
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_KernelCall{
+					KernelCall: &telemetryAPI.KernelFunctionCallEvent{
+						Arguments: map[string]*telemetryAPI.KernelFunctionCallEvent_FieldValue{
+							"bytes": &telemetryAPI.KernelFunctionCallEvent_FieldValue{
+								FieldType: telemetryAPI.KernelFunctionCallEvent_BYTES,
+								Value: &telemetryAPI.KernelFunctionCallEvent_FieldValue_BytesValue{
 									BytesValue: []byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66},
 								},
 							},
-							"string": &api.KernelFunctionCallEvent_FieldValue{
-								FieldType: api.KernelFunctionCallEvent_STRING,
-								Value: &api.KernelFunctionCallEvent_FieldValue_StringValue{
+							"string": &telemetryAPI.KernelFunctionCallEvent_FieldValue{
+								FieldType: telemetryAPI.KernelFunctionCallEvent_STRING,
+								Value: &telemetryAPI.KernelFunctionCallEvent_FieldValue_StringValue{
 									StringValue: "string_value",
 								},
 							},
-							"sint8": &api.KernelFunctionCallEvent_FieldValue{
-								FieldType: api.KernelFunctionCallEvent_SINT8,
-								Value: &api.KernelFunctionCallEvent_FieldValue_SignedValue{
+							"sint8": &telemetryAPI.KernelFunctionCallEvent_FieldValue{
+								FieldType: telemetryAPI.KernelFunctionCallEvent_SINT8,
+								Value: &telemetryAPI.KernelFunctionCallEvent_FieldValue_SignedValue{
 									SignedValue: int64(-8),
 								},
 							},
-							"sint16": &api.KernelFunctionCallEvent_FieldValue{
-								FieldType: api.KernelFunctionCallEvent_SINT16,
-								Value: &api.KernelFunctionCallEvent_FieldValue_SignedValue{
+							"sint16": &telemetryAPI.KernelFunctionCallEvent_FieldValue{
+								FieldType: telemetryAPI.KernelFunctionCallEvent_SINT16,
+								Value: &telemetryAPI.KernelFunctionCallEvent_FieldValue_SignedValue{
 									SignedValue: int64(-16),
 								},
 							},
-							"sint32": &api.KernelFunctionCallEvent_FieldValue{
-								FieldType: api.KernelFunctionCallEvent_SINT32,
-								Value: &api.KernelFunctionCallEvent_FieldValue_SignedValue{
+							"sint32": &telemetryAPI.KernelFunctionCallEvent_FieldValue{
+								FieldType: telemetryAPI.KernelFunctionCallEvent_SINT32,
+								Value: &telemetryAPI.KernelFunctionCallEvent_FieldValue_SignedValue{
 									SignedValue: int64(-32),
 								},
 							},
-							"sint64": &api.KernelFunctionCallEvent_FieldValue{
-								FieldType: api.KernelFunctionCallEvent_SINT64,
-								Value: &api.KernelFunctionCallEvent_FieldValue_SignedValue{
+							"sint64": &telemetryAPI.KernelFunctionCallEvent_FieldValue{
+								FieldType: telemetryAPI.KernelFunctionCallEvent_SINT64,
+								Value: &telemetryAPI.KernelFunctionCallEvent_FieldValue_SignedValue{
 									SignedValue: int64(-64),
 								},
 							},
-							"uint8": &api.KernelFunctionCallEvent_FieldValue{
-								FieldType: api.KernelFunctionCallEvent_UINT8,
-								Value: &api.KernelFunctionCallEvent_FieldValue_UnsignedValue{
+							"uint8": &telemetryAPI.KernelFunctionCallEvent_FieldValue{
+								FieldType: telemetryAPI.KernelFunctionCallEvent_UINT8,
+								Value: &telemetryAPI.KernelFunctionCallEvent_FieldValue_UnsignedValue{
 									UnsignedValue: uint64(8),
 								},
 							},
-							"uint16": &api.KernelFunctionCallEvent_FieldValue{
-								FieldType: api.KernelFunctionCallEvent_UINT16,
-								Value: &api.KernelFunctionCallEvent_FieldValue_UnsignedValue{
+							"uint16": &telemetryAPI.KernelFunctionCallEvent_FieldValue{
+								FieldType: telemetryAPI.KernelFunctionCallEvent_UINT16,
+								Value: &telemetryAPI.KernelFunctionCallEvent_FieldValue_UnsignedValue{
 									UnsignedValue: uint64(16),
 								},
 							},
-							"uint32": &api.KernelFunctionCallEvent_FieldValue{
-								FieldType: api.KernelFunctionCallEvent_UINT32,
-								Value: &api.KernelFunctionCallEvent_FieldValue_UnsignedValue{
+							"uint32": &telemetryAPI.KernelFunctionCallEvent_FieldValue{
+								FieldType: telemetryAPI.KernelFunctionCallEvent_UINT32,
+								Value: &telemetryAPI.KernelFunctionCallEvent_FieldValue_UnsignedValue{
 									UnsignedValue: uint64(32),
 								},
 							},
-							"uint64": &api.KernelFunctionCallEvent_FieldValue{
-								FieldType: api.KernelFunctionCallEvent_UINT64,
-								Value: &api.KernelFunctionCallEvent_FieldValue_UnsignedValue{
+							"uint64": &telemetryAPI.KernelFunctionCallEvent_FieldValue{
+								FieldType: telemetryAPI.KernelFunctionCallEvent_UINT64,
+								Value: &telemetryAPI.KernelFunctionCallEvent_FieldValue_UnsignedValue{
 									UnsignedValue: uint64(64),
 								},
 							},
 						},
+					},
+				},
+			},
+		},
+		// Lost Event
+		testCase{
+			event: LostRecordTelemetryEvent{
+				Lost: 21,
+				Type: LostRecordTypeUnknown,
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Lost{
+					Lost: &telemetryAPI.LostRecordEvent{
+						Lost: 21,
+						Type: telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_UNKNOWN,
+					},
+				},
+			},
+		},
+		testCase{
+			event: LostRecordTelemetryEvent{
+				Lost: 21,
+				Type: LostRecordTypeSubscription,
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Lost{
+					Lost: &telemetryAPI.LostRecordEvent{
+						Lost: 21,
+						Type: telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_SUBSCRIPTION,
+					},
+				},
+			},
+		},
+		testCase{
+			event: LostRecordTelemetryEvent{
+				Lost: 21,
+				Type: LostRecordTypeProcess,
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Lost{
+					Lost: &telemetryAPI.LostRecordEvent{
+						Lost: 21,
+						Type: telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_PROCESS,
+					},
+				},
+			},
+		},
+		testCase{
+			event: LostRecordTelemetryEvent{
+				Lost: 21,
+				Type: LostRecordTypeContainer,
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Lost{
+					Lost: &telemetryAPI.LostRecordEvent{
+						Lost: 21,
+						Type: telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_CONTAINER,
+					},
+				},
+			},
+		},
+		testCase{
+			event: LostRecordTelemetryEvent{
+				Lost: 21,
+				Type: LostRecordTypeFileCreate,
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Lost{
+					Lost: &telemetryAPI.LostRecordEvent{
+						Lost: 21,
+						Type: telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_CREATE,
+					},
+				},
+			},
+		},
+		testCase{
+			event: LostRecordTelemetryEvent{
+				Lost: 21,
+				Type: LostRecordTypeFileDelete,
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Lost{
+					Lost: &telemetryAPI.LostRecordEvent{
+						Lost: 21,
+						Type: telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_DELETE,
+					},
+				},
+			},
+		},
+		testCase{
+			event: LostRecordTelemetryEvent{
+				Lost: 21,
+				Type: LostRecordTypeFileLink,
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Lost{
+					Lost: &telemetryAPI.LostRecordEvent{
+						Lost: 21,
+						Type: telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_LINK,
+					},
+				},
+			},
+		},
+		testCase{
+			event: LostRecordTelemetryEvent{
+				Lost: 21,
+				Type: LostRecordTypeFileSymlink,
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Lost{
+					Lost: &telemetryAPI.LostRecordEvent{
+						Lost: 21,
+						Type: telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_SYMLINK,
+					},
+				},
+			},
+		},
+		testCase{
+			event: LostRecordTelemetryEvent{
+				Lost: 21,
+				Type: LostRecordTypeFileOpenModify,
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Lost{
+					Lost: &telemetryAPI.LostRecordEvent{
+						Lost: 21,
+						Type: telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_OPEN_MODIFY,
+					},
+				},
+			},
+		},
+		testCase{
+			event: LostRecordTelemetryEvent{
+				Lost: 21,
+				Type: LostRecordTypeFileCloseModify,
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Lost{
+					Lost: &telemetryAPI.LostRecordEvent{
+						Lost: 21,
+						Type: telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_CLOSE_MODIFY,
+					},
+				},
+			},
+		},
+		testCase{
+			event: LostRecordTelemetryEvent{
+				Lost: 21,
+				Type: LostRecordTypeFileModify,
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Lost{
+					Lost: &telemetryAPI.LostRecordEvent{
+						Lost: 21,
+						Type: telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_MODIFY,
+					},
+				},
+			},
+		},
+		testCase{
+			event: LostRecordTelemetryEvent{
+				Lost: 21,
+				Type: LostRecordTypeFileRename,
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Lost{
+					Lost: &telemetryAPI.LostRecordEvent{
+						Lost: 21,
+						Type: telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_RENAME,
+					},
+				},
+			},
+		},
+		testCase{
+			event: LostRecordTelemetryEvent{
+				Lost: 21,
+				Type: LostRecordTypeFileAttributeChange,
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Lost{
+					Lost: &telemetryAPI.LostRecordEvent{
+						Lost: 21,
+						Type: telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_ATTRIBUTE_CHANGE,
 					},
 				},
 			},
@@ -1160,10 +1545,10 @@ func TestTranslateEvent(t *testing.T) {
 					FD: 82734,
 				},
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Network{
-					Network: &api.NetworkEvent{
-						Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_ATTEMPT,
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Network{
+					Network: &telemetryAPI.NetworkEvent{
+						Type:   telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_ATTEMPT,
 						Sockfd: 82734,
 					},
 				},
@@ -1176,10 +1561,10 @@ func TestTranslateEvent(t *testing.T) {
 					Return: 293478,
 				},
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Network{
-					Network: &api.NetworkEvent{
-						Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_RESULT,
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Network{
+					Network: &telemetryAPI.NetworkEvent{
+						Type:   telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_RESULT,
 						Result: 293478,
 					},
 				},
@@ -1196,14 +1581,14 @@ func TestTranslateEvent(t *testing.T) {
 					UnixPath: "/path/to/local.socket",
 				},
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Network{
-					Network: &api.NetworkEvent{
-						Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_BIND_ATTEMPT,
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Network{
+					Network: &telemetryAPI.NetworkEvent{
+						Type:   telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_BIND_ATTEMPT,
 						Sockfd: 82734,
-						Address: &api.NetworkAddress{
-							Family: api.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_LOCAL,
-							Address: &api.NetworkAddress_LocalAddress{
+						Address: &telemetryAPI.NetworkAddress{
+							Family: telemetryAPI.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_LOCAL,
+							Address: &telemetryAPI.NetworkAddress_LocalAddress{
 								LocalAddress: "/path/to/local.socket",
 							},
 						},
@@ -1218,10 +1603,10 @@ func TestTranslateEvent(t *testing.T) {
 					Return: 293478,
 				},
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Network{
-					Network: &api.NetworkEvent{
-						Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_BIND_RESULT,
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Network{
+					Network: &telemetryAPI.NetworkEvent{
+						Type:   telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_BIND_RESULT,
 						Result: 293478,
 					},
 				},
@@ -1238,14 +1623,14 @@ func TestTranslateEvent(t *testing.T) {
 					UnixPath: "/path/to/local.socket",
 				},
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Network{
-					Network: &api.NetworkEvent{
-						Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_ATTEMPT,
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Network{
+					Network: &telemetryAPI.NetworkEvent{
+						Type:   telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_ATTEMPT,
 						Sockfd: 82734,
-						Address: &api.NetworkAddress{
-							Family: api.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_LOCAL,
-							Address: &api.NetworkAddress_LocalAddress{
+						Address: &telemetryAPI.NetworkAddress{
+							Family: telemetryAPI.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_LOCAL,
+							Address: &telemetryAPI.NetworkAddress_LocalAddress{
 								LocalAddress: "/path/to/local.socket",
 							},
 						},
@@ -1260,10 +1645,10 @@ func TestTranslateEvent(t *testing.T) {
 					Return: 293478,
 				},
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Network{
-					Network: &api.NetworkEvent{
-						Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_RESULT,
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Network{
+					Network: &telemetryAPI.NetworkEvent{
+						Type:   telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_RESULT,
 						Result: 293478,
 					},
 				},
@@ -1277,10 +1662,10 @@ func TestTranslateEvent(t *testing.T) {
 				},
 				Backlog: 24576,
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Network{
-					Network: &api.NetworkEvent{
-						Type:    api.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_ATTEMPT,
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Network{
+					Network: &telemetryAPI.NetworkEvent{
+						Type:    telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_ATTEMPT,
 						Sockfd:  82734,
 						Backlog: 24576,
 					},
@@ -1294,10 +1679,10 @@ func TestTranslateEvent(t *testing.T) {
 					Return: 293478,
 				},
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Network{
-					Network: &api.NetworkEvent{
-						Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_RESULT,
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Network{
+					Network: &telemetryAPI.NetworkEvent{
+						Type:   telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_RESULT,
 						Result: 293478,
 					},
 				},
@@ -1310,10 +1695,10 @@ func TestTranslateEvent(t *testing.T) {
 					FD: 82734,
 				},
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Network{
-					Network: &api.NetworkEvent{
-						Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_ATTEMPT,
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Network{
+					Network: &telemetryAPI.NetworkEvent{
+						Type:   telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_ATTEMPT,
 						Sockfd: 82734,
 					},
 				},
@@ -1326,10 +1711,10 @@ func TestTranslateEvent(t *testing.T) {
 					Return: 293478,
 				},
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Network{
-					Network: &api.NetworkEvent{
-						Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_RESULT,
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Network{
+					Network: &telemetryAPI.NetworkEvent{
+						Type:   telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_RESULT,
 						Result: 293478,
 					},
 				},
@@ -1346,14 +1731,14 @@ func TestTranslateEvent(t *testing.T) {
 					UnixPath: "/path/to/local.socket",
 				},
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Network{
-					Network: &api.NetworkEvent{
-						Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_ATTEMPT,
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Network{
+					Network: &telemetryAPI.NetworkEvent{
+						Type:   telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_ATTEMPT,
 						Sockfd: 82734,
-						Address: &api.NetworkAddress{
-							Family: api.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_LOCAL,
-							Address: &api.NetworkAddress_LocalAddress{
+						Address: &telemetryAPI.NetworkAddress{
+							Family: telemetryAPI.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_LOCAL,
+							Address: &telemetryAPI.NetworkAddress_LocalAddress{
 								LocalAddress: "/path/to/local.socket",
 							},
 						},
@@ -1368,10 +1753,10 @@ func TestTranslateEvent(t *testing.T) {
 					Return: 293478,
 				},
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Network{
-					Network: &api.NetworkEvent{
-						Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_RESULT,
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Network{
+					Network: &telemetryAPI.NetworkEvent{
+						Type:   telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_RESULT,
 						Result: 293478,
 					},
 				},
@@ -1400,24 +1785,24 @@ func TestTranslateEvent(t *testing.T) {
 					},
 				},
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Performance{
-					Performance: &api.PerformanceEvent{
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Performance{
+					Performance: &telemetryAPI.PerformanceEvent{
 						TotalTimeEnabled: 23984756,
 						TotalTimeRunning: 92873456,
-						Values: []*api.PerformanceEventValue{
-							&api.PerformanceEventValue{
-								Type:   api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE,
+						Values: []*telemetryAPI.PerformanceEventValue{
+							&telemetryAPI.PerformanceEventValue{
+								Type:   telemetryAPI.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE,
 								Config: 29384756,
 								Value:  20938457,
 							},
-							&api.PerformanceEventValue{
-								Type:   api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE_CACHE,
+							&telemetryAPI.PerformanceEventValue{
+								Type:   telemetryAPI.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE_CACHE,
 								Config: 928734,
 								Value:  9203784,
 							},
-							&api.PerformanceEventValue{
-								Type:   api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_SOFTWARE,
+							&telemetryAPI.PerformanceEventValue{
+								Type:   telemetryAPI.PerformanceEventType_PERFORMANCE_EVENT_TYPE_SOFTWARE,
 								Config: 192873,
 								Value:  495867,
 							},
@@ -1432,10 +1817,10 @@ func TestTranslateEvent(t *testing.T) {
 				Filename:    "/bin/bash",
 				CommandLine: []string{"bash", "-l"},
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Process{
-					Process: &api.ProcessEvent{
-						Type:            api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Process{
+					Process: &telemetryAPI.ProcessEvent{
+						Type:            telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
 						ExecFilename:    "/bin/bash",
 						ExecCommandLine: []string{"bash", "-l"},
 					},
@@ -1448,10 +1833,10 @@ func TestTranslateEvent(t *testing.T) {
 				ExitCode:   88 << 8,
 				ExitStatus: 88,
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Process{
-					Process: &api.ProcessEvent{
-						Type:       api.ProcessEventType_PROCESS_EVENT_TYPE_EXIT,
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Process{
+					Process: &telemetryAPI.ProcessEvent{
+						Type:       telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXIT,
 						ExitCode:   88 << 8,
 						ExitStatus: 88,
 					},
@@ -1465,10 +1850,10 @@ func TestTranslateEvent(t *testing.T) {
 				ExitSignal:     uint32(unix.SIGSEGV),
 				ExitCoreDumped: true,
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Process{
-					Process: &api.ProcessEvent{
-						Type:           api.ProcessEventType_PROCESS_EVENT_TYPE_EXIT,
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Process{
+					Process: &telemetryAPI.ProcessEvent{
+						Type:           telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXIT,
 						ExitCode:       int32(unix.SIGSEGV) | 0x80,
 						ExitSignal:     uint32(unix.SIGSEGV),
 						ExitCoreDumped: true,
@@ -1481,13 +1866,17 @@ func TestTranslateEvent(t *testing.T) {
 			event: ProcessForkTelemetryEvent{
 				ChildPID:       872364,
 				ChildProcessID: "some random string for a child process id",
+				CloneFlags:     85671641,
+				CWD:            "/home/user",
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Process{
-					Process: &api.ProcessEvent{
-						Type:         api.ProcessEventType_PROCESS_EVENT_TYPE_FORK,
-						ForkChildId:  "some random string for a child process id",
-						ForkChildPid: 872364,
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Process{
+					Process: &telemetryAPI.ProcessEvent{
+						Type:           telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_FORK,
+						ForkChildId:    "some random string for a child process id",
+						ForkChildPid:   872364,
+						ForkCloneFlags: 85671641,
+						UpdateCwd:      "/home/user",
 					},
 				},
 			},
@@ -1497,10 +1886,10 @@ func TestTranslateEvent(t *testing.T) {
 			event: ProcessUpdateTelemetryEvent{
 				CWD: "/var/run/capsule8",
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Process{
-					Process: &api.ProcessEvent{
-						Type:      api.ProcessEventType_PROCESS_EVENT_TYPE_UPDATE,
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Process{
+					Process: &telemetryAPI.ProcessEvent{
+						Type:      telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_UPDATE,
 						UpdateCwd: "/var/run/capsule8",
 					},
 				},
@@ -1512,10 +1901,10 @@ func TestTranslateEvent(t *testing.T) {
 				ID:        374186,
 				Arguments: [6]uint64{0x11, 0x22, 0x33, 0x44, 0x55, 0x66},
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Syscall{
-					Syscall: &api.SyscallEvent{
-						Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Syscall{
+					Syscall: &telemetryAPI.SyscallEvent{
+						Type: telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
 						Id:   374186,
 						Arg0: 0x11,
 						Arg1: 0x22,
@@ -1533,10 +1922,10 @@ func TestTranslateEvent(t *testing.T) {
 				ID:     987364,
 				Return: 9286745,
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Syscall{
-					Syscall: &api.SyscallEvent{
-						Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT,
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Syscall{
+					Syscall: &telemetryAPI.SyscallEvent{
+						Type: telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT,
 						Id:   987364,
 						Ret:  9286745,
 					},
@@ -1549,11 +1938,96 @@ func TestTranslateEvent(t *testing.T) {
 				Seconds:     2347856,
 				Nanoseconds: 238764529,
 			},
-			expected: &api.TelemetryEvent{
-				Event: &api.TelemetryEvent_Ticker{
-					Ticker: &api.TickerEvent{
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_Ticker{
+					Ticker: &telemetryAPI.TickerEvent{
 						Seconds:     2347856,
 						Nanoseconds: 238764529,
+					},
+				},
+			},
+		},
+		// UserFunctionCall
+		testCase{
+			event: UserFunctionCallTelemetryEvent{
+				Arguments: expression.FieldValueMap{
+					"bytes":  []byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66},
+					"string": "string_value",
+					"sint8":  int8(-8),
+					"sint16": int16(-16),
+					"sint32": int32(-32),
+					"sint64": int64(-64),
+					"uint8":  uint8(8),
+					"uint16": uint16(16),
+					"uint32": uint32(32),
+					"uint64": uint64(64),
+				},
+			},
+			expected: &telemetryAPI.TelemetryEvent{
+				Event: &telemetryAPI.TelemetryEvent_UserCall{
+					UserCall: &telemetryAPI.UserFunctionCallEvent{
+						Arguments: map[string]*telemetryAPI.UserFunctionCallEvent_FieldValue{
+							"bytes": &telemetryAPI.UserFunctionCallEvent_FieldValue{
+								FieldType: telemetryAPI.UserFunctionCallEvent_BYTES,
+								Value: &telemetryAPI.UserFunctionCallEvent_FieldValue_BytesValue{
+									BytesValue: []byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66},
+								},
+							},
+							"string": &telemetryAPI.UserFunctionCallEvent_FieldValue{
+								FieldType: telemetryAPI.UserFunctionCallEvent_STRING,
+								Value: &telemetryAPI.UserFunctionCallEvent_FieldValue_StringValue{
+									StringValue: "string_value",
+								},
+							},
+							"sint8": &telemetryAPI.UserFunctionCallEvent_FieldValue{
+								FieldType: telemetryAPI.UserFunctionCallEvent_SINT8,
+								Value: &telemetryAPI.UserFunctionCallEvent_FieldValue_SignedValue{
+									SignedValue: int64(-8),
+								},
+							},
+							"sint16": &telemetryAPI.UserFunctionCallEvent_FieldValue{
+								FieldType: telemetryAPI.UserFunctionCallEvent_SINT16,
+								Value: &telemetryAPI.UserFunctionCallEvent_FieldValue_SignedValue{
+									SignedValue: int64(-16),
+								},
+							},
+							"sint32": &telemetryAPI.UserFunctionCallEvent_FieldValue{
+								FieldType: telemetryAPI.UserFunctionCallEvent_SINT32,
+								Value: &telemetryAPI.UserFunctionCallEvent_FieldValue_SignedValue{
+									SignedValue: int64(-32),
+								},
+							},
+							"sint64": &telemetryAPI.UserFunctionCallEvent_FieldValue{
+								FieldType: telemetryAPI.UserFunctionCallEvent_SINT64,
+								Value: &telemetryAPI.UserFunctionCallEvent_FieldValue_SignedValue{
+									SignedValue: int64(-64),
+								},
+							},
+							"uint8": &telemetryAPI.UserFunctionCallEvent_FieldValue{
+								FieldType: telemetryAPI.UserFunctionCallEvent_UINT8,
+								Value: &telemetryAPI.UserFunctionCallEvent_FieldValue_UnsignedValue{
+									UnsignedValue: uint64(8),
+								},
+							},
+							"uint16": &telemetryAPI.UserFunctionCallEvent_FieldValue{
+								FieldType: telemetryAPI.UserFunctionCallEvent_UINT16,
+								Value: &telemetryAPI.UserFunctionCallEvent_FieldValue_UnsignedValue{
+									UnsignedValue: uint64(16),
+								},
+							},
+							"uint32": &telemetryAPI.UserFunctionCallEvent_FieldValue{
+								FieldType: telemetryAPI.UserFunctionCallEvent_UINT32,
+								Value: &telemetryAPI.UserFunctionCallEvent_FieldValue_UnsignedValue{
+									UnsignedValue: uint64(32),
+								},
+							},
+							"uint64": &telemetryAPI.UserFunctionCallEvent_FieldValue{
+								FieldType: telemetryAPI.UserFunctionCallEvent_UINT64,
+								Value: &telemetryAPI.UserFunctionCallEvent_FieldValue_UnsignedValue{
+									UnsignedValue: uint64(64),
+								},
+							},
+						},
 					},
 				},
 			},
@@ -1561,7 +2035,7 @@ func TestTranslateEvent(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		got := s.translateEvent(tc.event)
+		got := s.TranslateTelemetryEvent(tc.event)
 		assert.Equal(t, tc.expected, got)
 	}
 }

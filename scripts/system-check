@@ -1,18 +1,6 @@
 #!/bin/bash
 
-# Copyright 2017 Capsule8, Inc.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# (c) Copyright 2018 Capsule8, Inc (capsule8.com)
 
 # This script is intended to perform a cursory check on a system to determine
 # the likelihood that the sensor will be able to function it. It checks to
@@ -28,6 +16,16 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 NC='\033[0;0m'
 
+SKIP_VERSION_CHECK=no
+for arg in $*; do
+    case "$arg" in
+        --no-version-check)
+            echo -e "[ ${YELLOW} WARN ${NC} ] Skipping kernel version check"
+            SKIP_VERSION_CHECK=yes
+            ;;
+    esac
+done
+
 if [ "`id -u`" != 0 ]; then
     echo "This script must be run as root!"
     exit 1
@@ -42,16 +40,15 @@ echo -e "[ ${GREEN} PASS ${NC} ] Found proc filesystem mounted at ${PROC_MOUNT}"
 
 CONFIG_CMD=""
 # check to see if this kernel supports kprobes
-if [[ -e  "${PROC_MOUNT}/config.gz" ]]; then
+if [ -e "${PROC_MOUNT}/config.gz" ]; then
     CONFIG_CMD="cat ${PROC_MOUNT}/config.gz | gunzip "
-elif [[ -e "/boot/config-`uname -r`" ]]; then
+elif [ -e "/boot/config-`uname -r`" ]; then
     CONFIG_CMD="cat /boot/config-`uname -r`"
 fi
 
-
-# Unfortunately different distros e.g. redhat/fedora vs. ubuntu have slightly
+# Unfortunately different distros (e.g. RedHat/Fedora vs. Ubuntu) have slightly
 # different option names in their kernels depending upon when they pulled their
-# kernels from the mainline the following is a list of expected options with
+# kernels from the mainline. The following is a list of expected options with
 # "synonyms" specified on the same line delimited with a semi-colon and no
 # space between
 
@@ -61,56 +58,59 @@ CONFIG_KPROBE_EVENT=y;CONFIG_KPROBE_EVENTS=y
 EOF
 )
 
-if [ -z "$CONFIG_CMD" ]; then
+if [ ! -z "$CONFIG_CMD" ]; then
     for option in $(echo $CONFIG_OPTIONS); do
         OPT_FOUND=0
         OPT_NAME=""
         for opt in $(echo $option | tr ";" "\n"); do
-        	eval "$CONFIG_CMD | grep -qs $opt"
-		if [ "$?" == "0" ]; then
-		   OPT_FOUND=1
-		   OPT_NAME=$opt
-		   break
-		fi
+                eval "$CONFIG_CMD | grep -qs $opt"
+                if [ "$?" == "0" ]; then
+                    OPT_FOUND=1
+                    OPT_NAME=$opt
+                    break
+                fi
         done
 
         if  [ "$OPT_FOUND" == "0" ]; then
-	    for opt in $(echo $option | tr ";" "\n"); do
-            	echo -e "[ ${RED} FAIL ${NC} ] option $opt is missing from running kernel $(uname -r)"
-	    done
+            for opt in $(echo $option | tr ";" "\n"); do
+                echo -e "[ ${RED} FAIL ${NC} ] option $opt is missing from running kernel $(uname -r)"
+                exit 1
+            done
         else
             echo -e "[ ${GREEN} PASS ${NC} ] option $OPT_NAME is present in running kernel $(uname -r)"
         fi
     done
 else
-    echo -e "[ ${YELLOW} WARN ${NC} ] Could not find kernel config checking for tracingfs directly"
+    echo -e "[ ${YELLOW} WARN ${NC} ] Could not find kernel config; checking for tracingfs directly"
 fi
 
+if [ "$SKIP_VERSION_CHECK" != "yes" ]; then
+    # Quick checks for kernel version
+    MAJOR="`uname -r | cut -d '.' -f 1`"
+    MINOR="`uname -r | cut -d '.' -f 2`"
 
-
-# Quick checks for kernel version
-MAJOR="`uname -r | cut -d '.' -f 1`"
-MINOR="`uname -r | cut -d '.' -f 2`"
-
-if [ "$MAJOR" -lt 2 ]; then
-    echo -e "[ ${RED} FAIL ${NC}] Kernel version `uname -r` is not supported."
-    exit 1
-fi
-
-if [ "$MAJOR" = 2 ]; then
-    if [ "`uname -r | cut -d '.' -f 4`" != "el6" ]; then
+    if [ "$MAJOR" -lt 2 ]; then
+        echo -e "[ ${RED} FAIL ${NC}] Kernel version `uname -r` is not supported."
+        exit 1
+    fi
+    if [ "$MAJOR" = 2 ]; then
+        if [ "`uname -r | cut -d '.' -f 4`" != "el6" ]; then
+            echo -e "[ ${RED} FAIL ${NC} ] Kernel version `uname -r` is not supported."
+            exit 1
+        fi
+        if [ "`uname -r | cut -d '.' -f 3 | cut -d '-' -f 1`" != 32 ]; then
+            echo -e "[ ${RED} FAIL ${NC} ] Kernel version `uname -r` is not supported."
+            exit 1
+        fi
+        if [ "`uname -r | cut -d '.' -f 3 | cut -d '-' -f 2`" -lt 504 ]; then
+            echo -e "[ ${RED} FAIL ${NC} ] Kernel version `uname -r` is not supported."
+            exit 1
+        fi
+    fi
+    if [ "$MAJOR" = 3 -a "${MINOR}" -lt 10 ]; then
         echo -e "[ ${RED} FAIL ${NC} ] Kernel version `uname -r` is not supported."
         exit 1
     fi
-    if [ "`uname -r | cut -d '.' -f 3 | cut -d '-' -f 1`" != 32 ]; then
-        echo -e "[ ${RED} FAIL ${NC} ] Kernel version `uname -r` is not supported."
-    fi
-    if [ "`uname -r | cut -d '.' -f 3 | cut -d '-' -f 1`" -lt 504 ]; then
-        echo -e "[ ${RED} FAIL ${NC} ] Kernel version `uname -r` is not supported."
-    fi
-fi
-if [ "$MAJOR" = 3 -a "${MINOR}" -lt 10 ]; then
-    echo -e "[ ${RED} FAIL ${NC} ] Kernel version `uname -r` is not supported."
 fi
 
 # Check for the needed filesystems: tracefs, cgroup
@@ -168,7 +168,7 @@ fi
 # Check for CGROUP support. This is OPTIONAL, but if present additional
 # symbols are REQUIRED.
 if [ -z "$(lookup_kernel_symbol cgroup_procs_write)" ]; then
-    echo -e "[ ${RED} FAIL ${NC} ] No container support: kernel does not have cgroup support compiled in."
+    echo -e "[ ${YELLOW} WARN ${NC} ] No container support: kernel does not have cgroup support compiled in."
 else
     if [ -z "$(lookup_kernel_symbol attach_task_by_pid)" ]; then
         if [ -z "$(lookup_kernel_symbol __cgroup_procs_write)" ]; then
@@ -181,10 +181,7 @@ else
 fi
 
 # Check for all required tracepoints
-REQUIRED_TRACEPOINTS="
-sched/sched_process_exit
-sched/sched_process_fork
-
+REQUIRED_TRACEPOINTS=$(cat << EOF
 syscalls/sys_enter_accept
 syscalls/sys_exit_accept
 syscalls/sys_enter_accept4
@@ -199,7 +196,8 @@ syscalls/sys_exit_recvfrom
 syscalls/sys_exit_recvmsg
 syscalls/sys_exit_sendmsg
 syscalls/sys_exit_sendto
-"
+EOF
+)
 for tp in ${REQUIRED_TRACEPOINTS}; do
     if [ ! -d "${TRACEFS_MOUNT}/events/${tp}" ]; then
         echo -e "[ ${RED} FAIL ${NC} ] Required tracepoint ${tp} is not present."
@@ -212,6 +210,7 @@ done
 if [ ! -d "${TRACEFS_MOUNT}/events/raw_syscalls/sys_enter" ]; then
     if [ ! -d "${TRACEFS_MOUNT}/events/syscalls/sys_enter" ]; then
         echo -e "[ ${RED} FAIL ${NC} ] Required tracepoints raw_syscalls/sys_enter or syscalls/sys_enter are not present."
+        exit 1
     else
         echo -e "[ ${GREEN} PASS ${NC} ] Found required tracepoint syscalls/sys_enter"
     fi
@@ -223,6 +222,7 @@ fi
 if [ ! -d "${TRACEFS_MOUNT}/events/raw_syscalls/sys_exit" ]; then
     if [ ! -d "${TRACEFS_MOUNT}/events/syscalls/sys_exit" ]; then
         echo -e "[ ${RED} FAIL ${NC} ] Required tracepoints raw_syscalls/sys_exit or syscalls/sys_exit are not present."
+        exit 1
     else
         echo -e "[ ${GREEN} PASS ${NC} ] Found required tracepoint syscalls/sys_exit"
     fi
@@ -231,18 +231,30 @@ else
 fi
 
 # Check for all required kernel symbols
-REQUIRED_KPROBE_SYMBOLS="
+REQUIRED_KPROBE_SYMBOLS=$(cat << EOF
 commit_creds
 do_exit
 set_fs_pwd
 
+security_inode_create
+security_inode_setattr
+vfs_mkdir
+vfs_mknod
+vfs_rmdir
+vfs_unlink
+vfs_link
+vfs_symlink
+may_open
+__fsnotify_parent
+vfs_rename
 do_sys_open
 
 sys_bind
 sys_connect
 sys_sendmsg
 sys_sendto
-"
+EOF
+)
 for s in ${REQUIRED_KPROBE_SYMBOLS}; do
     if [ -z "$(lookup_kernel_symbol ${s})" ]; then
         echo -e "[ ${RED} FAIL ${NC} ]  Required kernel symbol ${s} is not present."
@@ -252,22 +264,24 @@ for s in ${REQUIRED_KPROBE_SYMBOLS}; do
 done
 
 # Check for special cases. Most of these are related to process monitoring.
-if [ ! -d "${TRACEFS_MOUNT}/events/task/task_newtask" ]; then
-    if [ -z "$(lookup_kernel_symbol do_fork)" ]; then
+if [ -z "$(lookup_kernel_symbol do_fork)" ]; then
+    if [ -z "$(lookup_kernel_symbol _do_fork)" ]; then
         echo -e "[ ${RED} FAIL ${NC} ] Required kernel symbol do_fork is not present."
         exit 1
     fi
-    if [ ! -d "${TRACEFS_MOUNT}/events/sched/sched_process_fork" ]; then
-        echo -e "[ ${RED} FAIL ${NC} ] Required tracepoint sched/sched_process_fork is not present."
-        exit 1
-    fi
+fi
+if [ ! -d "${TRACEFS_MOUNT}/events/sched/sched_process_fork" ]; then
+    echo -e "[ ${RED} FAIL ${NC} ] Required tracepoint sched/sched_process_fork is not present."
+    exit 1
 fi
 
-if [ -z "$(lookup_kernel_symbol do_execveat_common)" ]; then
-    if [ -z "$(lookup_kernel_symbol do_execve_common)" ]; then
-        if [ -z "$(lookup_kernel_symbol do_execve)" ]; then
-            echo -e "[ ${RED} FAIL ${NC} ] Required kernel symbol sys_execve is not present."
-            exit 1
+if [ -z "$(lookup_kernel_symbol __do_execve_file)" ]; then
+    if [ -z "$(lookup_kernel_symbol do_execveat_common)" ]; then
+        if [ -z "$(lookup_kernel_symbol do_execve_common)" ]; then
+            if [ -z "$(lookup_kernel_symbol do_execve)" ]; then
+                echo -e "[ ${RED} FAIL ${NC} ] Required kernel symbol sys_execve is not present."
+                exit 1
+            fi
         fi
     fi
 fi

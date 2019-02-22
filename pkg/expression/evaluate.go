@@ -161,28 +161,91 @@ func compareLike(lhs, rhs interface{}) (r bool) {
 }
 
 type evalContext struct {
-	types  FieldTypeMap
-	values FieldValueMap
-	stack  []interface{}
+	types       FieldTypeMap
+	valueGetter FieldValueGetter
+	stack       []interface{}
 }
 
-func (c *evalContext) pushIdentifier(ident string) {
-	t, ok := c.types[ident]
-	if !ok {
-		exprRaise(fmt.Errorf("Undefined identifier %q", ident))
+func (c *evalContext) pushIdentifier(ident string, t ValueType) {
+	// This may all seem redundant to break everything out instead of just
+	// using interface{}, but it's done this way quite on purpose to avoid
+	// tiny allocations of interface{} everywhere that are just quickly
+	// discarded.
+
+	var err error
+	switch t {
+	case ValueTypeString:
+		var v string
+		if v, err = c.valueGetter.GetString(ident); err == nil {
+			c.stack = append(c.stack, v)
+		}
+	case ValueTypeSignedInt8:
+		var v int8
+		if v, err = c.valueGetter.GetSignedInt8(ident); err == nil {
+			c.stack = append(c.stack, v)
+		}
+	case ValueTypeSignedInt16:
+		var v int16
+		if v, err = c.valueGetter.GetSignedInt16(ident); err == nil {
+			c.stack = append(c.stack, v)
+		}
+	case ValueTypeSignedInt32:
+		var v int32
+		if v, err = c.valueGetter.GetSignedInt32(ident); err == nil {
+			c.stack = append(c.stack, v)
+		}
+	case ValueTypeSignedInt64:
+		var v int64
+		if v, err = c.valueGetter.GetSignedInt64(ident); err == nil {
+			c.stack = append(c.stack, v)
+		}
+	case ValueTypeUnsignedInt8:
+		var v uint8
+		if v, err = c.valueGetter.GetUnsignedInt8(ident); err == nil {
+			c.stack = append(c.stack, v)
+		}
+	case ValueTypeUnsignedInt16:
+		var v uint16
+		if v, err = c.valueGetter.GetUnsignedInt16(ident); err == nil {
+			c.stack = append(c.stack, v)
+		}
+	case ValueTypeUnsignedInt32:
+		var v uint32
+		if v, err = c.valueGetter.GetUnsignedInt32(ident); err == nil {
+			c.stack = append(c.stack, v)
+		}
+	case ValueTypeUnsignedInt64:
+		var v uint64
+		if v, err = c.valueGetter.GetUnsignedInt64(ident); err == nil {
+			c.stack = append(c.stack, v)
+		}
+	case ValueTypeBool:
+		var v bool
+		if v, err = c.valueGetter.GetBool(ident); err == nil {
+			c.stack = append(c.stack, v)
+		}
+	case ValueTypeDouble:
+		var v float64
+		if v, err = c.valueGetter.GetDouble(ident); err == nil {
+			c.stack = append(c.stack, v)
+		}
+	case ValueTypeTimestamp:
+		var v time.Time
+		if v, err = c.valueGetter.GetTimestamp(ident); err == nil {
+			c.stack = append(c.stack, v)
+		}
 	}
-	v, ok := c.values[ident]
-	if !ok {
-		c.stack = append(c.stack, nil)
-	} else if ValueTypeOf(v) != t {
-		exprRaise(fmt.Errorf("Data type mismatch for %q (expected %s; got %s)",
-			ident, ValueTypeStrings[t], reflect.TypeOf(v)))
-	} else {
-		c.stack = append(c.stack, v)
+
+	if err != nil {
+		if _, ok := err.(FieldNotSet); ok {
+			c.stack = append(c.stack, nil)
+		} else {
+			exprRaise(err)
+		}
 	}
 }
 
-func (c *evalContext) evaluateBinaryExpr(e binaryExpr) {
+func (c *evalContext) evaluateBinaryExpr(e *binaryExpr) {
 	switch e.op {
 	case binaryOpLogicalAnd:
 		// if the lhs result is false, leave it on the stack and return
@@ -291,7 +354,7 @@ func (c *evalContext) evaluateBinaryExpr(e binaryExpr) {
 	}
 }
 
-func (c *evalContext) evaluateUnaryExpr(e unaryExpr) {
+func (c *evalContext) evaluateUnaryExpr(e *unaryExpr) {
 	switch e.op {
 	case unaryOpIsNull:
 		c.evaluateNode(e.x)
@@ -300,6 +363,11 @@ func (c *evalContext) evaluateUnaryExpr(e unaryExpr) {
 	case unaryOpIsNotNull:
 		c.evaluateNode(e.x)
 		c.stack[len(c.stack)-1] = c.stack[len(c.stack)-1] != nil
+
+	case unaryOpNot:
+		c.evaluateNode(e.x)
+		c.stack[len(c.stack)-1] = !c.stack[len(c.stack)-1].(bool)
+
 	default:
 		panic("internal error: unreachable condition in evaluateUnaryExpr")
 	}
@@ -307,13 +375,13 @@ func (c *evalContext) evaluateUnaryExpr(e unaryExpr) {
 
 func (c *evalContext) evaluateNode(e expr) {
 	switch v := e.(type) {
-	case identExpr:
-		c.pushIdentifier(v.name)
-	case valueExpr:
+	case *identExpr:
+		c.pushIdentifier(v.name, v.t)
+	case *valueExpr:
 		c.stack = append(c.stack, v.v)
-	case binaryExpr:
+	case *binaryExpr:
 		c.evaluateBinaryExpr(v)
-	case unaryExpr:
+	case *unaryExpr:
 		c.evaluateUnaryExpr(v)
 	default:
 		panic("internal error: unreachable condition in evaluateNode")
@@ -339,19 +407,19 @@ func (c *evalContext) evaluateExpression(e expr) (result interface{}, err error)
 	return
 }
 
-func newEvalContext(types FieldTypeMap, values FieldValueMap) evalContext {
+func newEvalContext(types FieldTypeMap, valueGetter FieldValueGetter) evalContext {
 	return evalContext{
-		types:  types,
-		values: values,
-		stack:  make([]interface{}, 0, 8),
+		types:       types,
+		valueGetter: valueGetter,
+		stack:       make([]interface{}, 0, 8),
 	}
 }
 
 func evaluateExpression(
 	e expr,
 	types FieldTypeMap,
-	values FieldValueMap,
+	valueGetter FieldValueGetter,
 ) (interface{}, error) {
-	c := newEvalContext(types, values)
+	c := newEvalContext(types, valueGetter)
 	return c.evaluateExpression(e)
 }

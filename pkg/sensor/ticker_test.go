@@ -20,33 +20,37 @@ import (
 	"time"
 
 	"github.com/capsule8/capsule8/pkg/expression"
-	"github.com/capsule8/capsule8/pkg/sys/perf"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestDecodeTickerEvent(t *testing.T) {
+func TestDispatchTickerEvent(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
 	s := newTestSubscription(t, sensor)
 
-	sample := &perf.SampleRecord{}
-	data := perf.TraceEventSampleData{
+	data := expression.FieldValueMap{
 		"seconds":     int64(29345873297),
 		"nanoseconds": int64(4569845689),
 	}
-	i, err := s.decodeTickerEvent(sample, data)
-	require.NotNil(t, i)
-	require.NoError(t, err)
-	e, ok := i.(TickerTelemetryEvent)
-	require.True(t, ok)
 
-	ok = testCommonTelemetryEventData(t, sensor, e)
-	require.True(t, ok)
-	assert.Equal(t, data["seconds"], e.Seconds)
-	assert.Equal(t, data["nanoseconds"], e.Nanoseconds)
+	dispatched := false
+	s.dispatchFn = func(event TelemetryEvent) {
+		e, ok := event.(TickerTelemetryEvent)
+		require.True(t, ok)
+
+		ok = testCommonTelemetryEventData(t, sensor, e)
+		require.True(t, ok)
+		assert.Equal(t, data["seconds"], e.Seconds)
+		assert.Equal(t, data["nanoseconds"], e.Nanoseconds)
+		dispatched = true
+	}
+
+	eventid, _ := s.addTestEventSink(t, nil)
+	s.dispatchTickerEvent(eventid, data)
+	require.True(t, dispatched)
 }
 
 func verifyRegisterTickerEventFilter(t *testing.T, s *Subscription, count int) {
@@ -65,16 +69,6 @@ func TestRegisterTickerEventFilter(t *testing.T) {
 	// Invalid interval should fail
 	s := newTestSubscription(t, sensor)
 	s.RegisterTickerEventFilter(0, nil)
-	verifyRegisterTickerEventFilter(t, s, -1)
-
-	// Invalid filter expression should fail
-	e := expression.Equal(expression.Identifier("foo"), expression.Value("bar"))
-	expr, err := expression.NewExpression(e)
-	require.NotNil(t, expr)
-	require.NoError(t, err)
-
-	s = newTestSubscription(t, sensor)
-	s.RegisterTickerEventFilter(50*int64(time.Millisecond), expr)
 	verifyRegisterTickerEventFilter(t, s, -1)
 
 	// This should succeed

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 // Sample Telemetry API client
-
 package main
 
 import (
@@ -26,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 	"github.com/capsule8/capsule8/pkg/expression"
 
 	"github.com/golang/protobuf/jsonpb"
@@ -72,29 +71,29 @@ func dialer(addr string, timeout time.Duration) (net.Conn, error) {
 	return net.DialTimeout(network, address, timeout)
 }
 
-func createSubscription() *api.Subscription {
-	processEvents := []*api.ProcessEventFilter{
+func createSubscription() *telemetryAPI.Subscription {
+	processEvents := []*telemetryAPI.ProcessEventFilter{
 		//
 		// Get all process lifecycle events
 		//
-		&api.ProcessEventFilter{
-			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_FORK,
+		&telemetryAPI.ProcessEventFilter{
+			Type: telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_FORK,
 		},
-		&api.ProcessEventFilter{
-			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
+		&telemetryAPI.ProcessEventFilter{
+			Type: telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
 		},
-		&api.ProcessEventFilter{
-			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_EXIT,
+		&telemetryAPI.ProcessEventFilter{
+			Type: telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXIT,
 		},
-		&api.ProcessEventFilter{
-			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_UPDATE,
+		&telemetryAPI.ProcessEventFilter{
+			Type: telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_UPDATE,
 		},
 	}
 
-	syscallEvents := []*api.SyscallEventFilter{
+	syscallEvents := []*telemetryAPI.SyscallEventFilter{
 		// Get all open(2) syscalls
-		&api.SyscallEventFilter{
-			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
+		&telemetryAPI.SyscallEventFilter{
+			Type: telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
 
 			Id: &wrappers.Int64Value{
 				Value: 2, // SYS_OPEN
@@ -103,8 +102,8 @@ func createSubscription() *api.Subscription {
 
 		// An example of negative filters:
 		// Get all setuid(2) calls that are not root
-		&api.SyscallEventFilter{
-			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
+		&telemetryAPI.SyscallEventFilter{
+			Type: telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
 
 			Id: &wrappers.Int64Value{
 				Value: 105, // SYS_SETUID
@@ -116,12 +115,12 @@ func createSubscription() *api.Subscription {
 		},
 	}
 
-	fileEvents := []*api.FileEventFilter{
+	fileEvents := []*telemetryAPI.FileEventFilter{
 		//
 		// Get all attempts to open files matching glob *foo*
 		//
-		&api.FileEventFilter{
-			Type: api.FileEventType_FILE_EVENT_TYPE_OPEN,
+		&telemetryAPI.FileEventFilter{
+			Type: telemetryAPI.FileEventType_FILE_EVENT_TYPE_OPEN,
 
 			//
 			// The glob accepts a wild card character
@@ -136,13 +135,13 @@ func createSubscription() *api.Subscription {
 	sinFamilyFilter := expression.Equal(
 		expression.Identifier("sin_family"),
 		expression.Value(uint16(2)))
-	kernelCallEvents := []*api.KernelFunctionCallFilter{
+	kernelCallEvents := []*telemetryAPI.KernelFunctionCallFilter{
 		//
 		// Install a kprobe on connect(2)
 		//
-		&api.KernelFunctionCallFilter{
-			Type:   api.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_ENTER,
-			Symbol: "SyS_connect",
+		&telemetryAPI.KernelFunctionCallFilter{
+			Type:   telemetryAPI.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_ENTER,
+			Symbol: "sys_connect",
 			Arguments: map[string]string{
 				"sin_family": "+0(%si):u16",
 				"sin_port":   "+2(%si):u16",
@@ -152,50 +151,64 @@ func createSubscription() *api.Subscription {
 		},
 	}
 
-	containerEvents := []*api.ContainerEventFilter{
+	userCallEvents := []*telemetryAPI.UserFunctionCallFilter{
+		&telemetryAPI.UserFunctionCallFilter{
+			Type:       telemetryAPI.UserFunctionCallEventType_USER_FUNCTION_CALL_EVENT_TYPE_EXIT,
+			Executable: "/bin/bash",
+			Symbol:     "readline",
+			Arguments: map[string]string{
+				"s": "+0($retval):string",
+			},
+		},
+	}
+
+	containerEvents := []*telemetryAPI.ContainerEventFilter{
 		//
 		// Get all container lifecycle events
 		//
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
 		},
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
 		},
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
 		},
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_DESTROYED,
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_DESTROYED,
 		},
 	}
 
 	// Ticker events are used for debugging and performance testing
-	tickerEvents := []*api.TickerEventFilter{
-		&api.TickerEventFilter{
-			Interval: int64(1 * time.Second),
-		},
+	tickerEvents := []*telemetryAPI.TickerEventFilter{
+		/*
+			&telemetryAPI.TickerEventFilter{
+				Interval: int64(1 * time.Second),
+			},
+		*/
 	}
 
-	chargenEvents := []*api.ChargenEventFilter{
+	chargenEvents := []*telemetryAPI.ChargenEventFilter{
 		/*
-			&api.ChargenEventFilter{
+			&telemetryAPI.ChargenEventFilter{
 				Length: 16,
 			},
 		*/
 	}
 
-	eventFilter := &api.EventFilter{
+	eventFilter := &telemetryAPI.EventFilter{
 		ProcessEvents:   processEvents,
 		SyscallEvents:   syscallEvents,
 		KernelEvents:    kernelCallEvents,
+		UserEvents:      userCallEvents,
 		FileEvents:      fileEvents,
 		ContainerEvents: containerEvents,
 		TickerEvents:    tickerEvents,
 		ChargenEvents:   chargenEvents,
 	}
 
-	sub := &api.Subscription{
+	sub := &telemetryAPI.Subscription{
 		EventFilter: eventFilter,
 	}
 
@@ -204,7 +217,7 @@ func createSubscription() *api.Subscription {
 			"Watching for container images matching %s\n",
 			config.image)
 
-		containerFilter := &api.ContainerFilter{}
+		containerFilter := &telemetryAPI.ContainerFilter{}
 
 		containerFilter.ImageNames =
 			append(containerFilter.ImageNames, config.image)
@@ -238,13 +251,13 @@ func main() {
 		grpc.WithTimeout(1*time.Second),
 		grpc.WithInsecure())
 
-	c := api.NewTelemetryServiceClient(conn)
+	c := telemetryAPI.NewTelemetryServiceClient(conn)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "grpc.Dial: %s\n", err)
 		os.Exit(1)
 	}
 
-	stream, err := c.GetEvents(ctx, &api.GetEventsRequest{
+	stream, err := c.GetEvents(ctx, &telemetryAPI.GetEventsRequest{
 		Subscription: createSubscription(),
 	})
 
@@ -262,7 +275,8 @@ func main() {
 	}
 
 	for {
-		ev, err := stream.Recv()
+		var ev *telemetryAPI.GetEventsResponse
+		ev, err = stream.Recv()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Recv: %s\n", err)
 			os.Exit(1)
@@ -273,7 +287,8 @@ func main() {
 				ev.Statuses[0].Code != int32(code.Code_OK)) {
 			for _, s := range ev.Statuses {
 				if config.json {
-					msg, err := marshaler.MarshalToString(s)
+					var msg string
+					msg, err = marshaler.MarshalToString(s)
 					if err != nil {
 						fmt.Fprintf(os.Stderr,
 							"Unable to decode event: %v", err)
@@ -289,7 +304,8 @@ func main() {
 
 		for _, e := range ev.Events {
 			if config.json {
-				msg, err := marshaler.MarshalToString(e)
+				var msg string
+				msg, err = marshaler.MarshalToString(e)
 				if err != nil {
 					fmt.Fprintf(os.Stderr,
 						"Unable to decode event: %v", err)

@@ -1,0 +1,4 @@
+55bbfdb7a000-55bbfdb7b000 r-xp 00000000 fd:01 47710801                   /sbin/init
+55bbfe046000-55bbfe067000 rw-p 00000000 00:00 0                          [heap]
+7febb3216000-7febb3217000 ---p 00000000 00:00 0 
+7ffff8fe6000-7ffff9007000 rw-p 00000000 00:00 0                          [stack]

@@ -18,10 +18,22 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+var vdsoClockGettimeSym uintptr
+
+func nanotime() int64
+
 // CurrentMonotonicRaw is a convenience function that returns that current
 // system raw monotonic clock as an integer.
-func CurrentMonotonicRaw() int64 {
+var CurrentMonotonicRaw = func() int64 {
 	var ts unix.Timespec
 	unix.ClockGettime(unix.CLOCK_MONOTONIC_RAW, &ts)
 	return ts.Nano()
+}
+
+func init() {
+	var ok bool
+	vdsoClockGettimeSym, ok = LookupKernelSymbol("__vdso_clock_gettime")
+	if ok {
+		CurrentMonotonicRaw = nanotime
+	}
 }

@@ -17,11 +17,6 @@ package perf
 import (
 	"sync"
 	"sync/atomic"
-	"time"
-
-	"github.com/capsule8/capsule8/pkg/sys"
-
-	"golang.org/x/sys/unix"
 )
 
 var nextStubSourceID uint64
@@ -87,18 +82,12 @@ func (s *StubEventSource) init(attr EventAttr) {
 	s.Enabled = !attr.Disabled
 }
 
-type stubSample struct {
-	sample Sample
-	err    error
-}
-
 // StubEventSourceLeader is an event source implementation used as part of
 // StubEventSourceController.
 type StubEventSourceLeader struct {
 	StubEventSource
 	pid, cpu   int
 	controller *StubEventSourceController
-	queue      []stubSample
 }
 
 func newStubEventSourceLeader(attr EventAttr, pid, cpu int) *StubEventSourceLeader {
@@ -130,37 +119,23 @@ func (s *StubEventSourceLeader) NewEventSource(
 	return newStubEventSource(attr), nil
 }
 
-// Read retrieves available samples, calling the specified function for each
-// sample retrieved.
+// Read retrieves the raw data available from the event source. The
+// function will return nil if there is no data availble for reading;
+// otherwise it will return a byte slice that contains the data from
+// the source. The acquireBuffer function will be called to acquire the
+// byte slice to read into. To avoid the creation of tiny, short-lived
+// objects that will put pressure on GC, the acquireBuffer function
+// will return a byte slice and an offset into the byte slice where the
+// data should be written.
 func (s *StubEventSourceLeader) Read(
-	attrMap map[uint64]EventAttr,
-	f func(Sample, error),
+	acquireBuffer func(size int) ([]byte, int),
 ) {
-	s.controller.lock.Lock()
-	for s.queue != nil {
-		queue := s.queue
-		s.queue = nil
-		s.controller.lock.Unlock()
-		for _, s := range queue {
-			f(s.sample, s.err)
-		}
-		s.controller.lock.Lock()
-	}
-	s.controller.lock.Unlock()
-}
-
-// EnqueueSample enqueues a sample and/or error to be retrived via Read.
-func (s *StubEventSourceLeader) EnqueueSample(sample Sample, err error) {
-	s.controller.lock.Lock()
-	s.queue = append(s.queue, stubSample{sample, err})
-	s.controller.lock.Unlock()
 }
 
 // StubEventSourceController is a stub implementation of EventSourceController
 // intended primarily for use in testing EventMonitor.
 type StubEventSourceController struct {
-	setTimeoutAtChannel chan int64
-	wakeupChannel       chan bool
+	wakeupChannel chan bool
 
 	lock          sync.RWMutex
 	activeLeaders map[uint64]*StubEventSourceLeader
@@ -170,9 +145,8 @@ type StubEventSourceController struct {
 // initializes it for use.
 func NewStubEventSourceController() *StubEventSourceController {
 	return &StubEventSourceController{
-		setTimeoutAtChannel: make(chan int64, 1024),
-		wakeupChannel:       make(chan bool, 1024),
-		activeLeaders:       make(map[uint64]*StubEventSourceLeader),
+		wakeupChannel: make(chan bool, 1),
+		activeLeaders: make(map[uint64]*StubEventSourceLeader),
 	}
 }
 
@@ -180,7 +154,6 @@ func NewStubEventSourceController() *StubEventSourceController {
 // may have reserved for itself. The EventSourceController is no longer usable
 // after this function completes.
 func (c *StubEventSourceController) Close() {
-	c.setTimeoutAtChannel = nil
 	c.wakeupChannel = nil
 	c.activeLeaders = nil
 }
@@ -200,99 +173,20 @@ func (c *StubEventSourceController) NewEventSourceLeader(
 	return l, nil
 }
 
-func (c *StubEventSourceController) hasPendingSamples() bool {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
-
-	for _, l := range c.activeLeaders {
-		if len(l.queue) > 0 {
-			return true
-		}
+// Wait pauses execution until events become available for processing.
+// A list of cookies will be returned, one for each EventSourceLeader
+// that is ready for processing. The order is undefined.
+func (c *StubEventSourceController) Wait() ([]uint64, error) {
+	select {
+	case <-c.wakeupChannel:
 	}
-	return false
+	return nil, nil
 }
 
-// Wait pauses execution until events become available for processing or the
-// specified time arrives. The time is specified using the system monotonic
-// clock. If the time is 0 or has already passed, Wait will return immediately
-// if no events are ready for processing. If the time is negative, Wait will
-// wait indefinitely until events become available. If the specified time
-// arrives before any events become available, the function will return
-// unix.ETIMEDOUT. The return from Wait will be nil when events are ready for
-// processing.
-func (c *StubEventSourceController) Wait(timeoutAt int64) error {
-	var t *time.Timer
-	defer func() {
-		if t != nil {
-			t.Stop()
-		}
-
-		// Drain anything pending on the channels
-		done := false
-		for !done {
-			select {
-			case <-c.setTimeoutAtChannel:
-			case <-c.wakeupChannel:
-			default:
-				done = true
-			}
-		}
-	}()
-
-	for {
-		switch timeoutAt {
-		case -1:
-			if t != nil {
-				t.Stop()
-				t = nil
-			}
-			if c.hasPendingSamples() {
-				return nil
-			}
-			select {
-			case timeoutAt = <-c.setTimeoutAtChannel:
-			case <-c.wakeupChannel:
-			}
-		case 0:
-			if c.hasPendingSamples() {
-				return nil
-			}
-			return unix.ETIMEDOUT
-		default:
-			if c.hasPendingSamples() {
-				return nil
-			}
-			now := sys.CurrentMonotonicRaw()
-			if timeoutAt <= now {
-				return unix.ETIMEDOUT
-			}
-			d := time.Duration(timeoutAt - now)
-			if t == nil {
-				t = time.NewTimer(d)
-			} else {
-				t.Reset(d)
-			}
-			select {
-			case v := <-c.setTimeoutAtChannel:
-				if v < timeoutAt {
-					timeoutAt = v
-				}
-			case <-c.wakeupChannel:
-			case <-t.C:
-			}
-		}
-	}
-	return nil
-}
-
-// SetTimeoutAt sets the time at which the currently paused Wait call will
-// timeout. The behavior of the timeout value is the same as for Wait itself.
-func (c *StubEventSourceController) SetTimeoutAt(timeoutAt int64) error {
-	c.setTimeoutAtChannel <- timeoutAt
-	return nil
-}
-
-// Wakeup wakes up any goroutine blocked in Wait.
+// Wakeup wakes up the controller if it is blocked in a wait state.
 func (c *StubEventSourceController) Wakeup() {
-	c.wakeupChannel <- true
+	select {
+	case c.wakeupChannel <- true:
+	default:
+	}
 }

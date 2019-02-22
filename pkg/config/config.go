@@ -24,6 +24,9 @@ var Global struct {
 	// RunDir is the path to the runtime state directory for Capsule8
 	RunDir string `split_words:"true" default:"/var/run/capsule8"`
 
+	// SupportDir is the path to the supporting files directory for Capsule8
+	SupportDir string `split_words:"true" default:"/var/lib/capsule8"`
+
 	// HTTP address and port for the pprof runtime profiling endpoint.
 	ProfilingListenAddr string `split_words:"true"`
 }
@@ -84,7 +87,7 @@ var Sensor struct {
 
 	// The default size of ring buffers used for kernel perf_event
 	// monitors. The size is defined in units of pages.
-	RingBufferPages int `split_words:"true" default:"8"`
+	RingBufferPages int `split_words:"true" default:"16"`
 
 	// The default buffer length for Go channels used internally
 	ChannelBufferLength int `split_words:"true" default:"1024"`

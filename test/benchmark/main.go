@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -24,11 +25,10 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/net/context"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 	sensorConfig "github.com/capsule8/capsule8/pkg/config"
 	"github.com/capsule8/capsule8/pkg/sensor"
 	"github.com/capsule8/capsule8/pkg/services"
@@ -76,37 +76,37 @@ func dialer(addr string, timeout time.Duration) (net.Conn, error) {
 	return net.DialTimeout(network, address, timeout)
 }
 
-func createSubscription() *api.Subscription {
-	processEvents := []*api.ProcessEventFilter{
+func createSubscription() *telemetryAPI.Subscription {
+	processEvents := []*telemetryAPI.ProcessEventFilter{
 		//
 		// Get all process lifecycle events
 		//
-		&api.ProcessEventFilter{
-			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_FORK,
+		&telemetryAPI.ProcessEventFilter{
+			Type: telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_FORK,
 		},
-		&api.ProcessEventFilter{
-			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
+		&telemetryAPI.ProcessEventFilter{
+			Type: telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
 		},
-		&api.ProcessEventFilter{
-			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_EXIT,
-		},
-	}
-
-	containerEvents := []*api.ContainerEventFilter{
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
-		},
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
+		&telemetryAPI.ProcessEventFilter{
+			Type: telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXIT,
 		},
 	}
 
-	eventFilter := &api.EventFilter{
+	containerEvents := []*telemetryAPI.ContainerEventFilter{
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
+		},
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
+		},
+	}
+
+	eventFilter := &telemetryAPI.EventFilter{
 		ProcessEvents:   processEvents,
 		ContainerEvents: containerEvents,
 	}
 
-	sub := &api.Subscription{
+	sub := &telemetryAPI.Subscription{
 		EventFilter: eventFilter,
 	}
 
@@ -115,7 +115,7 @@ func createSubscription() *api.Subscription {
 			"Watching for container images matching %s\n",
 			config.image)
 
-		containerFilter := &api.ContainerFilter{}
+		containerFilter := &telemetryAPI.ContainerFilter{}
 
 		containerFilter.ImageNames =
 			append(containerFilter.ImageNames, config.image)
@@ -230,7 +230,7 @@ func main() {
 			glog.Fatalf("Could not create sensor: %s", err)
 		}
 
-		if err := testSensor.Start(); err != nil {
+		if err = testSensor.Start(); err != nil {
 			glog.Fatalf("Could not start sensor: %s", err)
 		}
 		defer testSensor.Stop()
@@ -251,14 +251,14 @@ func main() {
 		grpc.WithDialer(dialer),
 		grpc.WithInsecure())
 
-	c := api.NewTelemetryServiceClient(conn)
+	c := telemetryAPI.NewTelemetryServiceClient(conn)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "grpc.Dial: %s\n", err)
 		os.Exit(1)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	stream, err := c.GetEvents(ctx, &api.GetEventsRequest{
+	stream, err := c.GetEvents(ctx, &telemetryAPI.GetEventsRequest{
 		Subscription: createSubscription(),
 	})
 	if err != nil {
@@ -276,7 +276,8 @@ func main() {
 	}()
 
 	for {
-		response, err := stream.Recv()
+		var response *telemetryAPI.GetEventsResponse
+		response, err = stream.Recv()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Recv: %s\n", err)
 			os.Exit(1)
@@ -290,12 +291,12 @@ func main() {
 			}
 
 			switch x := e.Event.(type) {
-			case *api.TelemetryEvent_Container:
+			case *telemetryAPI.TelemetryEvent_Container:
 				switch x.Container.GetType() {
-				case api.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING:
+				case telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING:
 					onContainerRunning(e.ContainerId)
 
-				case api.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED:
+				case telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED:
 					onContainerExited(e.ContainerId)
 				}
 			}

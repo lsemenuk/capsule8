@@ -17,15 +17,17 @@ package perf
 import (
 	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSafeUInt64Map(t *testing.T) {
 	sm := safeUInt64Map{}
 	sm.removeInPlace([]uint64{1, 2, 3, 4, 5})
-	equals(t, 0, len(sm.getMap()))
+	assert.Len(t, sm.getMap(), 0)
 
 	sm.remove([]uint64{1, 2, 3, 4, 5})
-	equals(t, 0, len(sm.getMap()))
+	assert.Len(t, sm.getMap(), 0)
 
 	m := newUInt64Map()
 	m[1] = 1001
@@ -33,13 +35,13 @@ func TestSafeUInt64Map(t *testing.T) {
 	m[3] = 1003
 	sm = safeUInt64Map{}
 	sm.updateInPlace(m)
-	equals(t, 3, len(sm.getMap()))
-	equals(t, m, sm.getMap())
+	assert.Len(t, sm.getMap(), 3)
+	assert.Equal(t, m, sm.getMap())
 
 	sm.removeInPlace([]uint64{2})
 	delete(m, 2)
-	equals(t, 2, len(sm.getMap()))
-	equals(t, m, sm.getMap())
+	assert.Len(t, sm.getMap(), 2)
+	assert.Equal(t, m, sm.getMap())
 
 	sm = safeUInt64Map{}
 	wg := sync.WaitGroup{}
@@ -69,24 +71,24 @@ func TestSafeUInt64Map(t *testing.T) {
 func TestSafeEventAttrMap(t *testing.T) {
 	sm := safeEventAttrMap{}
 	sm.removeInPlace([]uint64{1, 2, 3, 4, 5})
-	equals(t, 0, len(sm.getMap()))
+	assert.Len(t, sm.getMap(), 0)
 
 	sm.remove([]uint64{1, 2, 3, 4, 5})
-	equals(t, 0, len(sm.getMap()))
+	assert.Len(t, sm.getMap(), 0)
 
 	m := newEventAttrMap()
-	m[1] = EventAttr{Type: 1001}
-	m[2] = EventAttr{Type: 1002}
-	m[3] = EventAttr{Type: 1003}
+	m[1] = &EventAttr{Type: 1001}
+	m[2] = &EventAttr{Type: 1002}
+	m[3] = &EventAttr{Type: 1003}
 	sm = safeEventAttrMap{}
 	sm.updateInPlace(m)
-	equals(t, 3, len(sm.getMap()))
-	equals(t, m, sm.getMap())
+	assert.Len(t, sm.getMap(), 3)
+	assert.Equal(t, m, sm.getMap())
 
 	sm.removeInPlace([]uint64{2})
 	delete(m, 2)
-	equals(t, 2, len(sm.getMap()))
-	equals(t, m, sm.getMap())
+	assert.Len(t, sm.getMap(), 2)
+	assert.Equal(t, m, sm.getMap())
 
 	sm = safeEventAttrMap{}
 	wg := sync.WaitGroup{}
@@ -97,7 +99,7 @@ func TestSafeEventAttrMap(t *testing.T) {
 				switch x % 3 {
 				case 0:
 					lm := newEventAttrMap()
-					lm[i] = EventAttr{Type: uint32(x)}
+					lm[i] = &EventAttr{Type: uint32(x)}
 					sm.update(lm)
 				case 1:
 					lm := sm.getMap()
@@ -116,13 +118,13 @@ func TestSafeEventAttrMap(t *testing.T) {
 func TestSafeRegisteredEventMap(t *testing.T) {
 	sm := safeRegisteredEventMap{}
 	_, f := sm.lookup(8)
-	equals(t, false, f)
+	assert.False(t, f)
 
 	sm.removeInPlace(8)
-	equals(t, 0, len(sm.getMap()))
+	assert.Len(t, sm.getMap(), 0)
 
 	sm.remove(8)
-	equals(t, 0, len(sm.getMap()))
+	assert.Len(t, sm.getMap(), 0)
 
 	m := newRegisteredEventMap()
 	m[1] = &registeredEvent{id: 1001}
@@ -132,13 +134,13 @@ func TestSafeRegisteredEventMap(t *testing.T) {
 	for k, v := range m {
 		sm.insertInPlace(k, v)
 	}
-	equals(t, 3, len(sm.getMap()))
-	equals(t, m, sm.getMap())
+	assert.Len(t, sm.getMap(), 3)
+	assert.Equal(t, m, sm.getMap())
 
 	sm.removeInPlace(2)
 	delete(m, 2)
-	equals(t, 2, len(sm.getMap()))
-	equals(t, m, sm.getMap())
+	assert.Len(t, sm.getMap(), 2)
+	assert.Equal(t, m, sm.getMap())
 
 	sm = safeRegisteredEventMap{}
 	wg := sync.WaitGroup{}
@@ -194,8 +196,7 @@ func (s *dummyPerfGroupLeaderEventSourceLeader) NewEventSource(
 }
 
 func (s *dummyPerfGroupLeaderEventSourceLeader) Read(
-	attrMap map[uint64]EventAttr,
-	f func(Sample, error),
+	_ func(size int) ([]byte, int),
 ) {
 	// do nothing
 }
@@ -203,13 +204,13 @@ func (s *dummyPerfGroupLeaderEventSourceLeader) Read(
 func TestSafePerfGroupLeaderMap(t *testing.T) {
 	sm := safePerfGroupLeaderMap{}
 	_, p := sm.lookup(8)
-	equals(t, false, p)
+	assert.False(t, p)
 
 	sm.removeInPlace(map[uint64]struct{}{1: struct{}{}, 2: struct{}{}, 3: struct{}{}})
-	equals(t, 0, len(sm.getMap()))
+	assert.Len(t, sm.getMap(), 0)
 
 	sm.remove(map[uint64]struct{}{1: struct{}{}, 2: struct{}{}, 3: struct{}{}})
-	equals(t, 0, len(sm.getMap()))
+	assert.Len(t, sm.getMap(), 0)
 
 	m := newPerfGroupLeaderMap()
 	m[1] = &perfGroupLeader{source: &dummyPerfGroupLeaderEventSourceLeader{id: 1}}
@@ -221,13 +222,13 @@ func TestSafePerfGroupLeaderMap(t *testing.T) {
 		leaders = append(leaders, v)
 	}
 	sm.updateInPlace(leaders)
-	equals(t, 3, len(sm.getMap()))
-	equals(t, m, sm.getMap())
+	assert.Len(t, sm.getMap(), 3)
+	assert.Equal(t, m, sm.getMap())
 
 	sm.removeInPlace(map[uint64]struct{}{2: struct{}{}})
 	delete(m, 2)
-	equals(t, 2, len(sm.getMap()))
-	equals(t, m, sm.getMap())
+	assert.Len(t, sm.getMap(), 2)
+	assert.Equal(t, m, sm.getMap())
 
 	sm = safePerfGroupLeaderMap{}
 	wg := sync.WaitGroup{}
@@ -255,24 +256,24 @@ func TestSafePerfGroupLeaderMap(t *testing.T) {
 func TestSafeTraceEventFormatMap(t *testing.T) {
 	sm := safeTraceEventFormatMap{}
 	sm.removeInPlace(5)
-	equals(t, 0, len(sm.getMap()))
+	assert.Len(t, sm.getMap(), 0)
 
 	sm.remove(5)
-	equals(t, 0, len(sm.getMap()))
+	assert.Len(t, sm.getMap(), 0)
 
 	sm = safeTraceEventFormatMap{}
 	m := make(TraceEventFormat, 0)
 	sm.insertInPlace(1001, m)
-	equals(t, 1, len(sm.getMap()))
+	assert.Len(t, sm.getMap(), 1)
 	format, found := sm.lookup(1001)
-	equals(t, m, format)
-	equals(t, true, found)
+	assert.Equal(t, m, format)
+	assert.True(t, found)
 
 	sm.removeInPlace(1001)
-	equals(t, 0, len(sm.getMap()))
+	assert.Len(t, sm.getMap(), 0)
 	format, found = sm.lookup(1001)
-	equals(t, TraceEventFormat(nil), format)
-	equals(t, false, found)
+	assert.Nil(t, format)
+	assert.False(t, found)
 
 	sm = safeTraceEventFormatMap{}
 	wg := sync.WaitGroup{}

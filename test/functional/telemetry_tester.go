@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 
 	"github.com/golang/glog"
 
@@ -46,10 +46,10 @@ type TelemetryTest interface {
 	RunContainer(t *testing.T)
 
 	// create and return telemetry subscription to use for the test
-	CreateSubscription(t *testing.T) *api.Subscription
+	CreateSubscription(t *testing.T) *telemetryAPI.Subscription
 
 	// return true to keep going, false if done
-	HandleTelemetryEvent(t *testing.T, te *api.ReceivedTelemetryEvent) bool
+	HandleTelemetryEvent(t *testing.T, te *telemetryAPI.ReceivedTelemetryEvent) bool
 }
 
 // TelemetryTester is used for
@@ -85,6 +85,7 @@ func (tt *TelemetryTester) runTelemetryTest(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(),
 		telemetryTestTimeout)
+	defer cancel()
 
 	sub := tt.test.CreateSubscription(t)
 
@@ -92,15 +93,15 @@ func (tt *TelemetryTester) runTelemetryTest(t *testing.T) {
 	// necessary to get imageIDs in other events. Make sure that
 	// the subscription includes it until this is fixed.
 	sub.EventFilter.ContainerEvents = append(sub.EventFilter.ContainerEvents,
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
 		},
 	)
 
 	// If buildContainer returned an ImageID, restrict events to
 	// containers running that image
 	if len(tt.imageID) > 0 {
-		containerFilter := &api.ContainerFilter{}
+		containerFilter := &telemetryAPI.ContainerFilter{}
 		containerFilter.ImageIds = append(containerFilter.ImageIds, tt.imageID)
 		sub.ContainerFilter = containerFilter
 	}
@@ -108,8 +109,8 @@ func (tt *TelemetryTester) runTelemetryTest(t *testing.T) {
 	//
 	// Connect to telemetry service first
 	//
-	c := api.NewTelemetryServiceClient(conn)
-	stream, err := c.GetEvents(ctx, &api.GetEventsRequest{
+	c := telemetryAPI.NewTelemetryServiceClient(conn)
+	stream, err := c.GetEvents(ctx, &telemetryAPI.GetEventsRequest{
 		Subscription: sub,
 	})
 	if err != nil {
@@ -143,13 +144,13 @@ func (tt *TelemetryTester) runTelemetryTest(t *testing.T) {
 		defer tt.waitGroup.Done()
 
 		for {
-			response, err := stream.Recv()
-			if err != nil {
-				tt.err = err
+			r, err2 := stream.Recv()
+			if err2 != nil {
+				tt.err = err2
 				return
 			}
 
-			for _, e := range response.Events {
+			for _, e := range r.Events {
 				glog.V(2).Infof("Telemetry event %+v", e)
 				if !tt.test.HandleTelemetryEvent(t, e) {
 					cancel()

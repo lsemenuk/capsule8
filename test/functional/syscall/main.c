@@ -14,12 +14,13 @@
 
 #include <unistd.h>
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
 	alarm(87);
 	alarm(88);
 	alarm(89);
-	
+
 	alarm(0);
-	
+
 	return 0;
 }

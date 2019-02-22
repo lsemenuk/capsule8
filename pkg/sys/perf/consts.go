@@ -20,8 +20,20 @@
 
 package perf
 
+import "syscall"
+
 //
-// We support PERF_ATTR_SIZE_VER0, which is the first published version
+// linux/timerfd.h constants
+//
+const (
+	TFD_TIMER_ABSTIME       = 1 << 0
+	TFD_TIMER_CANCEL_ON_SET = 1 << 1
+	TFD_CLOEXEC             = syscall.O_CLOEXEC
+	TFD_NONBLOCK            = syscall.O_NONBLOCK
+)
+
+//
+// linux/perf_event.h constants
 //
 const sizeofPerfEventAttrVer0 = 64
 const sizeofPerfEventAttrVer1 = 72  // Linux 2.6.33

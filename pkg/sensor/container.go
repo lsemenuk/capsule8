@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"unicode"
 
 	"github.com/capsule8/capsule8/pkg/expression"
@@ -115,6 +116,10 @@ type ContainerCache struct {
 	ContainerExitedEventID    uint64
 	ContainerDestroyedEventID uint64
 	ContainerUpdatedEventID   uint64
+
+	// EventGroupID is the EventMonitor event group ID to use for container
+	// related events that will generate container meta events
+	EventGroupID int32
 }
 
 // ContainerState represents the state of a container (created, running, etc.)
@@ -194,20 +199,19 @@ func NewContainerCache(sensor *Sensor) *ContainerCache {
 	}
 
 	monitor := sensor.Monitor()
-	cache.ContainerCreatedEventID = monitor.RegisterExternalEvent(
-		"CONTAINER_CREATED", cache.decodeContainerCreatedEvent)
 
-	cache.ContainerRunningEventID = monitor.RegisterExternalEvent(
-		"CONTAINER_RUNNING", cache.decodeContainerRunningEvent)
+	var err error
+	cache.EventGroupID, err = monitor.RegisterEventGroup("containers",
+		cache.lostRecordHandler)
+	if err != nil {
+		glog.Fatalf("Failed to register container event group: %v", err)
+	}
 
-	cache.ContainerExitedEventID = monitor.RegisterExternalEvent(
-		"CONTAINER_EXITED", cache.decodeContainerExitedEvent)
-
-	cache.ContainerDestroyedEventID = monitor.RegisterExternalEvent(
-		"CONTAINER_DESTROYED", cache.decodeContainerDestroyedEvent)
-
-	cache.ContainerUpdatedEventID = monitor.RegisterExternalEvent(
-		"CONTAINER_UPDATED", cache.decodeContainerUpdatedEvent)
+	cache.ContainerCreatedEventID = monitor.ReserveEventID()
+	cache.ContainerRunningEventID = monitor.ReserveEventID()
+	cache.ContainerExitedEventID = monitor.ReserveEventID()
+	cache.ContainerDestroyedEventID = monitor.ReserveEventID()
+	cache.ContainerUpdatedEventID = monitor.ReserveEventID()
 
 	return cache
 }
@@ -231,8 +235,7 @@ func (cc *ContainerCache) DeleteContainer(
 
 	if ok {
 		glog.V(2).Infof("Sending CONTAINER_DESTROYED for %s", info.ID)
-		cc.enqueueContainerEvent(cc.ContainerDestroyedEventID,
-			sampleID, info)
+		cc.dispatchContainerDestroyedEvent(sampleID, info)
 	}
 }
 
@@ -241,6 +244,22 @@ func (cc *ContainerCache) newContainerInfo(containerID string) *ContainerInfo {
 		ID:      containerID,
 		Runtime: ContainerRuntimeUnknown,
 	}
+}
+
+func (cc *ContainerCache) lostRecordHandler(
+	eventid uint64,
+	groupid int32,
+	sampleID perf.SampleID,
+	count uint64,
+) {
+	glog.V(1).Infof("Lost %d container related events\n", count)
+
+	var e LostRecordTelemetryEvent
+	e.InitWithSampleID(cc.sensor, sampleID, count)
+	e.Type = LostRecordTypeContainer
+	cc.sensor.DispatchEventToAllSubscriptions(e)
+
+	atomic.AddUint64(&cc.sensor.Metrics.KernelSamplesLost, count)
 }
 
 // LookupContainer searches the cache for a container by ID and returns any
@@ -259,75 +278,59 @@ func (cc *ContainerCache) LookupContainer(containerID string, create bool) *Cont
 	return info
 }
 
-func (cc *ContainerCache) enqueueContainerEvent(
-	eventID uint64,
+func (cc *ContainerCache) dispatchContainerCreatedEvent(
 	sampleID perf.SampleID,
 	info *ContainerInfo,
-) error {
-	data := map[string]interface{}{
-		"__container__": *info,
-	}
-	return cc.sensor.Monitor().EnqueueExternalSample(eventID, sampleID, data)
-}
-
-func (cc *ContainerCache) decodeContainerCreatedEvent(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
+) {
 	var e ContainerCreatedTelemetryEvent
-	if !e.InitWithSample(cc.sensor, sample, data) {
-		return nil, nil
+	if e.InitWithSampleID(cc.sensor, sampleID) {
+		e.TelemetryEventData.Container = *info
+		cc.sensor.DispatchEvent(cc.ContainerCreatedEventID, e, nil)
 	}
-	e.TelemetryEventData.Container = data["__container__"].(ContainerInfo)
-	return e, nil
 }
 
-func (cc *ContainerCache) decodeContainerRunningEvent(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
+func (cc *ContainerCache) dispatchContainerRunningEvent(
+	sampleID perf.SampleID,
+	info *ContainerInfo,
+) {
 	var e ContainerRunningTelemetryEvent
-	if !e.InitWithSample(cc.sensor, sample, data) {
-		return nil, nil
+	if e.InitWithSampleID(cc.sensor, sampleID) {
+		e.TelemetryEventData.Container = *info
+		cc.sensor.DispatchEvent(cc.ContainerRunningEventID, e, nil)
 	}
-	e.TelemetryEventData.Container = data["__container__"].(ContainerInfo)
-	return e, nil
 }
 
-func (cc *ContainerCache) decodeContainerExitedEvent(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
+func (cc *ContainerCache) dispatchContainerExitedEvent(
+	sampleID perf.SampleID,
+	info *ContainerInfo,
+) {
 	var e ContainerExitedTelemetryEvent
-	if !e.InitWithSample(cc.sensor, sample, data) {
-		return nil, nil
+	if e.InitWithSampleID(cc.sensor, sampleID) {
+		e.TelemetryEventData.Container = *info
+		cc.sensor.DispatchEvent(cc.ContainerExitedEventID, e, nil)
 	}
-	e.TelemetryEventData.Container = data["__container__"].(ContainerInfo)
-	return e, nil
 }
 
-func (cc *ContainerCache) decodeContainerDestroyedEvent(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
+func (cc *ContainerCache) dispatchContainerDestroyedEvent(
+	sampleID perf.SampleID,
+	info *ContainerInfo,
+) {
 	var e ContainerDestroyedTelemetryEvent
-	if !e.InitWithSample(cc.sensor, sample, data) {
-		return nil, nil
+	if e.InitWithSampleID(cc.sensor, sampleID) {
+		e.TelemetryEventData.Container = *info
+		cc.sensor.DispatchEvent(cc.ContainerDestroyedEventID, e, nil)
 	}
-	e.TelemetryEventData.Container = data["__container__"].(ContainerInfo)
-	return e, nil
 }
 
-func (cc *ContainerCache) decodeContainerUpdatedEvent(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
+func (cc *ContainerCache) dispatchContainerUpdatedEvent(
+	sampleID perf.SampleID,
+	info *ContainerInfo,
+) {
 	var e ContainerUpdatedTelemetryEvent
-	if !e.InitWithSample(cc.sensor, sample, data) {
-		return nil, nil
+	if e.InitWithSampleID(cc.sensor, sampleID) {
+		e.TelemetryEventData.Container = *info
+		cc.sensor.DispatchEvent(cc.ContainerUpdatedEventID, e, nil)
 	}
-	e.TelemetryEventData.Container = data["__container__"].(ContainerInfo)
-	return e, nil
 }
 
 // Update updates the data cached for a container with new information. Some
@@ -376,25 +379,22 @@ func (info *ContainerInfo) Update(
 	if info.State != oldState {
 		if oldState < ContainerStateCreated {
 			glog.V(2).Infof("Sending CONTAINER_CREATED for %s", info.ID)
-			cache.enqueueContainerEvent(
-				cache.ContainerCreatedEventID, sampleID, info)
+			cache.dispatchContainerCreatedEvent(sampleID, info)
 		}
 		if oldState < ContainerStateRunning &&
 			info.State >= ContainerStateRunning {
 			glog.V(2).Infof("Sending CONTAINER_RUNNING for %s", info.ID)
-			cache.enqueueContainerEvent(
-				cache.ContainerRunningEventID, sampleID, info)
+			cache.dispatchContainerRunningEvent(sampleID, info)
+
 		}
 		if oldState < ContainerStateRestarting &&
 			info.State >= ContainerStateRestarting {
 			glog.V(2).Infof("Sending CONTAINER_EXITED for %s", info.ID)
-			cache.enqueueContainerEvent(
-				cache.ContainerExitedEventID, sampleID, info)
+			cache.dispatchContainerExitedEvent(sampleID, info)
 		}
 	} else if dataChanged {
 		glog.V(2).Infof("Sending CONTAINER_UPDATED for %s", info.ID)
-		cache.enqueueContainerEvent(
-			cache.ContainerUpdatedEventID, sampleID, info)
+		cache.dispatchContainerUpdatedEvent(sampleID, info)
 	}
 }
 
@@ -402,7 +402,7 @@ func (s *Subscription) registerContainerEventFilter(
 	eventID uint64,
 	expr *expression.Expression,
 ) {
-	if _, err := s.addEventSink(eventID, expr, ContainerEventTypes); err != nil {
+	if _, err := s.addEventSink(eventID, expr); err != nil {
 		s.logStatus(
 			fmt.Sprintf("Invalid container filter expression: %v", err))
 	}

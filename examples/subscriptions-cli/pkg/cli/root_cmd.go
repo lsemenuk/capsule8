@@ -1,3 +1,17 @@
+// Copyright 2018 Capsule8, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package cli
 
 import (
@@ -8,7 +22,7 @@ import (
 	"os"
 	"os/signal"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -53,13 +67,13 @@ func (opts *options) Run(out, errorOut io.Writer, args []string) error {
 		return fmt.Errorf("Error creading grpc connection to sensor: %s", err)
 	}
 
-	client := api.NewTelemetryServiceClient(conn)
+	client := telemetryAPI.NewTelemetryServiceClient(conn)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Open event stream
-	stream, err := client.GetEvents(ctx, &api.GetEventsRequest{
+	stream, err := client.GetEvents(ctx, &telemetryAPI.GetEventsRequest{
 		Subscription: subscription,
 	})
 
@@ -77,13 +91,15 @@ func (opts *options) Run(out, errorOut io.Writer, args []string) error {
 	}()
 
 	for {
-		ev, err := stream.Recv()
+		var ev *telemetryAPI.GetEventsResponse
+		ev, err = stream.Recv()
 		if err != nil {
 			return fmt.Errorf("Error receiving event from stream: %s", err)
 		}
 
 		for _, e := range ev.Events {
-			blob, err := json.Marshal(e)
+			var blob []byte
+			blob, err = json.Marshal(e)
 			if err != nil {
 				return fmt.Errorf("Error marshaling received event to JSON: %s", err)
 			}

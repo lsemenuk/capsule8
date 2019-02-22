@@ -1,0 +1,8 @@
+nodev	sysfs
+nodev	proc
+nodev	cgroup
+nodev	debugfs
+
+	iso9660
+	ext4
+nodev	autofs

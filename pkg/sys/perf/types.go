@@ -19,19 +19,20 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"sync"
-	"sync/atomic"
+	"runtime"
+	"time"
+	"unsafe"
 
-	"github.com/golang/glog"
+	"github.com/capsule8/capsule8/pkg/expression"
 )
 
-type readError struct{ error }
-
-func readOrPanic(buf io.Reader, i interface{}) {
-	if err := binary.Read(buf, binary.LittleEndian, i); err != nil {
-		panic(readError{err})
+func checkRawDataSize(rawData []byte, want int) error {
+	if len(rawData) < want {
+		_, _, line, _ := runtime.Caller(1)
+		return fmt.Errorf("Expected %d bytes at line %d; got %d",
+			want, line, len(rawData))
 	}
+	return nil
 }
 
 /*
@@ -157,6 +158,111 @@ type EventAttr struct {
 	SampleRegsIntr         uint64
 	AuxWatermark           uint32
 	SampleMaxStack         uint16
+
+	// sizeofSampleID is a cached size of SampleID data expected in each
+	// sample produced by the kernel
+	sizeofSampleID int
+
+	// sizeofSampleRecord is a cached size of sample data expected in each
+	// sample produced by the kernel. This includes the size of SampleID
+	// data because that data is not rendered as a SampleID struct the way
+	// it is for other record types. This does not include variable length
+	// data (e.g., IPs, RawData, V.CounterGroup.Values, etc.)
+	sizeofSampleRecord int
+}
+
+func (ea *EventAttr) computeSizes() {
+	// Compute sizeofSampleID
+	ea.sizeofSampleID = 0
+	if ea.SampleType&PERF_SAMPLE_TID != 0 {
+		ea.sizeofSampleID += 8
+	}
+	if ea.SampleType&PERF_SAMPLE_TIME != 0 {
+		ea.sizeofSampleID += 8
+	}
+	if ea.SampleType&PERF_SAMPLE_ID != 0 {
+		ea.sizeofSampleID += 8
+	}
+	if ea.SampleType&PERF_SAMPLE_STREAM_ID != 0 {
+		ea.sizeofSampleID += 8
+	}
+	if ea.SampleType&PERF_SAMPLE_CPU != 0 {
+		ea.sizeofSampleID += 8
+	}
+	if ea.SampleType&PERF_SAMPLE_IDENTIFIER != 0 {
+		ea.sizeofSampleID += 8
+	}
+
+	// Compute sizeofSampleRecord
+	ea.sizeofSampleRecord = 0
+	if ea.SampleType&PERF_SAMPLE_IDENTIFIER != 0 {
+		ea.sizeofSampleRecord += 8
+	}
+	if ea.SampleType&PERF_SAMPLE_IP != 0 {
+		ea.sizeofSampleRecord += 8
+	}
+	if ea.SampleType&PERF_SAMPLE_TID != 0 {
+		ea.sizeofSampleRecord += 8
+	}
+	if ea.SampleType&PERF_SAMPLE_TIME != 0 {
+		ea.sizeofSampleRecord += 8
+	}
+	if ea.SampleType&PERF_SAMPLE_ADDR != 0 {
+		ea.sizeofSampleRecord += 8
+	}
+	if ea.SampleType&PERF_SAMPLE_ID != 0 {
+		ea.sizeofSampleRecord += 8
+	}
+	if ea.SampleType&PERF_SAMPLE_STREAM_ID != 0 {
+		ea.sizeofSampleRecord += 8
+	}
+	if ea.SampleType&PERF_SAMPLE_CPU != 0 {
+		ea.sizeofSampleRecord += 8
+	}
+	if ea.SampleType&PERF_SAMPLE_PERIOD != 0 {
+		ea.sizeofSampleRecord += 8
+	}
+	if ea.SampleType&PERF_SAMPLE_READ != 0 {
+		if ea.ReadFormat&PERF_FORMAT_GROUP != 0 {
+			ea.sizeofSampleRecord += 8
+			if ea.ReadFormat&PERF_FORMAT_TOTAL_TIME_ENABLED != 0 {
+				ea.sizeofSampleRecord += 8
+			}
+			if ea.ReadFormat&PERF_FORMAT_TOTAL_TIME_RUNNING != 0 {
+				ea.sizeofSampleRecord += 8
+			}
+		} else {
+			ea.sizeofSampleRecord += 8
+			if ea.ReadFormat&PERF_FORMAT_TOTAL_TIME_ENABLED != 0 {
+				ea.sizeofSampleRecord += 8
+			}
+			if ea.ReadFormat&PERF_FORMAT_TOTAL_TIME_RUNNING != 0 {
+				ea.sizeofSampleRecord += 8
+			}
+			if ea.ReadFormat&PERF_FORMAT_ID != 0 {
+				ea.sizeofSampleRecord += 8
+			}
+		}
+	}
+	if ea.SampleType&PERF_SAMPLE_CALLCHAIN != 0 {
+		// Fixed 8 bytes + variable
+		ea.sizeofSampleRecord += 8
+	}
+	if ea.SampleType&PERF_SAMPLE_RAW != 0 {
+		// Fixed 4 bytes + variable
+		ea.sizeofSampleRecord += 4
+	}
+	if ea.SampleType&PERF_SAMPLE_BRANCH_STACK != 0 {
+		// Fixed 8 bytes + variable
+		ea.sizeofSampleRecord += 8
+	}
+
+	// PERF_SAMPLE_REGS_USER
+	// PERF_SAMPLE_STACK_USER
+	// PERF_SAMPLE_WEIGHT
+	// PERF_SAMPLE_DATA_SRC
+	// PERF_SAMPLE_TRANSACTION
+	// PERF_SAMPLE_REGS_INTR
 }
 
 type eventAttrBitfield uint64
@@ -276,6 +382,7 @@ func (ea *EventAttr) write(buf io.Writer) error {
 
 	binary.Write(buf, binary.LittleEndian, uint16(0))
 
+	ea.computeSizes()
 	return nil
 }
 
@@ -340,120 +447,6 @@ type metadata struct {
 
 // -----------------------------------------------------------------------------
 
-/*
-   struct perf_event_header {
-       __u32   type;
-       __u16   misc;
-       __u16   size;
-   };
-*/
-
-type eventHeader struct {
-	Type uint32
-	Misc uint16
-	Size uint16
-}
-
-const sizeofEventHeader = 8
-
-func (eh *eventHeader) read(reader io.Reader) error {
-	return binary.Read(reader, binary.LittleEndian, eh)
-}
-
-// CommRecord is a translation of the structure used by the Linux kernel for
-// PERF_RECORD_COMM samples into Go.
-type CommRecord struct {
-	Pid  uint32
-	Tid  uint32
-	Comm []byte
-}
-
-// Fixed portion + at least 8 for Comm
-const sizeofCommRecord = 8
-
-func (cr *CommRecord) read(reader io.Reader) {
-	readOrPanic(reader, &cr.Pid)
-	readOrPanic(reader, &cr.Tid)
-
-	for {
-		var b byte
-		readOrPanic(reader, &b)
-		if b == 0 {
-			break
-		}
-		cr.Comm = append(cr.Comm, b)
-	}
-
-	// The comm[] field is NULL-padded up to an 8-byte aligned
-	// offset. Discard the rest of the bytes.
-	i := 8 - ((len(cr.Comm) + 1) % 8)
-	if i < 8 {
-		readOrPanic(reader, make([]byte, i))
-	}
-}
-
-// ExitRecord is a translation of the structure used by the Linux kernel for
-// PERF_RECORD_EXIT samples into Go.
-type ExitRecord struct {
-	Pid  uint32
-	Ppid uint32
-	Tid  uint32
-	Ptid uint32
-	Time uint64
-}
-
-const sizeofExitRecord = 24
-
-func (er *ExitRecord) read(reader io.Reader) {
-	readOrPanic(reader, &er.Pid)
-	readOrPanic(reader, &er.Ppid)
-	readOrPanic(reader, &er.Tid)
-	readOrPanic(reader, &er.Ptid)
-	readOrPanic(reader, &er.Time)
-}
-
-// LostRecord is a translation of the structure used by the Linux kernel for
-// PERF_RECORD_LOST samples into Go.
-type LostRecord struct {
-	ID   uint64
-	Lost uint64
-}
-
-const sizeofLostRecord = 16
-
-func (lr *LostRecord) read(reader io.Reader) {
-	readOrPanic(reader, &lr.ID)
-	readOrPanic(reader, &lr.Lost)
-}
-
-// ForkRecord is a translation of the structure used by the Linux kernel for
-// PERF_RECORD_FORK samples into Go.
-type ForkRecord struct {
-	Pid  uint32
-	Ppid uint32
-	Tid  uint32
-	Ptid uint32
-	Time uint64
-}
-
-const sizeofForkRecord = 24
-
-func (fr *ForkRecord) read(reader io.Reader) {
-	readOrPanic(reader, &fr.Pid)
-	readOrPanic(reader, &fr.Ppid)
-	readOrPanic(reader, &fr.Tid)
-	readOrPanic(reader, &fr.Ptid)
-	readOrPanic(reader, &fr.Time)
-}
-
-// TraceEvent represents the common header on all trace events
-type TraceEvent struct {
-	Type         uint16
-	Flags        uint8
-	PreemptCount uint8
-	Pid          int32
-}
-
 // CounterValue resepresents the read value of a counter event
 type CounterValue struct {
 	// Globally unique identifier for this counter event. Only
@@ -471,49 +464,63 @@ type CounterGroup struct {
 	Values      []CounterValue
 }
 
-func (cg *CounterGroup) read(reader io.Reader, format uint64) {
-	if (format & PERF_FORMAT_GROUP) != 0 {
-		var nr uint64
-		readOrPanic(reader, &nr)
+func (cg *CounterGroup) read(rawData []byte, format uint64) (off int, err error) {
+	// The fixed length portion of the data should have already been
+	// checked before this is called. The variable length portion will be
+	// checked here.
 
-		if (format & PERF_FORMAT_TOTAL_TIME_ENABLED) != 0 {
-			readOrPanic(reader, &cg.TimeEnabled)
+	if format&PERF_FORMAT_GROUP != 0 {
+		nr := *(*uint64)(unsafe.Pointer(&rawData[0]))
+		off += 8
+		if format&PERF_FORMAT_TOTAL_TIME_ENABLED != 0 {
+			cg.TimeEnabled = *(*uint64)(unsafe.Pointer(&rawData[off]))
+			off += 8
+		}
+		if format&PERF_FORMAT_TOTAL_TIME_RUNNING != 0 {
+			cg.TimeRunning = *(*uint64)(unsafe.Pointer(&rawData[off]))
+			off += 8
 		}
 
-		if (format & PERF_FORMAT_TOTAL_TIME_RUNNING) != 0 {
-			readOrPanic(reader, &cg.TimeRunning)
-		}
-
-		for i := uint64(0); i < nr; i++ {
-			value := CounterValue{}
-
-			readOrPanic(reader, &value.Value)
-
-			if (format & PERF_FORMAT_ID) != 0 {
-				readOrPanic(reader, &value.ID)
+		cg.Values = make([]CounterValue, nr)
+		if format&PERF_FORMAT_ID != 0 {
+			if err = checkRawDataSize(rawData, off+(int(nr)*16)); err != nil {
+				return
 			}
-
-			cg.Values = append(cg.Values, value)
+			for i := uint64(0); i < nr; i++ {
+				cg.Values[i].Value = *(*uint64)(unsafe.Pointer(&(rawData[off])))
+				cg.Values[i].ID = *(*uint64)(unsafe.Pointer(&rawData[off+8]))
+				off += 16
+			}
+		} else {
+			if err = checkRawDataSize(rawData, off+(int(nr)*8)); err != nil {
+				return
+			}
+			for i := uint64(0); i < nr; i++ {
+				cg.Values[i].Value = *(*uint64)(unsafe.Pointer(&rawData[off]))
+				off += 8
+			}
 		}
 	} else {
-		value := CounterValue{}
-
-		readOrPanic(reader, &value.Value)
-
-		if (format & PERF_FORMAT_TOTAL_TIME_ENABLED) != 0 {
-			readOrPanic(reader, &cg.TimeEnabled)
+		cg.Values = []CounterValue{
+			CounterValue{
+				Value: *(*uint64)(unsafe.Pointer(&rawData[0])),
+			},
 		}
-
-		if (format & PERF_FORMAT_TOTAL_TIME_RUNNING) != 0 {
-			readOrPanic(reader, &cg.TimeRunning)
+		off += 8
+		if format&PERF_FORMAT_TOTAL_TIME_ENABLED != 0 {
+			cg.TimeEnabled = *(*uint64)(unsafe.Pointer(&rawData[off]))
+			off += 8
 		}
-
-		if (format & PERF_FORMAT_ID) != 0 {
-			readOrPanic(reader, &value.ID)
+		if format&PERF_FORMAT_TOTAL_TIME_RUNNING != 0 {
+			cg.TimeRunning = *(*uint64)(unsafe.Pointer(&rawData[off]))
+			off += 8
 		}
-
-		cg.Values = append(cg.Values, value)
+		if format&PERF_FORMAT_ID != 0 {
+			cg.Values[0].ID = *(*uint64)(unsafe.Pointer(&rawData[off]))
+			off += 8
+		}
 	}
+	return
 }
 
 // BranchEntry is a translation of the Linux kernel's struct perf_branch_entry
@@ -528,18 +535,23 @@ type BranchEntry struct {
 	Cycles    uint16
 }
 
-// SampleRecord is a translation of the structure used by the Linux kernel for
-// PERF_RECORD_SAMPLE samples into Go.
-type SampleRecord struct {
-	SampleID    uint64
+// Sample is the representation of a perf_event sample retrieved from the
+// Linux kernel. It includes the header information, a translation of the
+// sample data, and metadata depending on the flags set in the EventAttr
+// used to enable the event that generated the sample.
+type Sample struct {
+	Type uint32
+	Misc uint16
+
+	SampleID
+
+	// If Type == PERF_RECORD_LOST, this will be the count of lost records
+	Lost uint64
+
+	// If Type == PERF_RECORD_SAMPLE, the rest of this will be filled in
+	// accordingly
 	IP          uint64
-	Pid         uint32
-	Tid         uint32
-	Time        uint64
 	Addr        uint64
-	ID          uint64
-	StreamID    uint64
-	CPU         uint32
 	Period      uint64
 	V           CounterGroup
 	IPs         []uint64
@@ -553,116 +565,145 @@ type SampleRecord struct {
 	Transaction uint64
 	IntrABI     uint64
 	IntrRegs    []uint64
+
+	// TraceFormat is primarily used internally to decode RawData on-demand
+	// It is exposed publicly to facilitate unit testing.
+	TraceFormat TraceEventFormat
 }
 
-func (s *SampleRecord) read(
-	reader io.Reader,
-	eventAttr *EventAttr,
-) {
+func (sample *Sample) readSampleRecord(rawData []byte, eventAttr *EventAttr) (err error) {
+	// The fixed length portion of the data should have already been
+	// checked before this is called. The variable length portion will be
+	// checked here.
+
+	var off int
 	sampleType := eventAttr.SampleType
 
-	// Clear PERF_SAMPLE_IDENTIFIER because that should have already been
-	// read. Leaving it set will cause problems in the sanity check below
-	// just before returning.
-	sampleType &= ^PERF_SAMPLE_IDENTIFIER
+	if eventAttr.SampleType&PERF_SAMPLE_IDENTIFIER != 0 {
+		sampleType &= ^PERF_SAMPLE_IDENTIFIER
+		sample.ID = *(*uint64)(unsafe.Pointer(&rawData[off]))
+		off += 8
+	}
 
 	if sampleType&PERF_SAMPLE_IP != 0 {
 		sampleType &= ^PERF_SAMPLE_IP
-		readOrPanic(reader, &s.IP)
+		sample.IP = *(*uint64)(unsafe.Pointer(&rawData[off]))
+		off += 8
 	}
 
 	if sampleType&PERF_SAMPLE_TID != 0 {
 		sampleType &= ^PERF_SAMPLE_TID
-		readOrPanic(reader, &s.Pid)
-		readOrPanic(reader, &s.Tid)
+		sample.PID = *(*uint32)(unsafe.Pointer(&rawData[off]))
+		sample.TID = *(*uint32)(unsafe.Pointer(&rawData[off+4]))
+		off += 8
 	}
 
 	if sampleType&PERF_SAMPLE_TIME != 0 {
 		sampleType &= ^PERF_SAMPLE_TIME
-		readOrPanic(reader, &s.Time)
+		sample.Time = *(*uint64)(unsafe.Pointer(&rawData[off]))
+		off += 8
 	}
 
 	if sampleType&PERF_SAMPLE_ADDR != 0 {
 		sampleType &= ^PERF_SAMPLE_ADDR
-		readOrPanic(reader, &s.Addr)
+		sample.Addr = *(*uint64)(unsafe.Pointer(&rawData[off]))
+		off += 8
 	}
 
 	if sampleType&PERF_SAMPLE_ID != 0 {
 		sampleType &= ^PERF_SAMPLE_ID
-		readOrPanic(reader, &s.ID)
+		sample.ID = *(*uint64)(unsafe.Pointer(&rawData[off]))
+		off += 8
 	}
 
 	if sampleType&PERF_SAMPLE_STREAM_ID != 0 {
 		sampleType &= ^PERF_SAMPLE_STREAM_ID
-		readOrPanic(reader, &s.StreamID)
+		sample.StreamID = *(*uint64)(unsafe.Pointer(&rawData[off]))
+		off += 8
 	}
 
 	if sampleType&PERF_SAMPLE_CPU != 0 {
 		sampleType &= ^PERF_SAMPLE_CPU
-		var res uint32
-		readOrPanic(reader, &s.CPU)
-		readOrPanic(reader, &res)
+		sample.CPU = *(*uint32)(unsafe.Pointer(&rawData[off]))
+		// _ = *(*uint32)(unsafe.Pointer(&rawData[off+4]))
+		off += 8
 	}
 
 	if sampleType&PERF_SAMPLE_PERIOD != 0 {
 		sampleType &= ^PERF_SAMPLE_PERIOD
-		readOrPanic(reader, &s.Period)
+		sample.Period = *(*uint64)(unsafe.Pointer(&rawData[off]))
+		off += 8
 	}
 
 	if sampleType&PERF_SAMPLE_READ != 0 {
 		sampleType &= ^PERF_SAMPLE_READ
-		s.V.read(reader, eventAttr.ReadFormat)
+		var o int
+		o, err = sample.V.read(rawData[off:], eventAttr.ReadFormat)
+		if err != nil {
+			return
+		}
+		off += o
 	}
 
 	if sampleType&PERF_SAMPLE_CALLCHAIN != 0 {
 		sampleType &= ^PERF_SAMPLE_CALLCHAIN
-		var nr uint64
-		readOrPanic(reader, &nr)
-		s.IPs = make([]uint64, 0, nr)
+		nr := *(*uint64)(unsafe.Pointer(&rawData[off]))
+		off += 8
+		if err = checkRawDataSize(rawData, off+(int(nr)*8)); err != nil {
+			return
+		}
+		sample.IPs = make([]uint64, nr)
 		for i := uint64(0); i < nr; i++ {
-			var ip uint64
-			readOrPanic(reader, &ip)
-			s.IPs = append(s.IPs, ip)
+			sample.IPs[i] = *(*uint64)(unsafe.Pointer(&rawData[off]))
+			off += 8
 		}
 	}
 
 	if sampleType&PERF_SAMPLE_RAW != 0 {
 		sampleType &= ^PERF_SAMPLE_RAW
-		var rawDataSize uint32
-		readOrPanic(reader, &rawDataSize)
-		s.RawData = make([]byte, rawDataSize)
-		readOrPanic(reader, s.RawData)
+		rawDataSize := int(*(*uint32)(unsafe.Pointer(&rawData[off])))
+		off += 4
+		if err = checkRawDataSize(rawData, off+rawDataSize); err != nil {
+			return
+		}
+		sample.RawData = rawData[off : off+rawDataSize]
+		off += int(rawDataSize)
 	}
 
 	if sampleType&PERF_SAMPLE_BRANCH_STACK != 0 {
 		sampleType &= ^PERF_SAMPLE_BRANCH_STACK
-		var bnr uint64
-		readOrPanic(reader, &bnr)
-		s.Branches = make([]BranchEntry, 0, bnr)
-		for i := uint64(0); i < bnr; i++ {
-			var pbe struct {
-				From  uint64
-				To    uint64
-				Flags uint64
+		nr := *(*uint64)(unsafe.Pointer(&rawData[off]))
+		off += 8
+		if err = checkRawDataSize(rawData, off+(int(nr)*24)); err != nil {
+			return
+		}
+		sample.Branches = make([]BranchEntry, nr)
+		for i := uint64(0); i < nr; i++ {
+			flags := *(*uint64)(unsafe.Pointer(&rawData[off+16]))
+			sample.Branches[i] = BranchEntry{
+				From:      *(*uint64)(unsafe.Pointer(&rawData[off])),
+				To:        *(*uint64)(unsafe.Pointer(&rawData[off+8])),
+				Mispred:   (flags&(1<<0) != 0),
+				Predicted: (flags&(1<<1) != 0),
+				InTx:      (flags&(1<<2) != 0),
+				Abort:     (flags&(1<<3) != 0),
+				Cycles:    uint16((flags & 0xffff0) >> 4),
 			}
-			readOrPanic(reader, &pbe)
-
-			branchEntry := BranchEntry{
-				From:      pbe.From,
-				To:        pbe.To,
-				Mispred:   (pbe.Flags&(1<<0) != 0),
-				Predicted: (pbe.Flags&(1<<1) != 0),
-				InTx:      (pbe.Flags&(1<<2) != 0),
-				Abort:     (pbe.Flags&(1<<3) != 0),
-				Cycles:    uint16((pbe.Flags & 0xffff0) >> 4),
-			}
-			s.Branches = append(s.Branches, branchEntry)
+			off += 24
 		}
 	}
 
+	// PERF_SAMPLE_REGS_USER
+	// PERF_SAMPLE_STACK_USER
+	// PERF_SAMPLE_WEIGHT - uint64
+	// PERF_SAMPLE_DATA_SRC - uint64
+	// PERF_SAMPLE_TRANSACTION - uint64
+	// PERF_SAMPLE_REGS_INTR
+
 	if sampleType != 0 {
-		panic(fmt.Sprintf("EventAttr.SampleType has unsupported bits %x set", sampleType))
+		err = fmt.Errorf("EventAttr.SampleType has unsupported bits %x set", sampleType)
 	}
+	return
 }
 
 /*
@@ -687,271 +728,261 @@ type SampleID struct {
 	CPU      uint32
 }
 
-var sampleIDSizeCache atomic.Value
-var sampleIDSizeCacheMutex sync.Mutex
+func (sid *SampleID) read(rawData []byte, attr *EventAttr) {
+	// Availability of the data to read should be checked before this is
+	// called
 
-func (sid *SampleID) getSize(eventSampleType uint64, eventSampleIDAll bool) int {
-	if sizeCache := sampleIDSizeCache.Load(); sizeCache != nil {
-		cache := sizeCache.(map[uint64]int)
-		if size, ok := cache[eventSampleType]; ok {
-			return size
-		}
-	}
-
-	var size int
-	if eventSampleIDAll {
-		if (eventSampleType & PERF_SAMPLE_TID) != 0 {
-			size += binary.Size(sid.PID)
-			size += binary.Size(sid.TID)
-		}
-
-		if (eventSampleType & PERF_SAMPLE_TIME) != 0 {
-			size += binary.Size(sid.Time)
-		}
-
-		if (eventSampleType & PERF_SAMPLE_ID) != 0 {
-			size += binary.Size(sid.ID)
-		}
-
-		if (eventSampleType & PERF_SAMPLE_STREAM_ID) != 0 {
-			size += binary.Size(sid.StreamID)
-		}
-
-		if (eventSampleType & PERF_SAMPLE_CPU) != 0 {
-			size += binary.Size(sid.CPU)
-			size += binary.Size(uint32(0))
-		}
-
-		if (eventSampleType & PERF_SAMPLE_IDENTIFIER) != 0 {
-			size += binary.Size(sid.ID)
-		}
-	}
-
-	var newCache map[uint64]int
-	sampleIDSizeCacheMutex.Lock()
-	if sizeCache := sampleIDSizeCache.Load(); sizeCache == nil {
-		newCache = make(map[uint64]int)
-	} else {
-		oldCache := sizeCache.(map[uint64]int)
-		newCache = make(map[uint64]int, len(oldCache)+1)
-		for k, v := range oldCache {
-			newCache[k] = v
-		}
-	}
-	newCache[eventSampleType] = size
-	sampleIDSizeCache.Store(newCache)
-	sampleIDSizeCacheMutex.Unlock()
-
-	return size
-}
-
-func (sid *SampleID) read(reader io.Reader, eventSampleType uint64) {
+	var off int
+	eventSampleType := attr.SampleType
 	if (eventSampleType & PERF_SAMPLE_TID) != 0 {
-		readOrPanic(reader, &sid.PID)
-		readOrPanic(reader, &sid.TID)
+		sid.PID = *(*uint32)(unsafe.Pointer(&rawData[off]))
+		sid.TID = *(*uint32)(unsafe.Pointer(&rawData[off+4]))
+		off += 8
 	}
-
 	if (eventSampleType & PERF_SAMPLE_TIME) != 0 {
-		readOrPanic(reader, &sid.Time)
+		sid.Time = *(*uint64)(unsafe.Pointer(&rawData[off]))
+		off += 8
 	}
-
 	if (eventSampleType & PERF_SAMPLE_ID) != 0 {
-		readOrPanic(reader, &sid.ID)
+		sid.ID = *(*uint64)(unsafe.Pointer(&rawData[off]))
+		off += 8
 	}
-
 	if (eventSampleType & PERF_SAMPLE_STREAM_ID) != 0 {
-		readOrPanic(reader, &sid.StreamID)
+		sid.StreamID = *(*uint64)(unsafe.Pointer(&rawData[off]))
+		off += 8
 	}
-
 	if (eventSampleType & PERF_SAMPLE_CPU) != 0 {
-		var res uint32
-		readOrPanic(reader, &sid.CPU)
-		readOrPanic(reader, &res)
+		sid.CPU = *(*uint32)(unsafe.Pointer(&rawData[off]))
+		// _ = *(*uint32)(unsafe.Pointer(&rawData[off+4]))
+		off += 8
 	}
-
 	if (eventSampleType & PERF_SAMPLE_IDENTIFIER) != 0 {
-		readOrPanic(reader, &sid.ID)
+		sid.ID = *(*uint64)(unsafe.Pointer(&rawData[off]))
+		off += 8
 	}
-}
-
-// Sample is the representation of a perf_event sample retrieved from the
-// Linux kernel. It includes the header information, a translation of the
-// sample data, and metadata depending on the flags set in the EventAttr
-// used to enable the event that generated the sample.
-type Sample struct {
-	eventHeader
-	Record interface{}
-	SampleID
 }
 
 func (sample *Sample) resolveEventAttr(
-	reader io.ReadSeeker,
-	startPos int64,
-	eventAttr *EventAttr,
-	formatMap map[uint64]EventAttr,
-) (uint64, *EventAttr) {
+	rawData []byte,
+	formatMap map[uint64]*EventAttr,
+) (attr *EventAttr, err error) {
 	// Assumptions: All EventAttr structures in use must have following
 	// set for any of this code to function properly:
 	//
-	//	SampleType |= PERF_SAMPLE_IDENTIFIER
+	//      SampleType |= PERF_SAMPLE_IDENTIFIER
 	//      SampleIDAll = true
 	//
 	// If we're finding the eventAttr from formatMap, the sample ID will be
 	// in the record where it's needed. For PERF_RECORD_SAMPLE, the ID will
 	// be the first thing in the data. For everything else, the ID will be
 	// the last thing in the data.
-	var sampleID uint64
-	if sample.Type == PERF_RECORD_SAMPLE {
-		readOrPanic(reader, &sampleID)
-	} else {
-		// Move to the end of the record and read the sampleID from
-		// there, then jump back to the current position.
-		// currentPos - startPos == # bytes already read
-		currentPos, _ := reader.Seek(0, os.SEEK_CUR)
-		if currentPos-startPos == int64(sample.Size) {
-			return 0, nil
-		}
-		if currentPos-startPos > int64(sample.Size) {
-			panic("internal error - read too much data!")
-		}
-		if int64(sample.Size)-(currentPos-startPos) < 8 {
-			panic("internal error - not enough data left to read for SampleIDAll!")
-		}
 
-		reader.Seek(currentPos+int64(sample.Size)-8, os.SEEK_SET)
-		readOrPanic(reader, &sampleID)
-		reader.Seek(currentPos, os.SEEK_SET)
+	if err = checkRawDataSize(rawData, 8); err != nil {
+		return
 	}
 
-	if eventAttr != nil {
-		return sampleID, eventAttr
+	var sampleID uint64
+	if sample.Type == PERF_RECORD_SAMPLE {
+		// The SampleID will be immediately following the event header
+		sampleID = *(*uint64)(unsafe.Pointer(&rawData[0]))
+	} else {
+		// The SampleID will be the last uint64 in the sample
+		sampleID = *(*uint64)(unsafe.Pointer(&rawData[len(rawData)-8]))
 	}
 
 	attr, ok := formatMap[sampleID]
 	if !ok {
-		panic(readError{fmt.Errorf("Unknown SampleID %d from raw sample", sampleID)})
+		err = fmt.Errorf("Unknown SampleID %d from raw sample", sampleID)
 	}
-	if !attr.SampleIDAll {
-		panic("SampleIDAll not specified in EventAttr")
-	}
-	if attr.SampleType&PERF_SAMPLE_IDENTIFIER == 0 {
-		panic("PERF_SAMPLE_IDENTIFIER not specified in EventAttr")
-	}
-
-	return sampleID, &attr
+	return
 }
 
-func (sample *Sample) read(
-	reader io.ReadSeeker,
-	eventAttr *EventAttr,
-	formatMap map[uint64]EventAttr,
-) (err error) {
-	startPos, _ := reader.Seek(0, os.SEEK_CUR)
+const (
+	sizeofEventHeader = 8
+	sizeofLostRecord  = 16
+)
 
-	if err = sample.eventHeader.read(reader); err != nil {
-		// This is not recoverable
-		panic("Could not read perf event header")
+func (sample *Sample) read(
+	rawData []byte,
+	eventAttr *EventAttr,
+	formatMap map[uint64]*EventAttr,
+) (n int, err error) {
+	if err = checkRawDataSize(rawData, sizeofEventHeader); err != nil {
+		n = len(rawData)
+		return
+	}
+	sample.Type = *(*uint32)(unsafe.Pointer(&rawData[0]))
+	sample.Misc = *(*uint16)(unsafe.Pointer(&rawData[4]))
+	n = int(*(*uint16)(unsafe.Pointer(&rawData[6])))
+
+	if err = checkRawDataSize(rawData, n); err != nil {
+		n = len(rawData)
+		return
+	}
+	if n == sizeofEventHeader {
+		return
+	}
+	rawData = rawData[sizeofEventHeader:n]
+
+	if eventAttr == nil {
+		eventAttr, err = sample.resolveEventAttr(rawData, formatMap)
+		if err != nil {
+			return
+		}
 	}
 
-	defer func() {
-		if r := recover(); r != nil {
-			if e, ok := r.(readError); ok {
-				err = e.error
-				reader.Seek((startPos + int64(sample.Size)), os.SEEK_SET)
-			} else {
-				panic(r)
-			}
+	// For all sample types that are not PERF_RECORD_SAMPLE the sample ID
+	// will be at the end of the sample buffer
+	if sample.Type != PERF_RECORD_SAMPLE {
+		s := eventAttr.sizeofSampleID
+		if err = checkRawDataSize(rawData, s); err != nil {
+			return
 		}
-	}()
-
-	var sampleID uint64
-	if eventAttr == nil {
-		sampleID, eventAttr = sample.resolveEventAttr(
-			reader, startPos, eventAttr, formatMap)
-		if eventAttr == nil {
-			return nil
-		}
-	} else if sample.Type == PERF_RECORD_SAMPLE {
-		if eventAttr.SampleType&PERF_SAMPLE_IDENTIFIER != 0 {
-			readOrPanic(reader, &sampleID)
-		}
-	} // else SampleID is unknown
+		sample.SampleID.read(rawData[len(rawData)-s:], eventAttr)
+		rawData = rawData[:len(rawData)-s]
+	}
 
 	switch sample.Type {
-	case PERF_RECORD_FORK:
-		record := &ForkRecord{}
-		record.read(reader)
-		sample.Record = record
-		if eventAttr.SampleIDAll {
-			sample.SampleID.read(reader, eventAttr.SampleType)
-		}
-
-	case PERF_RECORD_EXIT:
-		record := &ExitRecord{}
-		record.read(reader)
-		sample.Record = record
-		if eventAttr.SampleIDAll {
-			sample.SampleID.read(reader, eventAttr.SampleType)
-		}
-
-	case PERF_RECORD_COMM:
-		record := &CommRecord{}
-		record.read(reader)
-		sample.Record = record
-		if eventAttr.SampleIDAll {
-			sample.SampleID.read(reader, eventAttr.SampleType)
+	case PERF_RECORD_LOST:
+		err = checkRawDataSize(rawData, sizeofLostRecord)
+		if err == nil {
+			sample.Lost = *(*uint64)(unsafe.Pointer(&rawData[8]))
 		}
 
 	case PERF_RECORD_SAMPLE:
-		record := &SampleRecord{
-			SampleID: sampleID,
+		err = checkRawDataSize(rawData, eventAttr.sizeofSampleRecord)
+		if err == nil {
+			err = sample.readSampleRecord(rawData, eventAttr)
 		}
-		record.read(reader, eventAttr)
-		sample.Record = record
-
-		// NB: PERF_RECORD_SAMPLE does not include a trailing
-		// SampleID, even if SampleIDAll is true.
-		// Fill in the missing information from SampleRecord so that
-		// it's complete to the outside observer
-		sample.SampleID = SampleID{
-			PID:      record.Pid,
-			TID:      record.Tid,
-			Time:     record.Time,
-			ID:       record.ID,
-			StreamID: record.StreamID,
-			CPU:      record.CPU,
-		}
-
-	case PERF_RECORD_LOST:
-		record := &LostRecord{}
-		record.read(reader)
-		sample.Record = record
-		if eventAttr.SampleIDAll {
-			sample.SampleID.read(reader, eventAttr.SampleType)
-		}
-
-	default:
-		// Unknown type, read sample record as a byte slice
-		recordSize := sample.Size - uint16(binary.Size(sample.eventHeader))
-
-		if eventAttr != nil {
-			sampleIDSize := sample.SampleID.getSize(eventAttr.SampleType, eventAttr.SampleIDAll)
-			recordSize -= uint16(sampleIDSize)
-		}
-
-		recordData := make([]byte, recordSize)
-
-		var n int
-		if n, err = reader.Read(recordData); err != nil {
-			panic(readError{err})
-		}
-		if n < int(recordSize) {
-			glog.Infof("Short read: %d < %d", n, int(recordSize))
-			panic(readError{errors.New("Read error")})
-		}
-
-		sample.Record = recordData
 	}
 
 	return
+}
+
+// DecodeRawData decodes a sample's raw data into a dictionary of field names
+// and values.
+func (sample *Sample) DecodeRawData() (expression.FieldValueMap, error) {
+	return sample.TraceFormat.DecodeRawData(sample.RawData)
+}
+
+// DecodeValue decodes the specified field from a sample's raw data.
+func (sample *Sample) DecodeValue(name string) (interface{}, error) {
+	field, found := sample.TraceFormat[name]
+	if !found {
+		return nil, expression.FieldNotSet{Name: name}
+	}
+	return field.DecodeRawData(sample.RawData)
+}
+
+//
+// Implement expression.FieldValueGetter interface
+//
+
+// GetString returns the string value set for the requested field name.
+func (sample *Sample) GetString(name string) (string, error) {
+	if field, set := sample.TraceFormat[name]; set {
+		return field.DecodeString(sample.RawData)
+	}
+	return "", expression.FieldNotSet{Name: name}
+}
+
+// GetSignedInt8 returns the signed 8-bit integer value set for the requested
+// field name.
+func (sample *Sample) GetSignedInt8(name string) (int8, error) {
+	if field, set := sample.TraceFormat[name]; set {
+		return field.DecodeSignedInt8(sample.RawData)
+	}
+	return 0, expression.FieldNotSet{Name: name}
+}
+
+// GetSignedInt16 returns the signed 16-bit integer value set for the requested
+// field name.
+func (sample *Sample) GetSignedInt16(name string) (int16, error) {
+	if field, set := sample.TraceFormat[name]; set {
+		return field.DecodeSignedInt16(sample.RawData)
+	}
+	return 0, expression.FieldNotSet{Name: name}
+}
+
+// GetSignedInt32 returns the signed 32-bit integer value set for the requested
+// field name.
+func (sample *Sample) GetSignedInt32(name string) (int32, error) {
+	if field, set := sample.TraceFormat[name]; set {
+		return field.DecodeSignedInt32(sample.RawData)
+	}
+	return 0, expression.FieldNotSet{Name: name}
+}
+
+// GetSignedInt64 returns the signed 64-bit integer value set for the requested
+// field name.
+func (sample *Sample) GetSignedInt64(name string) (int64, error) {
+	if field, set := sample.TraceFormat[name]; set {
+		return field.DecodeSignedInt64(sample.RawData)
+	}
+	return 0, expression.FieldNotSet{Name: name}
+}
+
+// GetUnsignedInt8 returns the unsigned 8-bit integer value set for the
+// requested field name.
+func (sample *Sample) GetUnsignedInt8(name string) (uint8, error) {
+	if field, set := sample.TraceFormat[name]; set {
+		return field.DecodeUnsignedInt8(sample.RawData)
+	}
+	return 0, expression.FieldNotSet{Name: name}
+}
+
+// GetUnsignedInt16 returns the unsigned 16-bit integer value set for the
+// requested field name.
+func (sample *Sample) GetUnsignedInt16(name string) (uint16, error) {
+	if field, set := sample.TraceFormat[name]; set {
+		return field.DecodeUnsignedInt16(sample.RawData)
+	}
+	return 0, expression.FieldNotSet{Name: name}
+}
+
+// GetUnsignedInt32 returns the unsigned 32-bit integer value set for the
+// requested field name.
+func (sample *Sample) GetUnsignedInt32(name string) (uint32, error) {
+	if field, set := sample.TraceFormat[name]; set {
+		return field.DecodeUnsignedInt32(sample.RawData)
+	}
+	return 0, expression.FieldNotSet{Name: name}
+}
+
+// GetUnsignedInt64 returns the unsigned 64-bit integer value set for the
+// requested field name.
+func (sample *Sample) GetUnsignedInt64(name string) (uint64, error) {
+	if field, set := sample.TraceFormat[name]; set {
+		return field.DecodeUnsignedInt64(sample.RawData)
+	}
+	return 0, expression.FieldNotSet{Name: name}
+}
+
+// GetBool is present solely to conform to expression.FieldValueGetter. It will
+// always return an error because the kernel does not support a Boolean type.
+func (sample *Sample) GetBool(name string) (bool, error) {
+	if field, set := sample.TraceFormat[name]; set {
+		return false, field.typeMismatch(expression.ValueTypeBool)
+	}
+	return false, expression.FieldNotSet{Name: name}
+}
+
+// GetDouble is present solely to conform to expression.FieldValueGetter. It
+// will always return an error because the kernel does not support a floating
+// point type.
+func (sample *Sample) GetDouble(name string) (float64, error) {
+	if field, set := sample.TraceFormat[name]; set {
+		return 0, field.typeMismatch(expression.ValueTypeDouble)
+	}
+	return 0, expression.FieldNotSet{Name: name}
+}
+
+// GetTimestamp is present solely to conform to expression.FieldValueGetter. It
+// will always return an error because the kernel does not support a timestamp
+// type.
+func (sample *Sample) GetTimestamp(name string) (time.Time, error) {
+	if field, set := sample.TraceFormat[name]; set {
+		return time.Time{}, field.typeMismatch(expression.ValueTypeTimestamp)
+	}
+	return time.Time{}, expression.FieldNotSet{Name: name}
 }

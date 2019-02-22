@@ -18,27 +18,29 @@ import (
 	"testing"
 
 	"github.com/capsule8/capsule8/pkg/sys/proc"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestParseMount(t *testing.T) {
 	var err error
 
 	_, err = parseMount("zero 1 2:3 4 5")
-	assert(t, err != nil, "unexpected nil error return")
+	assert.Error(t, err)
 
 	_, err = parseMount("0 one 2:3 4 5")
-	assert(t, err != nil, "unexpected nil error return")
+	assert.Error(t, err)
 
 	_, err = parseMount("0 1 two:3 4 5")
-	assert(t, err != nil, "unexpected nil error return")
+	assert.Error(t, err)
 
 	_, err = parseMount("0 1 2:three 4 5")
-	assert(t, err != nil, "unexpected nil error return")
+	assert.Error(t, err)
 }
 
 func TestMounts(t *testing.T) {
 	fs, err := NewFileSystem("testdata/proc")
-	ok(t, err)
+	assert.NoError(t, err)
 
 	expectedMounts := []proc.Mount{
 		proc.Mount{
@@ -113,50 +115,67 @@ func TestMounts(t *testing.T) {
 	}
 
 	actualMounts := fs.Mounts()
-	equals(t, expectedMounts, actualMounts)
+	assert.Equal(t, expectedMounts, actualMounts)
 }
 
 func TestHostFileSystem(t *testing.T) {
+	nocgroupsProcFS, err := NewFileSystem("testdata/nocgroups")
+	assert.NoError(t, err)
+
+	fs := nocgroupsProcFS.HostFileSystem()
+	assert.Equal(t, nocgroupsProcFS, fs)
+
 	nohostProcFS, err := NewFileSystem("testdata/nohost")
-	ok(t, err)
+	assert.NoError(t, err)
 
 	var expected proc.FileSystem
-	fs := nohostProcFS.HostFileSystem()
-	equals(t, expected, fs)
+	fs = nohostProcFS.HostFileSystem()
+	assert.Equal(t, expected, fs)
 
 	hostProcFS, err := NewFileSystem("testdata/host")
-	ok(t, err)
+	assert.NoError(t, err)
 
 	fs = hostProcFS.HostFileSystem()
-	equals(t, "testdata/host", hostProcFS.MountPoint)
+	assert.Equal(t, "testdata/host", hostProcFS.MountPoint)
 
-	procFS, err := NewFileSystem("testdata/proc")
-	ok(t, err)
+	pfs, err := NewFileSystem("testdata/proc")
+	assert.NoError(t, err)
 
-	fs = procFS.HostFileSystem()
-	equals(t, procFS, fs)
+	fs = pfs.HostFileSystem()
+	assert.Equal(t, pfs, fs)
 }
 
 func TestPerfEventDir(t *testing.T) {
-	procFS, err := NewFileSystem("testdata/proc")
-	ok(t, err)
-	equals(t, "", procFS.PerfEventDir())
+	pfs, err := NewFileSystem("testdata/proc")
+	assert.NoError(t, err)
+	assert.Equal(t, "", pfs.PerfEventDir())
 
 	hostProcFS, err := NewFileSystem("testdata/nohost")
-	ok(t, err)
-	equals(t, "/sys/fs/cgroup/perf_event", hostProcFS.PerfEventDir())
+	assert.NoError(t, err)
+	assert.Equal(t, "/sys/fs/cgroup/perf_event", hostProcFS.PerfEventDir())
 }
 
 func TestTracingDir(t *testing.T) {
-	procFS, err := NewFileSystem("testdata/proc")
-	ok(t, err)
-	equals(t, "/sys/kernel/debug/tracing", procFS.TracingDir())
+	pfs, err := NewFileSystem("testdata/proc")
+	assert.NoError(t, err)
+	assert.Equal(t, "/sys/kernel/debug/tracing", pfs.TracingDir())
 
 	hostProcFS, err := NewFileSystem("testdata/nohost")
-	ok(t, err)
-	equals(t, "", hostProcFS.TracingDir())
+	assert.NoError(t, err)
+	assert.Equal(t, "", hostProcFS.TracingDir())
 
 	debugfsProcFS, err := NewFileSystem("testdata/debugfs")
-	ok(t, err)
-	equals(t, "testdata/debugfs/mnt/debugfs/tracing", debugfsProcFS.TracingDir())
+	assert.NoError(t, err)
+	assert.Equal(t, "testdata/debugfs/mnt/debugfs/tracing", debugfsProcFS.TracingDir())
+}
+
+func TestSupportedFilesystems(t *testing.T) {
+	pfs, err := NewFileSystem("testdata/proc")
+	assert.NoError(t, err)
+
+	expected := []string{
+		"sysfs", "proc", "cgroup", "debugfs", "iso9660", "ext4", "autofs",
+	}
+	actual := pfs.SupportedFilesystems()
+	assert.Equal(t, expected, actual)
 }

@@ -18,6 +18,7 @@ package perf
 
 import (
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -62,8 +63,7 @@ func (s *defaultEventSourceLeader) NewEventSource(
 }
 
 func (s *defaultEventSourceLeader) Read(
-	attrMap map[uint64]EventAttr,
-	f func(Sample, error),
+	acquireBuffer func(size int) ([]byte, int),
 ) {
 	// Do nothing
 }
@@ -90,10 +90,67 @@ func (c *defaultEventSourceController) NewEventSourceLeader(
 	}, nil
 }
 
-func (c *defaultEventSourceController) Wait(timeoutAt int64) error {
-	return unix.ENOSYS
+func (c *defaultEventSourceController) Wait() ([]uint64, error) {
+	return nil, unix.ENOSYS
 }
 
-func (c *defaultEventSourceController) SetTimeoutAt(timeoutAt int64) error {
-	return unix.ENOSYS
+func (c *defaultEventSourceController) Wakeup() {
+	// Do nothing
+}
+
+type defaultTimedEvent struct {
+	c      chan struct{}
+	ticker *time.Ticker
+}
+
+func newDefaultTimedEvent() (*defaultTimedEvent, error) {
+	e := &defaultTimedEvent{
+		c: make(chan struct{}, 1),
+	}
+	return e, nil
+}
+
+func (e *defaultTimedEvent) Close() {
+	if e.c != nil {
+		close(e.c)
+		e.c = nil
+	}
+	if e.ticker != nil {
+		e.ticker.Stop()
+		e.ticker = nil
+	}
+}
+
+func (e *defaultTimedEvent) Signal() {
+	select {
+	case e.c <- struct{}{}:
+	default:
+	}
+}
+
+func (e *defaultTimedEvent) Wait(timeout time.Duration) bool {
+	if timeout < 0 {
+		<-e.c
+		return true
+	}
+	if timeout == 0 {
+		select {
+		case <-e.c:
+			return true
+		default:
+		}
+		return false
+	}
+
+	var result bool
+	e.ticker = time.NewTicker(timeout)
+	select {
+	case <-e.c:
+		result = true
+	case <-e.ticker.C:
+		result = false
+	}
+	e.ticker.Stop()
+	e.ticker = nil
+	return result
 }

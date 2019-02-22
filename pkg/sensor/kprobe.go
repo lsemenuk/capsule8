@@ -28,27 +28,23 @@ import (
 type KernelFunctionCallTelemetryEvent struct {
 	TelemetryEventData
 
-	Arguments perf.TraceEventSampleData
+	Arguments expression.FieldValueMap
 }
 
-// CommonTelemetryEventData returns the telemtry event data common to all
-// telemetry events for a chargen telemetry event.
+// CommonTelemetryEventData returns the telemetry event data common to all
+// telemetry events for a kernel function call telemetry event.
 func (e KernelFunctionCallTelemetryEvent) CommonTelemetryEventData() TelemetryEventData {
 	return e.TelemetryEventData
 }
 
-var validSymbolRegex = regexp.MustCompile("^[A-Za-z_]{1}[\\w]*$")
+var validKernelSymbolRegex = regexp.MustCompile("^[A-Za-z_]{1}[\\w]*$")
 
-func (s *Subscription) decodeKprobe(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
+func (s *Subscription) handleKprobe(eventid uint64, sample *perf.Sample) {
 	var e KernelFunctionCallTelemetryEvent
-	if !e.InitWithSample(s.sensor, sample, data) {
-		return nil, nil
+	if e.InitWithSample(s.sensor, sample) {
+		e.Arguments, _ = sample.DecodeRawData()
+		s.DispatchEvent(eventid, e, nil)
 	}
-	e.Arguments = data
-	return e, nil
 }
 
 // RegisterKernelFunctionCallEventFilter registers a kernel function call event
@@ -61,7 +57,7 @@ func (s *Subscription) RegisterKernelFunctionCallEventFilter(
 ) {
 	// The symbol must begin with [A-Za-z_] and contain only [A-Za-z0-9_]
 	// We do not accept addresses or offsets
-	if !validSymbolRegex.MatchString(symbol) {
+	if !validKernelSymbolRegex.MatchString(symbol) {
 		s.logStatus(
 			fmt.Sprintf("Kernel function call symbol %q is invalid", symbol))
 		return
@@ -76,6 +72,6 @@ func (s *Subscription) RegisterKernelFunctionCallEventFilter(
 	// Pass nil for filterTypes here to force the filter types to be
 	// determined dynamically after the kprobe is registered with the
 	// kernel.
-	s.registerKprobe(symbol, onReturn, fetchargs, s.decodeKprobe,
-		filter, nil)
+	s.registerKprobe(symbol, onReturn, fetchargs, s.handleKprobe,
+		filter, true)
 }

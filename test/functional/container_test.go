@@ -17,18 +17,18 @@ package functional
 import (
 	"testing"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 	"github.com/golang/glog"
 )
 
 type containerTest struct {
 	testContainer *Container
 	containerID   string
-	seenEvts      map[api.ContainerEventType]bool
+	seenEvts      map[telemetryAPI.ContainerEventType]bool
 }
 
 func newContainerTest() *containerTest {
-	return &containerTest{seenEvts: make(map[api.ContainerEventType]bool)}
+	return &containerTest{seenEvts: make(map[telemetryAPI.ContainerEventType]bool)}
 }
 
 func (ct *containerTest) BuildContainer(t *testing.T) string {
@@ -52,36 +52,36 @@ func (ct *containerTest) RunContainer(t *testing.T) {
 	glog.V(2).Infof("Running container %s\n", ct.testContainer.ImageID[0:12])
 }
 
-func (ct *containerTest) CreateSubscription(t *testing.T) *api.Subscription {
-	containerEvents := []*api.ContainerEventFilter{
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
+func (ct *containerTest) CreateSubscription(t *testing.T) *telemetryAPI.Subscription {
+	containerEvents := []*telemetryAPI.ContainerEventFilter{
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
 		},
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
 		},
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
 		},
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_DESTROYED,
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_DESTROYED,
 		},
 	}
 
-	eventFilter := &api.EventFilter{
+	eventFilter := &telemetryAPI.EventFilter{
 		ContainerEvents: containerEvents,
 	}
 
-	return &api.Subscription{
+	return &telemetryAPI.Subscription{
 		EventFilter: eventFilter,
 	}
 }
 
-func (ct *containerTest) HandleTelemetryEvent(t *testing.T, te *api.ReceivedTelemetryEvent) bool {
+func (ct *containerTest) HandleTelemetryEvent(t *testing.T, te *telemetryAPI.ReceivedTelemetryEvent) bool {
 	switch event := te.Event.Event.(type) {
-	case *api.TelemetryEvent_Container:
+	case *telemetryAPI.TelemetryEvent_Container:
 		switch event.Container.Type {
-		case api.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED:
+		case telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED:
 			if event.Container.ImageId == ct.testContainer.ImageID {
 				if ct.containerID != "" {
 					t.Errorf("Already seen container event %s", event.Container.Type)
@@ -93,9 +93,9 @@ func (ct *containerTest) HandleTelemetryEvent(t *testing.T, te *api.ReceivedTele
 					ct.containerID)
 			}
 
-		case api.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
-			api.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
-			api.ContainerEventType_CONTAINER_EVENT_TYPE_DESTROYED:
+		case telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
+			telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
+			telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_DESTROYED:
 			if ct.containerID != "" && te.Event.ContainerId == ct.containerID {
 				if ct.seenEvts[event.Container.Type] {
 					t.Errorf("Already saw container event type %v",
