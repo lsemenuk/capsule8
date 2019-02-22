@@ -24,8 +24,8 @@ DOCKER?=docker
 GO_BUILD?=go build
 GO_BUILD_FLAGS+=-ldflags "-X $(PKG)/pkg/version.Version=$(VERSION) -X $(PKG)/pkg/version.Build=$(BUILD)"
 
-GO_FMT?=go fmt
-GO_FMT_FLAGS+=
+GO_FMT?=gofmt
+GO_FMT_FLAGS+=-l
 
 GO_LINT?=golint -set_exit_status
 GO_LINTFLAGS+=
@@ -35,7 +35,7 @@ GO_TEST?=go test
 GO_TEST_FLAGS+=
 
 GO_VET?=go vet
-GO_VET_FLAGS+=-shadow
+GO_VET_FLAGS+=-all -shadow -shadowstrict -structtags=false
 
 # Extra test execution flags (e.g. glog flags like -v=2)
 TEST_FLAGS+=
@@ -47,12 +47,8 @@ DOCKER_RUN_FLAGS+=
 CLANG?=clang
 
 # Needed to regenerate code from protos
-GOBIN?=${GOPATH}/bin
-PROTOC_GEN_GO=${GOBIN}/protoc-gen-go
-PROTOC_GEN_GRPC_GATEWAY=${GOBIN}/protoc-gen-grpc-gateway
 GO_OUT=../
-GRPC_GATEWAY_OUT=../
-PROTO_INC=-I../:third_party/protobuf/src:third_party/googleapis 
+PROTO_INC=-I../:vendor/github.com/grpc-ecosystem/grpc-gateway/third_party/googleapis
 
 CMDS=$(notdir $(wildcard ./cmd/*))
 EXAMPLES=$(notdir $(wildcard ./examples/*))
@@ -63,6 +59,7 @@ BINS=$(patsubst %,bin/%,$(CMDS)) \
 # All source directories that need to be checked, compiled, tested, etc.
 SRC=./cmd/... ./pkg/... ./examples/... 
 CHECK_SRC=$(SRC) ./test/...
+FMT_SRC=$(patsubst %/...,%,$(CHECK_SRC))
 TEST_SRC=./pkg/...
 PKG_SOURCES=$(shell find pkg 2>&1 | grep -E '.*\.go$$')
 
@@ -106,13 +103,18 @@ DOCKER_RUN_FUNCTIONAL_TEST=$(DOCKER) run                                    \
 .PHONY: all api builder run_builder container load save                     \
 	run_sensor run_sensor_detach shell static dist check                \
 	test test_verbose test_all test_msan test_race test_functional      \
-	functional_test	run_functional_test clean
+	test_coverage functional_test run_functional_test clean deps fmt
 
 #
 # Default target: build all executables
 #
 all: $(BINS)
 
+deps:
+	dep ensure
+
+fmt:
+	$(GO_FMT) $(GO_FMT_FLAGS) -w $(FMT_SRC)
 
 #
 # Build all executables as static executables
@@ -123,18 +125,8 @@ static: clean all
 
 api: ../capsule8/api/v0/*.proto
         # Compile grpc and gateway stubs
-	protoc --plugin=protoc-gen-go=$(PROTOC_GEN_GO) \
-		--go_out=plugins=grpc:$(GO_OUT) \
-		--plugin=protoc-gen-grpc-gateway=$(PROTOC_GEN_GRPC_GATEWAY) \
-		--grpc-gateway_out=logtostderr=true:$(GRPC_GATEWAY_OUT) \
-		$(PROTO_INC) \
-		$?
-
-api_docs:
-	protoc --doc_out=../capsule8/docs/ \
-		--doc_opt=markdown,API.md:google/* \
-		$(PROTO_INC) \
-		../capsule8/api/v0/telemetry_service.proto
+	protoc --doc_out=../capsule8/docs/ --doc_opt=markdown,API.md:google/* \
+		--go_out=plugins=grpc:$(GO_OUT) $(PROTO_INC) $?
 
 #
 # Build all container images
@@ -210,21 +202,23 @@ bin/% : examples/% examples/%/*.go $(PKG_SOURCES)
 # Check that all sources build successfully, gofmt, go vet, golint, etc)
 #
 check:
-	echo "--- Checking that all sources build"
+	@echo "--- Checking that all sources build"
 	$(GO_BUILD) $(SRC)
-	echo "--- Checking source code formatting"
-	$(GO_FMT) $(CHECK_SRC)
-	echo "--- Checking that all sources vet clean"
+	@echo "--- Checking source code formatting"
+	OUT=`$(GO_FMT) $(GO_FMT_FLAGS) $(FMT_SRC)` && (test -z "$$OUT" || (echo $$OUT && exit 1))
+	@echo "--- Checking that all sources vet clean"
 	$(GO_VET) $(GO_VET_FLAGS) $(CHECK_SRC)
-	echo "--- Checking sources for lint"
-	$(GO_LINT) $(CHECK_SRC)
+	@echo "--- Checking sources for lint"
+	$(GO_LINT) $(GO_LINT_FLAGS) $(CHECK_SRC)
 
 #
 # Run unit tests
 #
-test: GO_TEST_FLAGS+=-cover -coverprofile=coverage.out
 test:
-	$(GO_TEST) $(GO_TEST_FLAGS) $(TEST_SRC) $(TEST_FLAGS)
+	$(GO_TEST) $(GO_TEST_FLAGS) -tags testing $(TEST_SRC) $(TEST_FLAGS)
+
+test_coverage: GO_TEST_FLAGS+=-cover -coverprofile=coverage.out
+test_coverage: test
 
 test_verbose: GO_TEST_FLAGS+=-v
 test_verbose: test
@@ -258,3 +252,4 @@ test/functional/functional.test: test/functional/*.go
 
 clean:
 	rm -rf $(BINS)
+	go clean $(CHECK_SRC)

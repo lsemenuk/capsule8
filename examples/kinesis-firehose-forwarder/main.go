@@ -13,7 +13,6 @@
 // limitations under the License.
 
 // Sample Telemetry API client that streams data to a kensis firehose in AWS
-
 package main
 
 import (
@@ -34,7 +33,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/firehose"
 	"github.com/aws/aws-sdk-go/service/firehose/firehoseiface"
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 	"github.com/golang/glog"
 	"github.com/golang/protobuf/jsonpb"
 )
@@ -83,63 +82,63 @@ func dialer(addr string, timeout time.Duration) (net.Conn, error) {
 	return net.DialTimeout(network, address, timeout)
 }
 
-func createSubscription() api.Subscription {
-	processEvents := []*api.ProcessEventFilter{
-		&api.ProcessEventFilter{
-			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_FORK,
+func createSubscription() telemetryAPI.Subscription {
+	processEvents := []*telemetryAPI.ProcessEventFilter{
+		&telemetryAPI.ProcessEventFilter{
+			Type: telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_FORK,
 		},
-		&api.ProcessEventFilter{
-			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
+		&telemetryAPI.ProcessEventFilter{
+			Type: telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
 		},
-		&api.ProcessEventFilter{
-			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_EXIT,
-		},
-	}
-
-	networkEvents := []*api.NetworkEventFilter{
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_ATTEMPT,
-		},
-
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_BIND_ATTEMPT,
-		},
-
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_BIND_RESULT,
-		},
-
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_ATTEMPT,
-		},
-
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_RESULT,
+		&telemetryAPI.ProcessEventFilter{
+			Type: telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXIT,
 		},
 	}
 
-	containerEvents := []*api.ContainerEventFilter{
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
+	networkEvents := []*telemetryAPI.NetworkEventFilter{
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_ATTEMPT,
 		},
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
+
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_BIND_ATTEMPT,
 		},
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
+
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_BIND_RESULT,
 		},
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_DESTROYED,
+
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_ATTEMPT,
+		},
+
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_RESULT,
 		},
 	}
 
-	eventFilter := &api.EventFilter{
+	containerEvents := []*telemetryAPI.ContainerEventFilter{
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
+		},
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
+		},
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
+		},
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_DESTROYED,
+		},
+	}
+
+	eventFilter := &telemetryAPI.EventFilter{
 		ContainerEvents: containerEvents,
 		NetworkEvents:   networkEvents,
 		ProcessEvents:   processEvents,
 	}
 
-	sub := api.Subscription{
+	sub := telemetryAPI.Subscription{
 		EventFilter: eventFilter,
 	}
 
@@ -220,10 +219,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	c := api.NewTelemetryServiceClient(conn)
+	c := telemetryAPI.NewTelemetryServiceClient(conn)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	var sub api.Subscription
+	var sub telemetryAPI.Subscription
 	if len(*configFile) > 0 {
 		var cfgFile *os.File
 
@@ -239,7 +238,7 @@ func main() {
 		sub = createSubscription()
 	}
 
-	stream, err := c.GetEvents(ctx, &api.GetEventsRequest{
+	stream, err := c.GetEvents(ctx, &telemetryAPI.GetEventsRequest{
 		Subscription: &sub,
 	})
 
@@ -268,7 +267,8 @@ func main() {
 			select {
 			case records, ok := <-kinesisBatchChan:
 				if ok {
-					output, err := firehoseService.PutRecordBatch(&firehose.PutRecordBatchInput{
+					var output *firehose.PutRecordBatchOutput
+					output, err = firehoseService.PutRecordBatch(&firehose.PutRecordBatchInput{
 						DeliveryStreamName: aws.String(deliveryStreamName),
 						Records:            records,
 					})
@@ -294,9 +294,9 @@ func main() {
 	//
 	go func() {
 		for {
-			response, err := stream.Recv()
-			if err != nil {
-				glog.Errorf("Error received from gRPC stream: %v", err)
+			response, recvErr := stream.Recv()
+			if recvErr != nil {
+				glog.Errorf("Error received from gRPC stream: %v", recvErr)
 
 				// Close the eventChan and return
 				// since there won't be any more
@@ -306,9 +306,9 @@ func main() {
 				return
 			}
 
-			kinesisRecords, err := convertTelemetryToFirehoseRecords(response.Events)
-			if err != nil {
-				glog.Fatal(err)
+			kinesisRecords, convertErr := convertTelemetryToFirehoseRecords(response.Events)
+			if convertErr != nil {
+				glog.Fatal(convertErr)
 			}
 
 			recordsChan <- kinesisRecords
@@ -362,7 +362,7 @@ func main() {
 // Convert received telemetry event from proto to JSON and enrich with a
 // few fields.
 //
-func convertTelemetryToFirehoseRecords(telemetryEvents []*api.ReceivedTelemetryEvent) ([]*firehose.Record, error) {
+func convertTelemetryToFirehoseRecords(telemetryEvents []*telemetryAPI.ReceivedTelemetryEvent) ([]*firehose.Record, error) {
 	var records []*firehose.Record
 
 	jsonMarshaller := jsonpb.Marshaler{

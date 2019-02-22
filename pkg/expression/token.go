@@ -122,7 +122,7 @@ func (t ValueType) IsNumeric() bool {
 	case ValueTypeSignedInt8, ValueTypeSignedInt16, ValueTypeSignedInt32,
 		ValueTypeSignedInt64, ValueTypeUnsignedInt8,
 		ValueTypeUnsignedInt16, ValueTypeUnsignedInt32,
-		ValueTypeUnsignedInt64, ValueTypeDouble:
+		ValueTypeUnsignedInt64, ValueTypeDouble, ValueTypeTimestamp:
 		return true
 	}
 	return false
@@ -185,9 +185,43 @@ const (
 
 	unaryOpIsNull
 	unaryOpIsNotNull
+	unaryOpNot
 )
 
 var unaryOpStrings = map[unaryOp]string{
 	unaryOpIsNull:    "IS NULL",
 	unaryOpIsNotNull: "IS NOT NULL",
+	unaryOpNot:       "NOT",
 }
+
+var unaryOpKernelStrings = map[unaryOp]string{
+	unaryOpNot: "!",
+}
+
+type token int
+
+const (
+	tokenEOF token = iota
+
+	tokenIdentifier
+	tokenString
+	tokenInteger
+	tokenFloat
+
+	tokenLogicalAnd
+	tokenLogicalOr
+	tokenNot
+
+	tokenEQ
+	tokenNE
+	tokenLT
+	tokenLE
+	tokenGT
+	tokenGE
+
+	tokenBitwiseAnd
+	tokenLParen
+	tokenRParen
+	tokenMinus
+	tokenLike
+)

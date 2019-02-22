@@ -17,175 +17,120 @@ package expression
 import (
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestValueTypeOf(t *testing.T) {
-	if ValueTypeOf("string") != ValueTypeString {
-		t.Error("ValueTypeOf failure")
-	}
-	if ValueTypeOf(int8(8)) != ValueTypeSignedInt8 {
-		t.Error("ValueTypeOf failure")
-	}
-	if ValueTypeOf(int16(8)) != ValueTypeSignedInt16 {
-		t.Error("ValueTypeOf failure")
-	}
-	if ValueTypeOf(int32(8)) != ValueTypeSignedInt32 {
-		t.Error("ValueTypeOf failure")
-	}
-	if ValueTypeOf(int64(8)) != ValueTypeSignedInt64 {
-		t.Error("ValueTypeOf failure")
-	}
-	if ValueTypeOf(uint8(8)) != ValueTypeUnsignedInt8 {
-		t.Error("ValueTypeOf failure")
-	}
-	if ValueTypeOf(uint16(8)) != ValueTypeUnsignedInt16 {
-		t.Error("ValueTypeOf failure")
-	}
-	if ValueTypeOf(uint32(8)) != ValueTypeUnsignedInt32 {
-		t.Error("ValueTypeOf failure")
-	}
-	if ValueTypeOf(uint64(8)) != ValueTypeUnsignedInt64 {
-		t.Error("ValueTypeOf failure")
-	}
-	if ValueTypeOf(true) != ValueTypeBool {
-		t.Error("ValueTypeOf failure")
-	}
-	if ValueTypeOf(8.8) != ValueTypeDouble {
-		t.Error("ValueTypeOf failure")
-	}
-	if ValueTypeOf(time.Now()) != ValueTypeTimestamp {
-		t.Error("ValueTypeOf failure")
-	}
+	testCases := []struct {
+		v interface{}
+		t ValueType
+	}{
+		{"string", ValueTypeString},
+		{int8(8), ValueTypeSignedInt8},
+		{int16(8), ValueTypeSignedInt16},
+		{int32(8), ValueTypeSignedInt32},
+		{int64(8), ValueTypeSignedInt64},
+		{uint8(8), ValueTypeUnsignedInt8},
+		{uint16(8), ValueTypeUnsignedInt16},
+		{uint32(8), ValueTypeUnsignedInt32},
+		{uint64(8), ValueTypeUnsignedInt64},
+		{true, ValueTypeBool},
+		{8.8, ValueTypeDouble},
+		{time.Now(), ValueTypeTimestamp},
 
-	// Obviously we cannot perform an exhaustive test of all types that
-	// should map to ValueTypeUnspecified, but this will at least get us
-	// coverage of that case.
-	if ValueTypeOf(make(chan interface{})) != ValueTypeUnspecified {
-		t.Error("ValueTypeOf failure")
+		// Obviously we cannot perform an exhaustive test of all types
+		// that should map to ValueTypeUnspecified, but this will at
+		// least get us coverage of that case.
+		{make(chan interface{}), ValueTypeUnspecified},
+	}
+	for _, tc := range testCases {
+		assert.Equalf(t, tc.t, ValueTypeOf(tc.v), "%#v", tc.v)
 	}
 }
 
 func TestValueTypeIsInteger(t *testing.T) {
-	if ValueTypeUnspecified.IsInteger() {
-		t.Error("ValueTypeUnspecified is not an integer")
+	goodTests := []ValueType{
+		ValueTypeSignedInt8,
+		ValueTypeSignedInt16,
+		ValueTypeSignedInt32,
+		ValueTypeSignedInt64,
+		ValueTypeUnsignedInt8,
+		ValueTypeUnsignedInt16,
+		ValueTypeUnsignedInt32,
+		ValueTypeUnsignedInt64,
 	}
-	if ValueTypeString.IsInteger() {
-		t.Error("ValueTypeString is not an integer")
+	for _, tc := range goodTests {
+		assert.Truef(t, tc.IsInteger(),
+			"test case: %#v", tc)
 	}
-	if !ValueTypeSignedInt8.IsInteger() {
-		t.Error("ValueTypeSignedInt8 is an integer")
+
+	badTests := []ValueType{
+		ValueTypeUnspecified,
+		ValueTypeString,
+		ValueTypeBool,
+		ValueTypeDouble,
+		ValueTypeTimestamp,
 	}
-	if !ValueTypeSignedInt16.IsInteger() {
-		t.Error("ValueTypeSignedInt16 is an integer")
-	}
-	if !ValueTypeSignedInt32.IsInteger() {
-		t.Error("ValueTypeSignedInt32 is an integer")
-	}
-	if !ValueTypeSignedInt64.IsInteger() {
-		t.Error("ValueTypeSignedInt64 is an integer")
-	}
-	if !ValueTypeUnsignedInt8.IsInteger() {
-		t.Error("ValueTypeUnsignedInt8 is an integer")
-	}
-	if !ValueTypeUnsignedInt16.IsInteger() {
-		t.Error("ValueTypeUnsignedInt16 is an integer")
-	}
-	if !ValueTypeUnsignedInt32.IsInteger() {
-		t.Error("ValueTypeUnsignedInt32 is an integer")
-	}
-	if !ValueTypeUnsignedInt64.IsInteger() {
-		t.Error("ValueTypeUnsignedInt64 is an integer")
-	}
-	if ValueTypeBool.IsInteger() {
-		t.Error("ValueTypeBool is not an integer")
-	}
-	if ValueTypeDouble.IsInteger() {
-		t.Error("ValueTypeDouble is not an integer")
-	}
-	if ValueTypeTimestamp.IsInteger() {
-		t.Error("ValueTypeTimestamp is not an integer")
+	for _, tc := range badTests {
+		assert.Falsef(t, tc.IsInteger(),
+			"test case: %#v", tc)
 	}
 }
 
 func TestValueTypeIsNumeric(t *testing.T) {
-	if ValueTypeUnspecified.IsNumeric() {
-		t.Error("ValueTypeUnspecified is not numeric")
+	goodTests := []ValueType{
+		ValueTypeSignedInt8,
+		ValueTypeSignedInt16,
+		ValueTypeSignedInt32,
+		ValueTypeSignedInt64,
+		ValueTypeUnsignedInt8,
+		ValueTypeUnsignedInt16,
+		ValueTypeUnsignedInt32,
+		ValueTypeUnsignedInt64,
+		ValueTypeDouble,
+		ValueTypeTimestamp,
 	}
-	if ValueTypeString.IsNumeric() {
-		t.Error("ValueTypeString is not numeric")
+	for _, tc := range goodTests {
+		assert.Truef(t, tc.IsNumeric(),
+			"test case: %#v", tc)
 	}
-	if !ValueTypeSignedInt8.IsNumeric() {
-		t.Error("ValueTypeSignedInt8 is numeric")
+
+	badTests := []ValueType{
+		ValueTypeUnspecified,
+		ValueTypeString,
+		ValueTypeBool,
 	}
-	if !ValueTypeSignedInt16.IsNumeric() {
-		t.Error("ValueTypeSignedInt16 is numeric")
-	}
-	if !ValueTypeSignedInt32.IsNumeric() {
-		t.Error("ValueTypeSignedInt32 is numeric")
-	}
-	if !ValueTypeSignedInt64.IsNumeric() {
-		t.Error("ValueTypeSignedInt64 is numeric")
-	}
-	if !ValueTypeUnsignedInt8.IsNumeric() {
-		t.Error("ValueTypeUnsignedInt8 is numeric")
-	}
-	if !ValueTypeUnsignedInt16.IsNumeric() {
-		t.Error("ValueTypeUnsignedInt16 is numeric")
-	}
-	if !ValueTypeUnsignedInt32.IsNumeric() {
-		t.Error("ValueTypeUnsignedInt32 is numeric")
-	}
-	if !ValueTypeUnsignedInt64.IsNumeric() {
-		t.Error("ValueTypeUnsignedInt64 is numeric")
-	}
-	if ValueTypeBool.IsNumeric() {
-		t.Error("ValueTypeBool is not numeric")
-	}
-	if !ValueTypeDouble.IsNumeric() {
-		t.Error("ValueTypeDouble is numeric")
-	}
-	if ValueTypeTimestamp.IsNumeric() {
-		t.Error("ValueTypeTimestamp is not numeric")
+	for _, tc := range badTests {
+		assert.Falsef(t, tc.IsNumeric(),
+			"test case: %#v", tc)
 	}
 }
 func TestValueTypeIsString(t *testing.T) {
-	if ValueTypeUnspecified.IsNumeric() {
-		t.Error("ValueTypeUnspecified is not a string")
+	goodTests := []ValueType{
+		ValueTypeString,
 	}
-	if !ValueTypeString.IsString() {
-		t.Error("ValueTypeString is a string")
+	for _, tc := range goodTests {
+		assert.Truef(t, tc.IsString(),
+			"test case: %#v", tc)
 	}
-	if ValueTypeSignedInt8.IsString() {
-		t.Error("ValueTypeSignedInt8 is not a string")
+
+	badTests := []ValueType{
+		ValueTypeUnspecified,
+		ValueTypeSignedInt8,
+		ValueTypeSignedInt16,
+		ValueTypeSignedInt32,
+		ValueTypeSignedInt64,
+		ValueTypeUnsignedInt8,
+		ValueTypeUnsignedInt16,
+		ValueTypeUnsignedInt32,
+		ValueTypeUnsignedInt64,
+		ValueTypeBool,
+		ValueTypeDouble,
+		ValueTypeTimestamp,
 	}
-	if ValueTypeSignedInt16.IsString() {
-		t.Error("ValueTypeSignedInt16 is not a string")
-	}
-	if ValueTypeSignedInt32.IsString() {
-		t.Error("ValueTypeSignedInt32 is not a string")
-	}
-	if ValueTypeSignedInt64.IsString() {
-		t.Error("ValueTypeSignedInt64 is not a string")
-	}
-	if ValueTypeUnsignedInt8.IsString() {
-		t.Error("ValueTypeUnsignedInt8 is not a string")
-	}
-	if ValueTypeUnsignedInt16.IsString() {
-		t.Error("ValueTypeUnsignedInt16 is not a string")
-	}
-	if ValueTypeUnsignedInt32.IsString() {
-		t.Error("ValueTypeUnsignedInt32 is not a string")
-	}
-	if ValueTypeUnsignedInt64.IsString() {
-		t.Error("ValueTypeUnsignedInt64 is not a string")
-	}
-	if ValueTypeBool.IsString() {
-		t.Error("ValueTypeBool is not a string")
-	}
-	if ValueTypeDouble.IsString() {
-		t.Error("ValueTypeDouble is not a string")
-	}
-	if ValueTypeTimestamp.IsString() {
-		t.Error("ValueTypeTimestamp is not a string")
+	for _, tc := range badTests {
+		assert.Falsef(t, tc.IsString(),
+			"test case: %#v", tc)
 	}
 }

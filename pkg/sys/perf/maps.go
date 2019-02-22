@@ -104,10 +104,10 @@ func (m *safeUInt64Map) update(mfrom uint64Map) {
 
 //
 // safeEventAttrMap
-// map[uint64]EventAttr
+// map[uint64]*EventAttr
 //
 
-type eventAttrMap map[uint64]EventAttr
+type eventAttrMap map[uint64]*EventAttr
 
 func newEventAttrMap() eventAttrMap {
 	return make(eventAttrMap)

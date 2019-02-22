@@ -15,19 +15,11 @@
 package main
 
 import (
-	"errors"
 	"flag"
 
 	"github.com/capsule8/capsule8/pkg/sys/perf"
 	"github.com/golang/glog"
 )
-
-type userPageFault struct {
-	pid       int32
-	ip        uint64
-	address   uint64
-	errorCode uint64
-}
 
 var pageFaultsByPid map[int32]uint
 
@@ -50,12 +42,15 @@ func main() {
 		glog.Fatal(err)
 	}
 
-	//
+	groupid, err := monitor.RegisterEventGroup("default", nil)
+	if err != nil {
+		glog.Fatal(err)
+	}
+
 	// Look for segmentation faults trying to read kernel memory addresses
-	//
 	filter := "address > 0xffff000000000000"
 	_, err = monitor.RegisterTracepoint("exceptions/page_fault_user",
-		onPageFaultUser, perf.WithFilter(filter))
+		onPageFaultUser, groupid, perf.WithFilter(filter))
 	if err != nil {
 		glog.Fatal(err)
 	}
@@ -63,72 +58,30 @@ func main() {
 	pageFaultsByPid = make(map[int32]uint)
 
 	glog.Info("Monitoring for meltdown exploitation attempts")
-	monitor.Run(onSamples)
-}
-
-func onSamples(samples []perf.EventMonitorSample) {
-	for _, sample := range samples {
-		if sample.Err != nil {
-			glog.Fatal(sample.Err)
-		}
-
-		upf := sample.DecodedSample.(userPageFault)
-
-		glog.V(10).Infof("%+v", sample.DecodedSample)
-
-		pageFaultsByPid[upf.pid]++
-
-		faults := pageFaultsByPid[upf.pid]
-		switch {
-		case faults == alarmThresholdInfo:
-			glog.Infof("pid %d kernel address page faults = %d",
-				upf.pid, faults)
-		case faults == alarmThresholdLow:
-			glog.Warningf("pid %d kernel address page faults = %d",
-				upf.pid, faults)
-		case faults == alarmThresholdMed:
-			glog.Warningf("pid %d kernel address page faults = %d",
-				upf.pid, faults)
-		case faults == alarmThresholdHigh:
-			glog.Errorf("pid %d kernel address page faults = %d",
-				upf.pid, faults)
-		case faults == alarmThresholdCritical:
-			glog.Errorf("pid %d kernel address page faults = %d",
-				upf.pid, faults)
-		}
-	}
+	monitor.Run()
 }
 
 func onPageFaultUser(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
-	pid, ok := data["common_pid"].(int32)
-	if !ok {
-		return nil, errors.New("common_pid not found")
+	_ uint64,
+	sample *perf.Sample,
+) {
+	pid := int32(sample.TID)
+	pageFaultsByPid[pid]++
+	switch faults := pageFaultsByPid[pid]; faults {
+	case alarmThresholdInfo:
+		glog.Infof("pid %d kernel address page faults = %d",
+			pid, faults)
+	case alarmThresholdLow:
+		glog.Warningf("pid %d kernel address page faults = %d",
+			pid, faults)
+	case alarmThresholdMed:
+		glog.Warningf("pid %d kernel address page faults = %d",
+			pid, faults)
+	case alarmThresholdHigh:
+		glog.Errorf("pid %d kernel address page faults = %d",
+			pid, faults)
+	case alarmThresholdCritical:
+		glog.Errorf("pid %d kernel address page faults = %d",
+			pid, faults)
 	}
-
-	address, ok := data["address"].(uint64)
-	if !ok {
-		return nil, errors.New("address not found")
-	}
-
-	ip, ok := data["ip"].(uint64)
-	if !ok {
-		return nil, errors.New("ip not found")
-	}
-
-	errorCode, ok := data["error_code"].(uint64)
-	if !ok {
-		return nil, errors.New("error_code not found")
-	}
-
-	upf := userPageFault{
-		pid:       pid,
-		ip:        ip,
-		address:   address,
-		errorCode: errorCode,
-	}
-
-	return upf, nil
 }

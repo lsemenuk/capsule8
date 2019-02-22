@@ -1,0 +1,12 @@
+15 20 0:3 / /proc rw,relatime - proc proc rw
+16 20 0:0 / /sys rw,relatime - sysfs sysfs rw,seclabel
+17 22 0:5 / /dev rw,relatime - devtmpfs devtmpfs rw,seclabel,size=948556k,nr_inodes=237139,mode=755
+18 17 0:11 / /dev/pts rw,relatime - devpts devpts rw,seclabel,gid=5,mode=620,ptmxmode=000
+19 17 0:15 / /dev/shm rw,relatime - tmpfs tmpfs rw,seclabel,size=960964k,nr_inodes=240241
+20 1 253:1 / / rw,relatime - ext4 /dev/mapper/VolGroup00-LogVol00 rw,seclabel,barrier=1,data=ordered
+21 20 0:14 / /selinux rw,relatime - selinuxfs none rw
+22 20 0:5 / /dev rw,relatime - devtmpfs devtmpfs rw,seclabel,size=948556k,nr_inodes=237139,mode=755
+23 15 0:16 / /proc/bus/usb rw,relatime - usbfs /proc/bus/usb rw
+24 20 8:1 / /boot rw,relatime - ext4 /dev/sda1 rw,seclabel,barrier=1,data=ordered
+25 15 0:17 / /proc/sys/fs/binfmt_misc rw,relatime - binfmt_misc none rw
+26 16 0:7 / /sys/kernel/debug rw,relatime - debugfs nodev rw

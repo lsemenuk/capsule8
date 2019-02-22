@@ -34,7 +34,7 @@ func Main() {
 		if err != nil {
 			glog.Fatalf("Could not create sensor: %s", err.Error())
 		}
-		if err := sensor.Start(); err != nil {
+		if err = sensor.Start(); err != nil {
 			glog.Fatalf("Could not start sensor: %s", err.Error())
 		}
 		defer sensor.Stop()

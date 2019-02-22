@@ -91,7 +91,7 @@ message EventFilter {
         // Zero or more filters specifying which file events to include
         repeated FileEventFilter file_events = 3;
 
-        // Zero or more kernel functional calls to include
+        // Zero or more kernel function calls to include
         repeated KernelFunctionCallFilter kernel_events = 4;
 
         // Zero or more network events to include
@@ -99,6 +99,9 @@ message EventFilter {
 
         // Zero or more performance events to include
         repeated PerformanceEventFilter performance_events = 6;
+
+        // Zero or more user function calls to include
+        repeated UserFunctionCallFilter user_events = 7;
 
         //
         // Operating System-level events (containers, etc)
@@ -233,6 +236,39 @@ message KernelFunctionCallFilter {
         map<string, string> arguments = 11;
 
         // Optional; a filter to apply to kernel probe.
+        Expression filter_expression = 100;
+}
+
+// The UserFunctionCallFilter specifies which user mode function call events to
+// include in the Subscription. User mode function call events are functions in
+// running user mode binaries that must be specified with both the executable
+// name and symbol to monitor. They otherwise work the same as kernel function
+// call events. The arguments map defines values that will be fetched at each
+// call and returned along with the event. In order to minimize event volume, a
+// filter may be included that filters the user function calls based on the
+// observed values of the specified arguments at the time of the user function
+// call.
+message UserFunctionCallFilter {
+        // Required; the user function call event type to match
+        UserFunctionCallEventType type = 1;
+
+        // Required; the executable binary in which calls are to be hooked.
+        string executable = 10;
+
+        // Required; the executable symbol to match on
+        string symbol = 11;
+
+        // Option; the field names and data to be returned by the kernel when
+        // the event triggers. Note that this is a map. The keys are the names
+        // to assign to the returned fields, and the values are a string
+        // describing the data to return, usually an expression involving the
+        // register containing the desired data and a suffix indicating the
+        // type of the data (e.g., "s32", "string", "u64", etc.). This map is
+        // used to construct the "fetchargs" passed to the kernel when creating
+        // the user probe.
+        map<string, string> arguments = 12;
+
+        // Optional; a filter to apply to the user probe.
         Expression filter_expression = 100;
 }
 

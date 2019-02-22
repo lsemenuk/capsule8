@@ -17,14 +17,14 @@ package functional
 import (
 	"testing"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 	"github.com/golang/glog"
 	"github.com/golang/protobuf/ptypes/wrappers"
 )
 
 type fileTest struct {
 	testContainer *Container
-	openEvts      map[string]*api.FileEvent
+	openEvts      map[string]*telemetryAPI.FileEvent
 }
 
 func newFileTest() (*fileTest, error) {
@@ -56,24 +56,24 @@ func (ft *fileTest) RunContainer(t *testing.T) {
 	glog.V(1).Infof("Running container %s\n", ft.testContainer.ImageID[0:12])
 }
 
-func (ft *fileTest) CreateSubscription(t *testing.T) *api.Subscription {
-	fileEvents := []*api.FileEventFilter{}
+func (ft *fileTest) CreateSubscription(t *testing.T) *telemetryAPI.Subscription {
+	fileEvents := []*telemetryAPI.FileEventFilter{}
 	for _, fe := range ft.openEvts {
 		fileEvents = append(fileEvents, filterForTestData(fe))
 	}
 
-	eventFilter := &api.EventFilter{
+	eventFilter := &telemetryAPI.EventFilter{
 		FileEvents: fileEvents,
 	}
 
-	return &api.Subscription{
+	return &telemetryAPI.Subscription{
 		EventFilter: eventFilter,
 	}
 }
 
-func (ft *fileTest) HandleTelemetryEvent(t *testing.T, te *api.ReceivedTelemetryEvent) bool {
+func (ft *fileTest) HandleTelemetryEvent(t *testing.T, te *telemetryAPI.ReceivedTelemetryEvent) bool {
 	switch event := te.Event.Event.(type) {
-	case *api.TelemetryEvent_File:
+	case *telemetryAPI.TelemetryEvent_File:
 		if td, ok := ft.openEvts[event.File.Filename]; ok {
 			if !eventMatchFileTestData(event.File, td) {
 				t.Errorf("Expected %#v, got %#v\n", td, event.File)
@@ -86,9 +86,9 @@ func (ft *fileTest) HandleTelemetryEvent(t *testing.T, te *api.ReceivedTelemetry
 	return len(ft.openEvts) > 0
 }
 
-func filterForTestData(fe *api.FileEvent) *api.FileEventFilter {
-	return &api.FileEventFilter{
-		Type:     api.FileEventType_FILE_EVENT_TYPE_OPEN,
+func filterForTestData(fe *telemetryAPI.FileEvent) *telemetryAPI.FileEventFilter {
+	return &telemetryAPI.FileEventFilter{
+		Type:     telemetryAPI.FileEventType_FILE_EVENT_TYPE_OPEN,
 		Filename: &wrappers.StringValue{Value: fe.Filename},
 	}
 }

@@ -15,12 +15,11 @@
 package services
 
 import (
+	"context"
 	"net/http"
 
 	// Include pprof
 	_ "net/http/pprof"
-
-	"golang.org/x/net/context"
 
 	"github.com/golang/glog"
 )

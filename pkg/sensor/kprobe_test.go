@@ -25,43 +25,50 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDecodeKprobe(t *testing.T) {
+func TestHandleKprobe(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
 	s := newTestSubscription(t, sensor)
 
-	sample := &perf.SampleRecord{
-		Time: uint64(sys.CurrentMonotonicRaw()),
+	sample := &perf.Sample{
+		SampleID: perf.SampleID{
+			TID:  uint32(sensorPID),
+			Time: uint64(sys.CurrentMonotonicRaw()),
+		},
 	}
-	data := perf.TraceEventSampleData{
-		"common_pid": int32(sensorPID),
-		"bytes":      []byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66},
-		"string":     "string_value",
-		"sint8":      int8(-8),
-		"sint16":     int16(-16),
-		"sint32":     int32(-32),
-		"sint64":     int64(-64),
-		"uint8":      uint8(8),
-		"uint16":     uint16(16),
-		"uint32":     uint32(32),
-		"uint64":     uint64(64),
+	data := expression.FieldValueMap{
+		"bytes":  []byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66},
+		"string": "string_value",
+		"sint8":  int8(-8),
+		"sint16": int16(-16),
+		"sint32": int32(-32),
+		"sint64": int64(-64),
+		"uint8":  uint8(8),
+		"uint16": uint16(16),
+		"uint32": uint32(32),
+		"uint64": uint64(64),
+	}
+	setSampleRawData(sample, data)
+
+	dispatched := false
+	s.dispatchFn = func(event TelemetryEvent) {
+		e, ok := event.(KernelFunctionCallTelemetryEvent)
+		require.True(t, ok)
+
+		ok = testCommonTelemetryEventData(t, sensor, e)
+		require.True(t, ok)
+		assert.Equal(t, data, e.Arguments)
+		dispatched = true
 	}
 
-	i, err := s.decodeKprobe(sample, data)
-	require.Nil(t, i)
-	require.NoError(t, err)
+	eventid, _ := s.addTestEventSink(t, nil)
+	s.handleKprobe(eventid, sample)
+	require.False(t, dispatched)
 
-	delete(data, "common_pid")
-	i, err = s.decodeKprobe(sample, data)
-	require.NotNil(t, i)
-	require.NoError(t, err)
-	e, ok := i.(KernelFunctionCallTelemetryEvent)
-	require.True(t, ok)
-
-	ok = testCommonTelemetryEventData(t, sensor, e)
-	require.True(t, ok)
-	assert.Equal(t, data, e.Arguments)
+	sample.TID = 0
+	s.handleKprobe(eventid, sample)
+	require.True(t, dispatched)
 }
 
 func prepareForRegisterKernelFunctionCallEventFilter(t *testing.T, s *Subscription) {
@@ -100,7 +107,7 @@ func TestRegisterKernelFunctionCallEventFilter(t *testing.T) {
 	verifyRegisterKernelFunctionCallEventFilter(t, s, -1)
 
 	e := expression.Equal(expression.Identifier("foo"), expression.Value("bar"))
-	expr, err := expression.NewExpression(e)
+	expr, err := expression.ConvertExpression(e, nil)
 	require.NotNil(t, expr)
 	require.NoError(t, err)
 

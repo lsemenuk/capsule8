@@ -18,8 +18,6 @@ import (
 	"fmt"
 
 	"github.com/capsule8/capsule8/pkg/expression"
-	"github.com/capsule8/capsule8/pkg/sys"
-	"github.com/capsule8/capsule8/pkg/sys/perf"
 )
 
 // ChargenEventTypes defines the field types that can be used with filters on
@@ -44,17 +42,16 @@ func (e ChargenTelemetryEvent) CommonTelemetryEventData() TelemetryEventData {
 	return e.TelemetryEventData
 }
 
-func (s *Subscription) decodeChargenEvent(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
+func (s *Subscription) dispatchChargenEvent(
+	eventid uint64,
+	data expression.FieldValueMap,
+) {
 	var e ChargenTelemetryEvent
 
 	e.Init(s.sensor)
 	e.Index = data["index"].(uint64)
 	e.Characters = data["characters"].(string)
-
-	return e, nil
+	s.DispatchEvent(eventid, e, data)
 }
 
 func generateCharacters(start, length uint64) string {
@@ -78,41 +75,37 @@ func (s *Subscription) RegisterChargenEventFilter(
 	}
 
 	monitor := s.sensor.Monitor()
-	eventID := monitor.RegisterExternalEvent("chargen", s.decodeChargenEvent)
+	eventID := monitor.ReserveEventID()
 
 	done := make(chan struct{})
 
-	es, err := s.addEventSink(eventID, filter, ChargenEventTypes)
+	es, err := s.addEventSink(eventID, filter)
 	if err != nil {
 		s.logStatus(
 			fmt.Sprintf("Invalid filter expression for chargen filter: %v", err))
-		monitor.UnregisterEvent(eventID)
 		return
 	}
 	es.unregister = func(es *eventSink) {
-		monitor.UnregisterEvent(es.eventID)
 		close(done)
 	}
-
-	go func() {
-		index := uint64(0)
-		for {
-			select {
-			case <-done:
-				return
-			default:
-				monoNow := sys.CurrentMonotonicRaw()
-				sampleID := perf.SampleID{
-					Time: uint64(monoNow),
+	es.enable = func() {
+		go func() {
+			index := uint64(0)
+			for {
+				select {
+				case <-done:
+					return
+				default:
+					characters := generateCharacters(index,
+						length)
+					data := expression.FieldValueMap{
+						"index":      index,
+						"characters": characters,
+					}
+					index += length
+					s.dispatchChargenEvent(eventID, data)
 				}
-				data := perf.TraceEventSampleData{
-					"index":      index,
-					"characters": generateCharacters(index, length),
-				}
-				index += length
-				monitor.EnqueueExternalSample(
-					eventID, sampleID, data)
 			}
-		}
-	}()
+		}()
+	}
 }

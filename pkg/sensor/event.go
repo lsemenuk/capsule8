@@ -15,11 +15,10 @@
 package sensor
 
 import (
-	"bytes"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/capsule8/capsule8/pkg/sys"
 	"github.com/capsule8/capsule8/pkg/sys/perf"
@@ -58,44 +57,35 @@ func (e *TelemetryEventData) Init(sensor *Sensor) {
 	e.MonotimeNanos = sys.CurrentMonotonicRaw() - sensor.bootMonotimeNanos
 	e.SequenceNumber = atomic.AddUint64(&sensor.sequenceNumber, 1)
 
-	var b []byte
-	buf := bytes.NewBuffer(b)
-	binary.Write(buf, binary.LittleEndian, sensor.ID)
-	binary.Write(buf, binary.LittleEndian, e.SequenceNumber)
-	binary.Write(buf, binary.LittleEndian, e.MonotimeNanos)
-	hash := sha256.Sum256(buf.Bytes())
+	var b [64 + 8 + 8]byte
+	copy(b[:], ([]byte)(sensor.ID))
+	*(*uint64)(unsafe.Pointer(&b[64])) = e.SequenceNumber
+	*(*int64)(unsafe.Pointer(&b[72])) = e.MonotimeNanos
+
+	hash := sha256.Sum256(b[:])
 	e.EventID = hex.EncodeToString(hash[:])
 
 	atomic.AddUint64(&sensor.Metrics.Events, 1)
 }
 
-// InitWithSample initializes a telemetry event using perf_event sample
+// InitWithSampleID initializes a telemetry event using perf_event sample
 // information. If the sample should be suppressed for some reason, the
 // return will be false.
-func (e *TelemetryEventData) InitWithSample(
+func (e *TelemetryEventData) InitWithSampleID(
 	sensor *Sensor,
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
+	sampleID perf.SampleID,
 ) bool {
-	var (
-		ok           bool
-		leader, task *Task
-	)
-
-	// Avoid the lookup if we've been given the information.
-	// This happens most commonly with process events.
-	if task, ok = data["__task__"].(*Task); ok {
-		leader = task.Leader()
-	} else if pid, _ := data["common_pid"].(int32); pid != 0 {
-		// When both the sensor and the process generating the sample
-		// are in containers, the sample.Pid and sample.Tid fields will
-		// be zero. Use "common_pid" from the trace event data instead.
-		task, leader = sensor.ProcessCache.LookupTaskAndLeader(int(pid))
+	var leader, task *Task
+	if pid := int(sampleID.TID); pid != 0 {
+		task, leader = sensor.ProcessCache.LookupTaskAndLeader(pid)
+		if leader.IsSensor() {
+			return false
+		}
 	}
 
 	e.Init(sensor)
-	e.MonotimeNanos = int64(sample.Time) - sensor.bootMonotimeNanos
-	e.CPU = sample.CPU
+	e.MonotimeNanos = int64(sampleID.Time) - sensor.bootMonotimeNanos
+	e.CPU = sampleID.CPU
 
 	if task != nil {
 		e.ProcessID = task.ProcessID
@@ -113,6 +103,15 @@ func (e *TelemetryEventData) InitWithSample(
 		}
 	}
 
-	// Return false if the event comes from the sensor itself
-	return leader == nil || !leader.IsSensor()
+	return true
+}
+
+// InitWithSample initializes a telemetry event using perf_event sample
+// information. If the sample should be suppressed for some reason, the
+// return will be false.
+func (e *TelemetryEventData) InitWithSample(
+	sensor *Sensor,
+	sample *perf.Sample,
+) bool {
+	return e.InitWithSampleID(sensor, sample.SampleID)
 }

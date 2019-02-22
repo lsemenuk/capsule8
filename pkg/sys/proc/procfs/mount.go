@@ -25,6 +25,8 @@ import (
 	"github.com/capsule8/capsule8/pkg/sys/proc"
 
 	"github.com/golang/glog"
+
+	"golang.org/x/sys/unix"
 )
 
 func parseMount(line string) (proc.Mount, error) {
@@ -106,6 +108,9 @@ func (fs *FileSystem) Mounts() []proc.Mount {
 			mounts = append(mounts, m)
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		glog.Fatal(err)
+	}
 
 	return mounts
 }
@@ -113,21 +118,18 @@ func (fs *FileSystem) Mounts() []proc.Mount {
 func (fs *FileSystem) findHostFileSystem() proc.FileSystem {
 	for _, mi := range fs.Mounts() {
 		if mi.FilesystemType == "proc" && mi.MountPoint != fs.MountPoint {
-			fs, err := NewFileSystem(mi.MountPoint)
+			hfs, err := NewFileSystem(mi.MountPoint)
 			if err != nil {
 				glog.Warning(err)
 				continue
 			}
 
-			if cgroups, err := fs.TaskControlGroups(1, 1); err != nil {
-				glog.Warningf("Cannot get cgroups for pid 1 on procfs %s: %v",
+			id, err := hfs.ProcessContainerID(1)
+			if err != nil {
+				glog.Warningf("Cannot get container ID for pid 1 on procfs mounted at %s: %v",
 					mi.MountPoint, err)
-			} else {
-				for _, cg := range cgroups {
-					if cg.Path == "/" {
-						return fs
-					}
-				}
+			} else if id == "" {
+				return hfs
 			}
 		}
 	}
@@ -139,20 +141,33 @@ func (fs *FileSystem) findHostFileSystem() proc.FileSystem {
 // procfs from the perspective of the active proc.FileSystem. If the calling
 // process is running in the host pid namespace, the receiver may return
 // itself. If the calling process is running in a container and no host proc
-// filesystem is mounted in, the return will be nil.
+// filesystem is mounted in, the return will be nil. If cgroups are not enabled
+// on the system, the host filesystem is the same as the calling filesystem.
 func (fs *FileSystem) HostFileSystem() proc.FileSystem {
+	// Care should be taken here to never simply return /proc as the host
+	// filesystem without being absolutely sure that's the host filesystem.
+	// If the sensor is running inside of a container, /proc will be the
+	// container's proc filesystem and so the sensor will have no visibility
+	// outside of it. The host proc filesystem must be properly mounted
+	// into a container running a sensor. It is better for the sensor to
+	// fail to start than to run with the wrong proc filesystem. This logic
+	// should never fall back to simply returning /proc when all else fails.
+	//
+	// If new cases are found that cause this detection logic to fail for
+	// some reason (such as cgroups not being enabled on the system, which
+	// inspired a new fix and this comment), take care to keep the scope
+	// of the fix as narrow as possible.
+
 	fs.hostProcFSOnce.Do(func() {
-		// If this filesystem's init process (pid 1) is in one or more
-		// root cgroup paths, it is the host filesystem.
-		if cgroups, err := fs.TaskControlGroups(1, 1); err != nil {
+		// If this filesystem's init process (pid 1) is not in a
+		// container, it is the host filesystem.
+		id, err := fs.ProcessContainerID(1)
+		if err == unix.ENOENT || id == "" {
+			fs.hostProcFS = fs
+			return
+		}
+		if err != nil {
 			glog.Fatalf("Cannot get cgroups for pid 1: %v", err)
-		} else {
-			for _, cg := range cgroups {
-				if cg.Path == "/" {
-					fs.hostProcFS = fs
-					return
-				}
-			}
 		}
 
 		// Scan this filesystem's view of mounts to look for a host
@@ -208,4 +223,36 @@ func (fs *FileSystem) TracingDir() string {
 	}
 
 	return ""
+}
+
+// SupportedFilesystems returns a list of filesystem types supported by the
+// system.
+func (fs *FileSystem) SupportedFilesystems() []string {
+	var systems []string
+
+	data := string(fs.ReadFileOrPanic("filesystems"))
+	scanner := bufio.NewScanner(strings.NewReader(data))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if len(line) == 0 {
+			continue
+		}
+
+		fields := strings.Fields(line)
+		switch len(fields) {
+		case 1:
+			// e.g., ext4, iso9660, etc.
+			systems = append(systems, fields[0])
+		case 2:
+			// e.g., debugfs, autofs, etc.
+			systems = append(systems, fields[1])
+		default:
+			glog.Fatalf("Unexpected filesystems line: %s", line)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		glog.Fatal(err)
+	}
+
+	return systems
 }

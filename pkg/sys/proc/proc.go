@@ -20,8 +20,11 @@ type FileSystem interface {
 	// BootID returns the kernel's boot identifier
 	BootID() string
 
-	// MaxPid returns the maximum PID that the kernel will use.
+	// MaxPID returns the maximum PID that the kernel will use.
 	MaxPID() uint
+
+	// SelfTGID returns the TGID of the calling task.
+	SelfTGID() int
 
 	// NumCPU returns the number of CPUs on the system. This differs from
 	// runtime.NumCPU in that runtime.NumCPU returns the number of logical
@@ -49,6 +52,10 @@ type FileSystem interface {
 	// tracefs filesystem is mounted.
 	TracingDir() string
 
+	// SupportedFilesystems returns a list of filesystem types supported by the
+	// system.
+	SupportedFilesystems() []string
+
 	// KernelTextSymbolNames returns a mapping of kernel symbols in the
 	// text segment. For each symbol in the map, the key is the source name
 	// for the symbol, and the value is the actual linker name that should
@@ -67,15 +74,18 @@ type FileSystem interface {
 	// TaskControlGroups returns the cgroup membership of the specified task.
 	TaskControlGroups(tgid, pid int) ([]ControlGroup, error)
 
-	// TaskCWD returns the current working dirtectory for the specified
+	// TaskCWD returns the current working directory for the specified
 	// task.
 	TaskCWD(tgid, pid int) (string, error)
+
+	// ProcessExecutable returns the name of the executable
+	ProcessExecutable(pid int) (string, error)
 
 	// TaskStartTime returns the time at which the specified task started.
 	TaskStartTime(tgid, pid int) (int64, error)
 
 	// TaskUniqueID returns a unique task ID for the specified task.
-	TaskUniqueID(tgid, pid int, startTime int64) (string, error)
+	TaskUniqueID(tgid, pid int, startTime int64) string
 
 	// WalkTasks calls the specified function for each task present in the
 	// proc FileSystem.
@@ -84,6 +94,9 @@ type FileSystem interface {
 	// ReadTaskStatus reads the status of a task, storing the information
 	// into the supplied struct. The supplied struct must be a pointer.
 	ReadTaskStatus(tgid, pid int, i interface{}) error
+
+	// ProcessMappings returns the memory mappings a process currently has
+	ProcessMappings(pid int) ([]MemoryMapping, error)
 }
 
 // TaskWalkFunc is a function that is called by WalkTasks for each TGID and PID
@@ -116,5 +129,18 @@ type ControlGroup struct {
 
 	// Path is the pathname of the control group to which the process
 	// belongs. It is relative to the mountpoint of the hierarchy.
+	Path string
+}
+
+// MemoryMapping holds relevant information about a particular VM mapping
+// read out of /proc/<pid>/maps
+type MemoryMapping struct {
+	// Start is the starting virtual address of the mapping.
+	Start uint64
+
+	// End is the ending virtual address of the mapping.
+	End uint64
+
+	// Path is the path of the file that is backing the mapping.
 	Path string
 }

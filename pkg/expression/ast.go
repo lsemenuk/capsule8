@@ -24,11 +24,14 @@ type expr interface {
 
 	KernelString() string
 	String() string
+	BindTypes(types FieldTypeMap) error
+	Type() ValueType
 }
 
 type (
 	identExpr struct {
 		name string
+		t    ValueType
 	}
 
 	valueExpr struct {
@@ -47,20 +50,33 @@ type (
 	}
 )
 
-func (e identExpr) exprNode()  {}
-func (e valueExpr) exprNode()  {}
-func (e binaryExpr) exprNode() {}
-func (e unaryExpr) exprNode()  {}
+func (e *identExpr) exprNode()  {}
+func (e *valueExpr) exprNode()  {}
+func (e *binaryExpr) exprNode() {}
+func (e *unaryExpr) exprNode()  {}
 
-func (e identExpr) String() string {
+func (e *identExpr) String() string {
 	return e.name
 }
 
-func (e identExpr) KernelString() string {
+func (e *identExpr) KernelString() string {
 	return e.String()
 }
 
-func (e valueExpr) String() string {
+func (e *identExpr) BindTypes(types FieldTypeMap) error {
+	if t, ok := types[e.name]; ok {
+		e.t = t
+		return nil
+	}
+	e.t = ValueTypeUnspecified
+	return fmt.Errorf("Unknown IDENTIFIER %q", e.name)
+}
+
+func (e *identExpr) Type() ValueType {
+	return e.t
+}
+
+func (e *valueExpr) String() string {
 	switch v := e.v.(type) {
 	case string:
 		return fmt.Sprintf("%q", v)
@@ -94,11 +110,32 @@ func (e valueExpr) String() string {
 	panic("internal error: invalid valueExpr")
 }
 
-func (e valueExpr) KernelString() string {
+func (e *valueExpr) KernelString() string {
+	switch v := e.v.(type) {
+	case string:
+		// Use \"%s\" instead of %q here because the kernel's parser
+		// does not accept any escaping. We've already disallowed quotes
+		// from being included in kernel filter strings elsewhere.
+		return fmt.Sprintf("\"%s\"", v)
+	case bool:
+		return ""
+	case float64:
+		return ""
+	case time.Time:
+		return ""
+	}
 	return e.String()
 }
 
-func (e valueExpr) isInteger() bool {
+func (e *valueExpr) BindTypes(types FieldTypeMap) error {
+	return nil
+}
+
+func (e *valueExpr) Type() ValueType {
+	return ValueTypeOf(e.v)
+}
+
+func (e *valueExpr) isInteger() bool {
 	switch e.v.(type) {
 	case int8, int16, int32, int64, uint8, uint16, uint32, uint64:
 		return true
@@ -106,7 +143,7 @@ func (e valueExpr) isInteger() bool {
 	return false
 }
 
-func (e valueExpr) isNumeric() bool {
+func (e *valueExpr) isNumeric() bool {
 	switch e.v.(type) {
 	case float64, time.Time:
 		return true
@@ -114,12 +151,12 @@ func (e valueExpr) isNumeric() bool {
 	return e.isInteger()
 }
 
-func (e valueExpr) isString() bool {
+func (e *valueExpr) isString() bool {
 	_, ok := e.v.(string)
 	return ok
 }
 
-func (e binaryExpr) isValid() bool {
+func (e *binaryExpr) isValid() bool {
 	switch e.op {
 	case binaryOpLogicalAnd, binaryOpLogicalOr, binaryOpEQ, binaryOpNE,
 		binaryOpLT, binaryOpLE, binaryOpGT, binaryOpGE, binaryOpLike,
@@ -130,12 +167,12 @@ func (e binaryExpr) isValid() bool {
 	return true
 }
 
-func (e binaryExpr) String() string {
+func (e *binaryExpr) String() string {
 	if !e.isValid() {
 		panic("internal error: invalid binaryExpr")
 	}
 
-	if y, ok := e.y.(binaryExpr); ok {
+	if y, ok := e.y.(*binaryExpr); ok {
 		if y.op == binaryOpLogicalAnd || y.op == binaryOpLogicalOr {
 			return fmt.Sprintf("%s %s (%s)", e.x, binaryOpStrings[e.op], e.y)
 		}
@@ -143,20 +180,20 @@ func (e binaryExpr) String() string {
 	return fmt.Sprintf("%s %s %s", e.x, binaryOpStrings[e.op], e.y)
 }
 
-func (e binaryExpr) KernelString() string {
+func (e *binaryExpr) KernelString() string {
 	if !e.isValid() {
 		panic("internal error: invalid binaryExpr")
 	}
 
 	if e.op == binaryOpNE {
-		if x, ok := e.x.(binaryExpr); ok && x.op == binaryOpBitwiseAnd {
+		if x, ok := e.x.(*binaryExpr); ok && x.op == binaryOpBitwiseAnd {
 			// Assume that the rhs is 0 because prior validation
 			// should ensure that to be the case
 			return e.x.KernelString()
 		}
 	}
 
-	if y, ok := e.y.(binaryExpr); ok {
+	if y, ok := e.y.(*binaryExpr); ok {
 		if y.op == binaryOpLogicalAnd || y.op == binaryOpLogicalOr {
 			return fmt.Sprintf("%s %s (%s)", e.x.KernelString(),
 				binaryOpKernelStrings[e.op], e.y.KernelString())
@@ -166,14 +203,54 @@ func (e binaryExpr) KernelString() string {
 		binaryOpKernelStrings[e.op], e.y.KernelString())
 }
 
-func (e unaryExpr) String() string {
+func (e *binaryExpr) BindTypes(types FieldTypeMap) error {
+	err := e.x.BindTypes(types)
+	if err == nil {
+		err = e.y.BindTypes(types)
+	}
+	return err
+}
+
+func (e *binaryExpr) Type() ValueType {
+	switch e.op {
+	case binaryOpLogicalAnd, binaryOpLogicalOr:
+		return ValueTypeBool
+	case binaryOpEQ, binaryOpNE, binaryOpLike:
+		return ValueTypeBool
+	case binaryOpLE, binaryOpLT, binaryOpGE, binaryOpGT:
+		return ValueTypeBool
+	case binaryOpBitwiseAnd:
+		return e.x.Type()
+	}
+	panic("internal error: invalid binaryExpr")
+}
+
+func (e *unaryExpr) String() string {
 	switch e.op {
 	case unaryOpIsNull, unaryOpIsNotNull:
 		return fmt.Sprintf("%s %s", e.x, unaryOpStrings[e.op])
+	case unaryOpNot:
+		return fmt.Sprintf("%s %s", unaryOpStrings[e.op], e.x)
 	}
 	panic("internal error: invalid unaryExpr")
 }
 
-func (e unaryExpr) KernelString() string {
+func (e *unaryExpr) KernelString() string {
+	switch e.op {
+	case unaryOpNot:
+		return fmt.Sprintf("%s%s", unaryOpKernelStrings[e.op], e.x)
+	}
 	return ""
+}
+
+func (e *unaryExpr) BindTypes(types FieldTypeMap) error {
+	return e.x.BindTypes(types)
+}
+
+func (e *unaryExpr) Type() ValueType {
+	switch e.op {
+	case unaryOpIsNull, unaryOpIsNotNull, unaryOpNot:
+		return ValueTypeBool
+	}
+	panic("internal error: invalid unaryExpr")
 }

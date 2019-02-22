@@ -26,24 +26,19 @@ package sensor
 import (
 	"errors"
 	"fmt"
-	"os"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode"
 	"unsafe"
 
 	"github.com/capsule8/capsule8/pkg/config"
 	"github.com/capsule8/capsule8/pkg/expression"
 	"github.com/capsule8/capsule8/pkg/sys"
 	"github.com/capsule8/capsule8/pkg/sys/perf"
-	"github.com/capsule8/capsule8/pkg/sys/proc"
 
 	"github.com/golang/glog"
-
 	"golang.org/x/sys/unix"
 )
 
@@ -51,6 +46,7 @@ import (
 // on process exec telemetry events.
 var ProcessExecEventTypes = expression.FieldTypeMap{
 	"filename": expression.ValueTypeString,
+	"cwd":      expression.ValueTypeString,
 }
 
 // ProcessExitEventTypes defines the field types that can be used with filters
@@ -65,8 +61,11 @@ var ProcessExitEventTypes = expression.FieldTypeMap{
 // ProcessForkEventTypes defines the field types that can be used with filters
 // on process fork telemetry events.
 var ProcessForkEventTypes = expression.FieldTypeMap{
-	"fork_child_pid": expression.ValueTypeSignedInt32,
-	"fork_child_id":  expression.ValueTypeString,
+	"fork_child_pid":   expression.ValueTypeSignedInt32,
+	"fork_child_id":    expression.ValueTypeString,
+	"fork_clone_flags": expression.ValueTypeUnsignedInt64,
+	"fork_stack_start": expression.ValueTypeUnsignedInt64,
+	"cwd":              expression.ValueTypeString,
 }
 
 // ProcessUpdateEventTypes defines the field types that can be used with
@@ -82,6 +81,7 @@ type ProcessExecTelemetryEvent struct {
 
 	Filename    string
 	CommandLine []string
+	CWD         string
 }
 
 // CommonTelemetryEventData returns the telemtry event data common to all
@@ -114,6 +114,9 @@ type ProcessForkTelemetryEvent struct {
 
 	ChildPID       int32
 	ChildProcessID string
+	CloneFlags     uint64
+	StackStart     uint64
+	CWD            string
 }
 
 // CommonTelemetryEventData returns the telemtry event data common to all
@@ -168,24 +171,46 @@ const (
 
 	execveArgCount = 6
 
-	doExecveatCommonAddress = "do_execveat_common"
-	doExecveatCommonArgs    = "filename=+0(+0(%si)):string "
-	doExecveCommonAddress   = "do_execve_common"
-	doExecveCommonArgs      = "filename=+0(%di):string "
-	doExecveAddress         = "do_execve"
-	doExecveArgs            = "filename=+0(%di):string "
+	doExecvefileAddress              = "__do_execve_file"
+	doExecvefileArgs                 = "filename=+0(+0(%si)):string "
+	doExecveatCommonAddress          = "do_execveat_common"
+	doExecveatCommonArgs             = "filename=+0(+0(%si)):string "
+	doExecveCommonAddress            = "do_execve_common"
+	doExecveCommonConstCharArgs      = "filename=+0(%di):string "
+	doExecveCommonStructFilenameArgs = "filename=+0(+0(%di)):string "
+	doExecveAddress                  = "do_execve"
+	doExecveArgs                     = "filename=+0(%di):string "
 
 	doExitAddress = "do_exit"
 	doExitArgs    = "code=%di:s64"
 
 	doForkAddress   = "do_fork"
-	doForkFetchargs = "clone_flags=%di:u64"
+	doForkFetchargs = "clone_flags=%di:u64 stack_start=%si:u64"
+
+	// For kernels where we have offsets into struct task_struct, we will
+	// use different kprobes for tracking forks. This is mainly so that we
+	// can get the task start_time as efficiently as possible, because
+	// hitting /proc/pid/status is really slow. Unfortunately there's not
+	// a single kprobe that is good for most kernel versions, so we have to
+	// use two and combine the information. We'll get clone_flags from the
+	// call to do_fork (doForkAddress, doForkFetchargs above) and we'll get
+	// the resulting task struct for the new task from the call to
+	// wake_up_new_task. In older kernels, clone_flags is also passed to
+	// that function, but there's not a good way to make sure that we have
+	// a version of the kernel that we can reliably get that from, so we
+	// will just always split the calls to make things consistent for all
+	// kernel versions.
+	wakeUpNewTaskAddress                  = "wake_up_new_task"
+	wakeUpNewTaskRealStartTime16Fetchargs = "child_pid=+PID_OFFSET(%di):s32 start_time_sec=+START_TIME_SEC_OFFSET(%di):s64 start_time_nsec=+START_TIME_NSEC_OFFSET(%di):s64"
+	wakeUpNewTaskRealStartTime8Fetchargs  = "child_pid=+PID_OFFSET(%di):s32 start_time_sec=+START_TIME_SEC_OFFSET(%di):s64"
 
 	// This is used for tracking current working directory. It's a
 	// a kretprobe that's used to trigger a lookup in /proc to get the
 	// needed data.
 	doSetFsPwd = "set_fs_pwd"
 )
+
+var execveArgString = []string{"argv0", "argv1", "argv2", "argv3", "argv4", "argv5"}
 
 // Cred contains task credential information
 type Cred struct {
@@ -236,6 +261,7 @@ type cloneEvent struct {
 
 	// Set by the parent
 	cloneFlags uint64
+	stackStart uint64
 
 	// Set by the child
 	childPid  int
@@ -316,6 +342,12 @@ type Task struct {
 	// task clone executed by the clone(2) system call. In kernels >= 3.9
 	// this is not necessary
 	pendingClone *cloneEvent
+
+	// funkyExecTime is the time at which an exec event last occurred for
+	// this task's thread group by one of its member tasks (but not itself)
+	// If we see a process exit within a few ms of this, suppress it and
+	// then clear this.
+	funkyExecTime int64
 }
 
 var rootTask = Task{}
@@ -326,7 +358,10 @@ func newTask(pid int) *Task {
 	}
 }
 
-var sensorPID = os.Getpid()
+var (
+	sensorPID     int
+	sensorPIDOnce sync.Once
+)
 
 // IsSensor returns true if the task belongs to the sensor process.
 func (t *Task) IsSensor() bool {
@@ -355,75 +390,17 @@ func (t *Task) Parent() *Task {
 	return t.parent
 }
 
-// Update updates a task instance with new data. It returns true if any data
-// was actually changed.
-func (t *Task) Update(
-	changes map[string]interface{},
-	changeTime uint64,
-	procFS proc.FileSystem,
-) bool {
-	dataChanged := false
-	changedContainerInfo := false
-	changedPID := false
-	changedStartTime := false
-
-	s := reflect.ValueOf(t).Elem()
-	st := s.Type()
-	for i := st.NumField() - 1; i >= 0; i-- {
-		f := st.Field(i)
-		if !unicode.IsUpper(rune(f.Name[0])) {
-			continue
-		}
-		v, ok := changes[f.Name]
-		if !ok {
-			continue
-		}
-		if !reflect.TypeOf(v).AssignableTo(f.Type) {
-			glog.Fatalf("Cannot assign %v to %s %v",
-				v, f.Name, f.Type)
-		}
-
-		// Assume field types that are not compareable always change
-		// Examples of uncompareable types: []string (e.g. CommandLine)
-		if !reflect.TypeOf(v).Comparable() ||
-			s.Field(i).Interface() != v {
-			dataChanged = true
-			s.Field(i).Set(reflect.ValueOf(v))
-
-			switch f.Name {
-			case "PID", "TGID":
-				changedPID = true
-			case "StartTime":
-				changedStartTime = true
-			case "ContainerID":
-				// Invalidate ContainerInfo if it hasn't
-				// already been changed in this update.
-				if !changedContainerInfo {
-					t.ContainerInfo = nil
-				}
-			case "ContainerInfo":
-				changedContainerInfo = true
-			}
-		}
+func (t *Task) suppressExitEvent(ts int64) bool {
+	if t.funkyExecTime <= 0 {
+		return false
 	}
-
-	if changedPID || changedStartTime {
-		if !changedStartTime {
-			var err error
-			t.StartTime, err = procFS.TaskStartTime(t.TGID, t.PID)
-			if err != nil {
-				t.StartTime = int64(changeTime)
-			}
-		}
-		if t.StartTime > 0 {
-			t.ProcessID, _ = procFS.TaskUniqueID(
-				t.TGID, t.PID, t.StartTime)
-		} else {
-			t.ProcessID = ""
-		}
+	var delta int64
+	if t.funkyExecTime > ts {
+		delta = t.funkyExecTime - ts
+	} else {
+		delta = ts - t.funkyExecTime
 	}
-
-	return dataChanged
+	return delta <= taskReuseThreshold
 }
 
 type taskCache interface {
@@ -517,6 +494,10 @@ type ProcessInfoCache struct {
 	ProcessExitEventID   uint64
 	ProcessUpdateEventID uint64
 
+	// EventGroupID is the EventMonitor event group id to use for
+	// registering all process related events.
+	EventGroupID int32
+
 	startLock  sync.Mutex
 	startQueue []scannerDeferredAction
 	started    bool
@@ -532,6 +513,12 @@ func NewProcessInfoCache(sensor *Sensor) *ProcessInfoCache {
 		sensor: sensor,
 	}
 
+	sensorPIDOnce.Do(func() {
+		sensorPID = sensor.ProcFS.SelfTGID()
+		glog.V(1).Infof("Filtering all events from kernel TGID %d",
+			sensorPID)
+	})
+
 	maxPID := sensor.ProcFS.MaxPID()
 	if maxPID > config.Sensor.ProcessInfoCacheSize {
 		cache.cache = newMapTaskCache(maxPID)
@@ -540,54 +527,27 @@ func NewProcessInfoCache(sensor *Sensor) *ProcessInfoCache {
 	}
 
 	monitor := sensor.Monitor()
-	cache.ProcessExecEventID = monitor.RegisterExternalEvent(
-		"PROCESS_EXEC", cache.decodeProcessExecEvent)
 
-	cache.ProcessForkEventID = monitor.RegisterExternalEvent(
-		"PROCESS_FORK", cache.decodeProcessForkEvent)
-
-	cache.ProcessExitEventID = monitor.RegisterExternalEvent(
-		"PROCESS_EXIT", cache.decodeProcessExitEvent)
-
-	cache.ProcessUpdateEventID = monitor.RegisterExternalEvent(
-		"PROCESS_UPDATE", cache.decodeProcessUpdateEvent)
-
-	// Register with the sensor's global event monitor...
-	eventName := "task/task_newtask"
-	_, err := monitor.RegisterTracepoint(eventName,
-		cache.decodeNewTask,
-		perf.WithEventEnabled())
+	var err error
+	cache.EventGroupID, err = monitor.RegisterEventGroup("tasks",
+		cache.lostRecordHandler)
 	if err != nil {
-		eventName = doForkAddress
-		_, err = sensor.RegisterKprobe(eventName, false,
-			doForkFetchargs, cache.decodeDoFork,
-			perf.WithTracingEventName("dofork"),
-			perf.WithEventEnabled())
-		if err != nil {
-			eventName = "_" + eventName
-			_, err = sensor.RegisterKprobe(eventName, false,
-				doForkFetchargs, cache.decodeDoFork,
-				perf.WithTracingEventName("_dofork"),
-				perf.WithEventEnabled())
-			if err != nil {
-				glog.Fatalf("Couldn't register kprobe %s: %s",
-					eventName, err)
-			}
-		}
-
-		eventName = "sched/sched_process_fork"
-		_, err = monitor.RegisterTracepoint(eventName,
-			cache.decodeSchedProcessFork,
-			perf.WithEventEnabled())
-		if err != nil {
-			glog.Fatalf("Couldn't register kprobe %s: %s",
-				eventName, err)
-		}
+		glog.Fatalf("Failed to register task event group: %v", err)
 	}
 
-	eventName = doExitAddress
+	cache.ProcessExecEventID = monitor.ReserveEventID()
+	cache.ProcessForkEventID = monitor.ReserveEventID()
+	cache.ProcessExitEventID = monitor.ReserveEventID()
+	cache.ProcessUpdateEventID = monitor.ReserveEventID()
+
+	// Register with the sensor's global event monitor...
+	if err = cache.installForkMonitor(); err != nil {
+		glog.Fatalf("Couldn't register fork handlers: %v", err)
+	}
+
+	eventName := doExitAddress
 	_, err = sensor.RegisterKprobe(eventName, false,
-		doExitArgs, cache.decodeDoExit,
+		doExitArgs, cache.handleDoExit, cache.EventGroupID,
 		perf.WithTracingEventName("doexit"),
 		perf.WithEventEnabled())
 	if err != nil {
@@ -596,31 +556,66 @@ func NewProcessInfoCache(sensor *Sensor) *ProcessInfoCache {
 
 	// Attach kprobe on commit_creds to capture task privileges
 	_, err = sensor.RegisterKprobe(commitCredsAddress, false,
-		commitCredsArgs, cache.decodeCommitCreds,
+		commitCredsArgs, cache.handleCommitCreds, cache.EventGroupID,
 		perf.WithTracingEventName("creds"),
 		perf.WithEventEnabled())
 
 	// Attach kretprobe on set_fs_pwd to track working directories
 	_, err = sensor.RegisterKprobe(doSetFsPwd, true,
-		"", cache.decodeDoSetFsPwd,
+		"", cache.handleDoSetFsPwd, cache.EventGroupID,
 		perf.WithTracingEventName("setfspwd"),
 		perf.WithEventEnabled())
 
 	// Attach a probe to capture exec events in the kernel. There are three
 	// possibilities, in descending order of preference:
-	//      do_execveat_common (Linux 3.19+)
-	//      do_execve_common (Linux 3.0-3.18)
+	//      __do_execve_file [Linux 4.18+]
+	//      do_execveat_common [Linux 3.19-4.17]
+	//      do_execve_common(const char *, ...) [Linux 3.0-3.13]
+	//	do_execve_common(struct filename*, ...) [Linux 3.14-3.18]
 	//	do_execve
+	//
+	// For do_execve_common, check to see if the symbol do_open_exec exists.
+	// If it does, use struct filename * instead of const char *.
 	//
 	var execveProbes = []struct {
 		address          string
-		args             string
+		args             [][2]string
 		compatRegister   string
 		nocompatRegister string
 	}{
-		{doExecveatCommonAddress, doExecveatCommonArgs, "cx", "dx"},
-		{doExecveCommonAddress, doExecveCommonArgs, "dx", "di"},
-		{doExecveAddress, doExecveArgs, "si", "si"},
+		{
+			address: doExecvefileAddress,
+			args: [][2]string{
+				{"", doExecvefileArgs},
+			},
+			compatRegister:   "cx",
+			nocompatRegister: "dx",
+		},
+		{
+			address: doExecveatCommonAddress,
+			args: [][2]string{
+				{"", doExecveatCommonArgs},
+			},
+			compatRegister:   "cx",
+			nocompatRegister: "dx",
+		},
+		{
+			address: doExecveCommonAddress,
+			args: [][2]string{
+				{"do_open_exec", doExecveCommonStructFilenameArgs},
+				{"", doExecveCommonConstCharArgs},
+			},
+			compatRegister:   "dx",
+			nocompatRegister: "di",
+		},
+		{
+			address: doExecveAddress,
+			args: [][2]string{
+				{"", doExecveArgs},
+			},
+			compatRegister:   "si",
+			nocompatRegister: "si",
+		},
 	}
 	compatMode := sensor.IsKernelSymbolAvailable("compat_sys_execve") ||
 		sensor.IsKernelSymbolAvailable("__ia32_compat_sys_execve")
@@ -632,10 +627,19 @@ func NewProcessInfoCache(sensor *Sensor) *ProcessInfoCache {
 			execveArgs = makeExecveFetchArgs(probe.nocompatRegister)
 		}
 
-		eventName := fmt.Sprintf("execve%d", i+1)
+		var args string
+		for _, choice := range probe.args {
+			if choice[0] == "" || sensor.IsKernelSymbolAvailable(choice[0]) {
+				args = choice[1]
+				break
+			}
+		}
+
+		eventName = fmt.Sprintf("execve%d", i+1)
 		_, err = sensor.RegisterKprobe(probe.address, false,
-			probe.args+execveArgs,
-			cache.decodeExecve,
+			args+execveArgs,
+			cache.handleExecve,
+			cache.EventGroupID,
 			perf.WithTracingEventName(eventName),
 			perf.WithEventEnabled())
 		if err == nil {
@@ -704,6 +708,8 @@ func (pc *ProcessInfoCache) cacheTaskFromProc(tgid, pid int) error {
 		return fmt.Errorf("Couldn't read pid %d status: %s",
 			pid, err)
 	}
+	tgid = s.TGID // this may change if we're caching for a missed fork
+	glog.V(2).Infof("Found task %d (tgid %d): %s", pid, tgid, s.Name)
 
 	t := pc.cache.LookupTask(s.PID)
 	t.TGID = s.TGID
@@ -714,9 +720,15 @@ func (pc *ProcessInfoCache) cacheTaskFromProc(tgid, pid int) error {
 	if err != nil {
 		t.StartTime = sys.CurrentMonotonicRaw()
 	}
-	t.ProcessID, _ = procFS.TaskUniqueID(t.TGID, t.PID, t.StartTime)
+	t.ProcessID = procFS.TaskUniqueID(t.TGID, t.PID, t.StartTime)
 	if t.PID != t.TGID {
-		t.parent = pc.cache.LookupTask(t.TGID)
+		// TGID should never be 0 in theory, but it could be if the task
+		// is in the process of exiting and we happened to catch it at
+		// just the right time. If we call LookupTask with a pid of 0,
+		// it will panic.
+		if t.TGID != 0 {
+			t.parent = pc.cache.LookupTask(t.TGID)
+		}
 	} else {
 		if s.PPID == 0 && (t.PID == 1 || s.Name == "kthreadd") {
 			t.parent = &rootTask
@@ -783,7 +795,7 @@ func (pc *ProcessInfoCache) installCgroupMonitor() error {
 	}
 
 	_, err := pc.sensor.RegisterKprobe(eventName, false,
-		fetchArgs, pc.decodeCgroupProcsWrite,
+		fetchArgs, pc.handleCgroupProcsWrite, pc.EventGroupID,
 		perf.WithTracingEventName("cgroups1"),
 		perf.WithEventEnabled())
 	if err != nil {
@@ -791,8 +803,8 @@ func (pc *ProcessInfoCache) installCgroupMonitor() error {
 	}
 
 	if eventName2 != "" {
-		_, err := pc.sensor.RegisterKprobe(eventName2, false,
-			fetchArgs2, pc.decodeCgroupProcsWrite,
+		_, err = pc.sensor.RegisterKprobe(eventName2, false,
+			fetchArgs2, pc.handleCgroupProcsWrite, pc.EventGroupID,
 			perf.WithTracingEventName("cgroups2"),
 			perf.WithEventEnabled())
 		if err != nil {
@@ -803,16 +815,130 @@ func (pc *ProcessInfoCache) installCgroupMonitor() error {
 	return nil
 }
 
+func (pc *ProcessInfoCache) replaceTaskStructOffsets(s string) string {
+	s = strings.Replace(s, "PID_OFFSET", fmt.Sprintf("%d", pc.sensor.taskStructPID.Offset), -1)
+	s = strings.Replace(s, "TGID_OFFSET", fmt.Sprintf("%d", pc.sensor.taskStructTGID.Offset), -1)
+	s = strings.Replace(s, "START_TIME_SEC_OFFSET", fmt.Sprintf("%d", pc.sensor.taskStructRealStartTime.Offset), -1)
+	s = strings.Replace(s, "START_TIME_NSEC_OFFSET", fmt.Sprintf("%d", pc.sensor.taskStructRealStartTime.Offset+8), -1)
+	return s
+}
+
+func (pc *ProcessInfoCache) installForkMonitor() error {
+	monitor := pc.sensor.Monitor()
+
+	// Use the preferred method if we have struct task_struct offsets for
+	// pid, tgid, and start_time.
+	if pc.sensor.taskStructPID.Size != 0 &&
+		(pc.sensor.taskStructRealStartTime.Size == 8 ||
+			pc.sensor.taskStructRealStartTime.Size == 16) {
+		// Install kprobes for doForkAddress and wakeUpNewTaskAddress
+		// If this fails for any reason, fall back to the same behavior
+		// as when no offsets are available.
+		args := pc.replaceTaskStructOffsets(doForkFetchargs)
+		eventid, err := pc.sensor.RegisterKprobe(doForkAddress,
+			false, args, pc.handleDoFork, pc.EventGroupID,
+			perf.WithTracingEventName("dofork"),
+			perf.WithEventEnabled())
+		if err != nil {
+			eventid, err = pc.sensor.RegisterKprobe(
+				"_"+doForkAddress, false, args, pc.handleDoFork,
+				pc.EventGroupID,
+				perf.WithTracingEventName("dofork"),
+				perf.WithEventEnabled())
+		}
+		if err == nil {
+			switch pc.sensor.taskStructRealStartTime.Size {
+			case 16:
+				args = wakeUpNewTaskRealStartTime16Fetchargs
+			case 8:
+				args = wakeUpNewTaskRealStartTime8Fetchargs
+			}
+			args = pc.replaceTaskStructOffsets(args)
+			_, err = pc.sensor.RegisterKprobe(wakeUpNewTaskAddress,
+				false, args, pc.handleWakeUpNewTask,
+				pc.EventGroupID,
+				perf.WithTracingEventName("wake_up_new_task"),
+				perf.WithEventEnabled())
+			if err == nil {
+				glog.V(2).Info("Using task_struct offsets for fork tracing")
+				return nil
+			}
+			monitor.UnregisterEvent(eventid)
+		}
+	}
+
+	eventName := doForkAddress
+	_, err := pc.sensor.RegisterKprobe(eventName, false,
+		doForkFetchargs, pc.handleDoFork, pc.EventGroupID,
+		perf.WithTracingEventName("dofork"),
+		perf.WithEventEnabled())
+	if err != nil {
+		eventName = "_" + eventName
+		_, err = pc.sensor.RegisterKprobe(eventName, false,
+			doForkFetchargs, pc.handleDoFork, pc.EventGroupID,
+			perf.WithTracingEventName("_dofork"),
+			perf.WithEventEnabled())
+		if err != nil {
+			glog.Fatalf("Couldn't register kprobe %s: %s",
+				eventName, err)
+		}
+	}
+
+	eventName = "sched/sched_process_fork"
+	_, err = monitor.RegisterTracepoint(eventName,
+		pc.handleSchedProcessFork, pc.EventGroupID,
+		perf.WithEventEnabled())
+	if err != nil {
+		glog.Fatalf("Couldn't register kprobe %s: %s",
+			eventName, err)
+	}
+
+	return nil
+}
+
+func (pc *ProcessInfoCache) lostRecordHandler(
+	eventid uint64,
+	groupid int32,
+	sampleID perf.SampleID,
+	count uint64,
+) {
+	glog.V(1).Infof("Lost %d process related events\n", count)
+
+	var e LostRecordTelemetryEvent
+	e.InitWithSampleID(pc.sensor, sampleID, count)
+	e.Type = LostRecordTypeProcess
+	pc.sensor.DispatchEventToAllSubscriptions(e)
+
+	atomic.AddUint64(&pc.sensor.Metrics.KernelSamplesLost, count)
+}
+
 // LookupTask finds the task information for the given PID.
 func (pc *ProcessInfoCache) LookupTask(pid int) *Task {
-	return pc.cache.LookupTask(pid)
+	t := pc.cache.LookupTask(pid)
+	if t.TGID == 0 {
+		// The fork for this process was lost. We don't know what the
+		// TGID actually is, but procfs has a little quirk that means
+		// we don't really need it. Listing files in /proc will yield
+		// only TGIDs, but any valid PID is recognized as a legit path
+		pc.cacheTaskFromProc(t.PID, t.PID)
+	}
+	return t
 }
 
 // LookupTaskAndLeader finds the task information for both a given PID and the
 // thread group leader.
 func (pc *ProcessInfoCache) LookupTaskAndLeader(pid int) (*Task, *Task) {
 	t := pc.cache.LookupTask(pid)
-	return t, t.Leader()
+	if t.TGID == 0 {
+		// See comment in LookupTask above
+		pc.cacheTaskFromProc(t.PID, t.PID)
+	}
+	l := t.Leader()
+	if l.TGID == 0 {
+		// See comment in LookupTask above
+		pc.cacheTaskFromProc(l.PID, l.PID)
+	}
+	return t, l
 }
 
 // LookupTaskContainerInfo returns the container info for a task, possibly
@@ -850,65 +976,56 @@ func (pc *ProcessInfoCache) maybeDeferAction(f func()) {
 	f()
 }
 
-func (pc *ProcessInfoCache) decodeProcessExecEvent(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
+func (pc *ProcessInfoCache) dispatchProcessExecEvent(
+	sampleID perf.SampleID,
+	data expression.FieldValueMap,
+) {
 	var e ProcessExecTelemetryEvent
-	if !e.InitWithSample(pc.sensor, sample, data) {
-		return nil, nil
+	if e.InitWithSampleID(pc.sensor, sampleID) {
+		e.Filename = data["filename"].(string)
+		e.CommandLine = data["exec_command_line"].([]string)
+		e.CWD = data["cwd"].(string)
+		pc.sensor.DispatchEvent(pc.ProcessExecEventID, e, data)
 	}
-	e.Filename = data["filename"].(string)
-	e.CommandLine = data["exec_command_line"].([]string)
-	return e, nil
 }
 
-func (pc *ProcessInfoCache) decodeProcessExitEvent(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
+func (pc *ProcessInfoCache) dispatchProcessExitEvent(
+	sampleID perf.SampleID,
+	data expression.FieldValueMap,
+) {
 	var e ProcessExitTelemetryEvent
-	if !e.InitWithSample(pc.sensor, sample, data) {
-		return nil, nil
+	if e.InitWithSampleID(pc.sensor, sampleID) {
+		e.ExitCode = data["code"].(int32)
+		e.ExitStatus = data["exit_status"].(uint32)
+		e.ExitSignal = data["exit_signal"].(uint32)
+		e.ExitCoreDumped = data["exit_core_dumped"].(bool)
+		pc.sensor.DispatchEvent(pc.ProcessExitEventID, e, data)
 	}
-	e.ExitCode = data["code"].(int32)
-	e.ExitStatus = data["exit_status"].(uint32)
-	e.ExitSignal = data["exit_signal"].(uint32)
-	e.ExitCoreDumped = data["exit_core_dumped"].(bool)
-	return e, nil
 }
 
-func (pc *ProcessInfoCache) decodeProcessForkEvent(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
+func (pc *ProcessInfoCache) dispatchProcessForkEvent(
+	sampleID perf.SampleID,
+	data expression.FieldValueMap,
+) {
 	var e ProcessForkTelemetryEvent
-	if !e.InitWithSample(pc.sensor, sample, data) {
-		return nil, nil
+	if e.InitWithSampleID(pc.sensor, sampleID) {
+		e.ChildPID = data["fork_child_pid"].(int32)
+		e.ChildProcessID = data["fork_child_id"].(string)
+		e.CloneFlags = data["fork_clone_flags"].(uint64)
+		e.StackStart = data["fork_stack_start"].(uint64)
+		e.CWD = data["cwd"].(string)
+		pc.sensor.DispatchEvent(pc.ProcessForkEventID, e, data)
 	}
-	e.ChildPID = data["fork_child_pid"].(int32)
-	e.ChildProcessID = data["fork_child_id"].(string)
-	return e, nil
 }
 
-func (pc *ProcessInfoCache) decodeProcessUpdateEvent(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
+func (pc *ProcessInfoCache) dispatchProcessUpdateEvent(
+	sampleID perf.SampleID,
+	data expression.FieldValueMap,
+) {
 	var e ProcessUpdateTelemetryEvent
-	if !e.InitWithSample(pc.sensor, sample, data) {
-		return nil, nil
-	}
-	e.CWD = data["cwd"].(string)
-	return e, nil
-}
-
-func sampleIDFromSample(sample *perf.SampleRecord) perf.SampleID {
-	return perf.SampleID{
-		Time: sample.Time,
-		PID:  sample.Pid,
-		TID:  sample.Tid,
-		CPU:  sample.CPU,
+	if e.InitWithSampleID(pc.sensor, sampleID) {
+		e.CWD = data["cwd"].(string)
+		pc.sensor.DispatchEvent(pc.ProcessUpdateEventID, e, data)
 	}
 }
 
@@ -916,78 +1033,57 @@ func (pc *ProcessInfoCache) handleSysClone(
 	parentTask, parentLeader, childTask *Task,
 	cloneFlags uint64,
 	childComm string,
-	sample *perf.SampleRecord,
+	sampleID perf.SampleID,
+	startTime int64,
+	stackStart uint64,
 ) {
-	changes := map[string]interface{}{
-		"Command": childComm,
-		"Creds":   parentTask.Creds,
-	}
+	childTask.parent = parentLeader
+	childTask.Command = childComm
+	childTask.Creds = parentTask.Creds
 
 	if (cloneFlags & CLONE_THREAD) != 0 {
-		changes["TGID"] = parentLeader.TGID
+		childTask.TGID = parentLeader.TGID
 	} else {
 		// This is a new thread group leader, tgid is the new pid
-		changes["TGID"] = childTask.PID
-		changes["ContainerID"] = parentLeader.ContainerID
-		changes["ContainerInfo"] = parentLeader.ContainerInfo
+		childTask.TGID = childTask.PID
 	}
+	childTask.ContainerID = parentLeader.ContainerID
+	childTask.ContainerInfo = parentLeader.ContainerInfo
 
-	// This must be done before filling in eventData, because otherwise
-	// childTask.ProcessID won't be set yet.
-	childTask.parent = parentLeader
-	childTask.Update(changes, sample.Time, pc.sensor.ProcFS)
-
-	eventData := map[string]interface{}{
-		"__task__":       parentTask,
-		"fork_child_pid": int32(childTask.PID),
-		"fork_child_id":  childTask.ProcessID,
+	procFS := pc.sensor.ProcFS
+	if startTime != 0 {
+		// Convert nsec to clock_t: startTime / NSEC_PER_SEC / USER_HZ
+		// For x86_64 (and most arches it would seem): USER_HZ is 100
+		// We convert because this is what fs/proc/array.c does when
+		// producing /proc/<tgid>/task/<pid>/stat. We want to match
+		// for start-up scans.
+		childTask.StartTime = startTime / 1e7
+	} else {
+		var err error
+		childTask.StartTime, err = procFS.TaskStartTime(childTask.TGID,
+			childTask.PID)
+		if err != nil {
+			childTask.StartTime = int64(sampleID.Time)
+		}
 	}
-	pc.sensor.Monitor().EnqueueExternalSample(
-		pc.ProcessForkEventID,
-		sampleIDFromSample(sample),
-		eventData)
+	childTask.ProcessID = procFS.TaskUniqueID(childTask.TGID,
+		childTask.PID, childTask.StartTime)
+
+	eventData := expression.FieldValueMap{
+		"fork_child_pid":   int32(childTask.PID),
+		"fork_child_id":    childTask.ProcessID,
+		"fork_clone_flags": cloneFlags,
+		"fork_stack_start": stackStart,
+		"cwd":              parentTask.CWD,
+	}
+	pc.dispatchProcessForkEvent(sampleID, eventData)
 }
 
-func (pc *ProcessInfoCache) decodeNewTask(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
-	parentPid := int(data["common_pid"].(int32))
-	childPid := int(data["pid"].(int32))
-	cloneFlags := data["clone_flags"].(uint64)
-	childComm := commToString(data["comm"].([]interface{}))
-
-	pc.maybeDeferAction(func() {
-		parentTask, parentLeader := pc.LookupTaskAndLeader(parentPid)
-		childTask := pc.LookupTask(childPid)
-
-		pc.handleSysClone(parentTask, parentLeader, childTask,
-			cloneFlags, childComm, sample)
-	})
-
-	return nil, nil
-}
-
-// decodeDoExit marks a task as having exited. The time of the exit
-// is noted so that the task can be safely reused later. Don't delete it from
-// the cache, because out-of-order events could cause it to be recreated and
-// then when the pid is reused by the kernel later, it'll contain stale data.
-func (pc *ProcessInfoCache) decodeDoExit(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
-	pid := int(data["common_pid"].(int32))
-	exitCode := data["code"].(int64)
-
-	changes := map[string]interface{}{
-		"ExitTime": sys.CurrentMonotonicRaw(),
-	}
-
+func (pc *ProcessInfoCache) prepareTaskExit(exitCode int64) expression.FieldValueMap {
 	ws := unix.WaitStatus(exitCode)
-	eventData := map[string]interface{}{
+	eventData := expression.FieldValueMap{
 		"code": int32(exitCode),
 	}
-
 	if ws.Exited() {
 		eventData["exit_status"] = uint32(ws.ExitStatus())
 		eventData["exit_signal"] = uint32(0)
@@ -998,208 +1094,257 @@ func (pc *ProcessInfoCache) decodeDoExit(
 		eventData["exit_core_dumped"] = ws.CoreDump()
 	}
 
-	pc.maybeDeferAction(func() {
-		t := pc.LookupTask(pid)
-		t.Update(changes, sample.Time, pc.sensor.ProcFS)
-		eventData["__task__"] = t
-		pc.sensor.Monitor().EnqueueExternalSample(
-			pc.ProcessExitEventID,
-			sampleIDFromSample(sample),
-			eventData)
-	})
-
-	return nil, nil
+	return eventData
 }
 
-func (pc *ProcessInfoCache) decodeCommitCreds(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
-	pid := int(data["common_pid"].(int32))
+// handleDoExit marks a task as having exited. The time of the exit
+// is noted so that the task can be safely reused later. Don't delete it from
+// the cache, because out-of-order events could cause it to be recreated and
+// then when the pid is reused by the kernel later, it'll contain stale data.
+func (pc *ProcessInfoCache) handleDoExit(_ uint64, sample *perf.Sample) {
+	exitCode, _ := sample.GetSignedInt64("code")
+	exitTime := sys.CurrentMonotonicRaw()
 
-	changes := map[string]interface{}{
-		"Creds": &Cred{
-			UID:   data["uid"].(uint32),
-			GID:   data["gid"].(uint32),
-			EUID:  data["euid"].(uint32),
-			EGID:  data["egid"].(uint32),
-			SUID:  data["suid"].(uint32),
-			SGID:  data["sgid"].(uint32),
-			FSUID: data["fsuid"].(uint32),
-			FSGID: data["fsgid"].(uint32),
-		},
-	}
+	eventData := pc.prepareTaskExit(exitCode)
+
+	// references to sample cannot outlive this function, because
+	// the sample may be reused in EventMonitor.
+	sampleID := sample.SampleID
+	pc.maybeDeferAction(func() {
+		t := pc.LookupTask(int(sampleID.TID))
+		if t.suppressExitEvent(int64(sample.Time)) {
+			t.funkyExecTime = 0
+			return
+		}
+		pc.dispatchProcessExitEvent(sampleID, eventData)
+		t.ExitTime = exitTime
+	})
+}
+
+func (pc *ProcessInfoCache) handleCommitCreds(_ uint64, sample *perf.Sample) {
+	pid := int(sample.TID)
+	newCreds := &Cred{}
+	newCreds.UID, _ = sample.GetUnsignedInt32("uid")
+	newCreds.GID, _ = sample.GetUnsignedInt32("gid")
+	newCreds.EUID, _ = sample.GetUnsignedInt32("euid")
+	newCreds.EGID, _ = sample.GetUnsignedInt32("egid")
+	newCreds.SUID, _ = sample.GetUnsignedInt32("suid")
+	newCreds.SGID, _ = sample.GetUnsignedInt32("sgid")
+	newCreds.FSUID, _ = sample.GetUnsignedInt32("fsuid")
+	newCreds.FSGID, _ = sample.GetUnsignedInt32("fsgid")
 
 	pc.maybeDeferAction(func() {
 		t := pc.LookupTask(pid)
-		t.Update(changes, sample.Time, pc.sensor.ProcFS)
+		t.Creds = newCreds
 	})
-
-	return nil, nil
 }
 
-func (pc *ProcessInfoCache) decodeDoSetFsPwd(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
-	pid := int(data["common_pid"].(int32))
+func (pc *ProcessInfoCache) handleDoSetFsPwd(_ uint64, sample *perf.Sample) {
+	pid := int(sample.TID)
 
+	// references to sample cannot outlive this function, because
+	// the sample may be reused in EventMonitor.
+	sampleID := sample.SampleID
 	pc.maybeDeferAction(func() {
 		t := pc.LookupTask(pid)
 		cwd, err := pc.sensor.ProcFS.TaskCWD(t.TGID, t.PID)
 		if err == nil && cwd != t.CWD {
 			glog.V(10).Infof("CWD(%d) = %s", t.PID, cwd)
-			changes := map[string]interface{}{
-				"CWD": cwd,
-			}
-			t.Update(changes, sample.Time, pc.sensor.ProcFS)
+			t.CWD = cwd
 
-			eventData := map[string]interface{}{
-				"__task__": t,
-				"cwd":      t.CWD,
+			eventData := expression.FieldValueMap{
+				"cwd": t.CWD,
 			}
-			pc.sensor.Monitor().EnqueueExternalSample(
-				pc.ProcessUpdateEventID,
-				sampleIDFromSample(sample),
-				eventData)
-
+			pc.dispatchProcessUpdateEvent(sampleID, eventData)
 		}
 	})
-
-	return nil, nil
 }
 
-// decodeDoExecve decodes sys_execve() and sys_execveat() events to obtain the
+// handleDoExecve handles sys_execve() and sys_execveat() events to obtain the
 // command-line for the process.
-func (pc *ProcessInfoCache) decodeExecve(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
-	pid := int(data["common_pid"].(int32))
+func (pc *ProcessInfoCache) handleExecve(_ uint64, sample *perf.Sample) {
+	pid := int(sample.TID)
+	command, _ := sample.GetString("filename")
 	commandLine := make([]string, 0, execveArgCount)
 	for i := 0; i < execveArgCount; i++ {
-		s := data[fmt.Sprintf("argv%d", i)].(string)
+		s, _ := sample.GetString(execveArgString[i])
 		if len(s) == 0 {
 			break
 		}
 		commandLine = append(commandLine, s)
 	}
 
-	changes := map[string]interface{}{
-		"CommandLine": commandLine,
-	}
-
-	eventData := map[string]interface{}{
-		"filename":          data["filename"].(string),
+	eventData := expression.FieldValueMap{
+		"filename":          command,
 		"exec_command_line": commandLine,
 	}
 
+	// references to sample cannot outlive this function, because
+	// the sample may be reused in EventMonitor.
+	sampleID := sample.SampleID
 	pc.maybeDeferAction(func() {
 		t := pc.LookupTask(pid)
-		t.Update(changes, sample.Time, pc.sensor.ProcFS)
-		eventData["__task__"] = t
-		pc.sensor.Monitor().EnqueueExternalSample(
-			pc.ProcessExecEventID,
-			sampleIDFromSample(sample),
-			eventData)
-	})
+		if t.PID != t.TGID {
+			execTime := int64(sampleID.Time)
 
-	return nil, nil
+			// Send a process exit for this task
+			exitEventData := pc.prepareTaskExit(0)
+			pc.dispatchProcessExitEvent(sampleID, exitEventData)
+			t.ExitTime = execTime
+
+			// This task becomes the task leader. Note that the
+			// kernel updates tsk->start_time to be leader->start_time,
+			// but it does not update real_start_time, which is what
+			// procfs uses, so we don't update start time here either
+			sampleID.TID = uint32(t.TGID)
+			l := t.Leader()
+			l.Creds = t.Creds
+			l.ContainerID = t.ContainerID
+			l.ContainerInfo = t.ContainerInfo
+			l.ExitTime = 0
+			l.CWD = t.CWD
+			l.funkyExecTime = execTime
+			t = l
+		}
+
+		t.Command = command
+		t.CommandLine = commandLine
+		eventData["cwd"] = t.CWD
+		pc.dispatchProcessExecEvent(sampleID, eventData)
+	})
 }
 
-func (pc *ProcessInfoCache) decodeDoFork(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
-	pid := int(data["common_pid"].(int32))
-	cloneFlags := data["clone_flags"].(uint64)
+func (pc *ProcessInfoCache) handleDoFork(_ uint64, sample *perf.Sample) {
+	pid := int(sample.TID)
+	cloneFlags, _ := sample.GetUnsignedInt64("clone_flags")
+	stackStart, _ := sample.GetUnsignedInt64("stack_start")
 
+	// references to sample cannot outlive this function, because
+	// the sample may be reused in EventMonitor.
+	sampleID := sample.SampleID
 	pc.maybeDeferAction(func() {
 		t := pc.LookupTask(pid)
 
 		if t.pendingClone.isExpired(sample.Time) {
 			t.pendingClone = &cloneEvent{
-				timestamp:  sample.Time,
+				timestamp:  sampleID.Time,
 				cloneFlags: cloneFlags,
+				stackStart: stackStart,
 			}
 		} else if t.pendingClone.childPid != 0 {
 			c := t.pendingClone
 			t.pendingClone = nil
 
-			childTask := pc.LookupTask(c.childPid)
+			childTask := pc.cache.LookupTask(c.childPid)
 			pc.handleSysClone(t, t.Leader(), childTask,
-				cloneFlags, c.childComm, sample)
+				cloneFlags, c.childComm, sampleID, 0, stackStart)
 		}
 	})
-
-	return nil, nil
 }
 
-func (pc *ProcessInfoCache) decodeSchedProcessFork(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
-	parentPid := int(data["parent_pid"].(int32))
-	childPid := int(data["child_pid"].(int32))
-	childComm := commToString(data["child_comm"].([]interface{}))
+func (pc *ProcessInfoCache) handleSchedProcessFork(_ uint64, sample *perf.Sample) {
+	parentPid, _ := sample.GetSignedInt32("parent_pid")
+	childPid, _ := sample.GetSignedInt32("child_pid")
 
+	commValue, _ := sample.DecodeValue("child_comm")
+	childComm := commToString(commValue)
+
+	// references to sample cannot outlive this function, because
+	// the sample may be reused in EventMonitor.
+	sampleID := sample.SampleID
 	pc.maybeDeferAction(func() {
-		parentTask, parentLeader := pc.LookupTaskAndLeader(parentPid)
-		if parentTask.pendingClone.isExpired(sample.Time) {
+		parentTask, parentLeader := pc.LookupTaskAndLeader(int(parentPid))
+		if parentTask.pendingClone.isExpired(sampleID.Time) {
 			parentTask.pendingClone = &cloneEvent{
-				timestamp: sample.Time,
-				childPid:  childPid,
+				timestamp: sampleID.Time,
+				childPid:  int(childPid),
 				childComm: childComm,
 			}
 		} else {
 			c := parentTask.pendingClone
 			parentTask.pendingClone = nil
 
-			childTask := pc.LookupTask(childPid)
+			childTask := pc.cache.LookupTask(int(childPid))
 			pc.handleSysClone(parentTask, parentLeader, childTask,
-				c.cloneFlags, childComm, sample)
+				c.cloneFlags, childComm, sampleID, 0,
+				c.stackStart)
 		}
 	})
-
-	return nil, nil
 }
 
-func (pc *ProcessInfoCache) decodeCgroupProcsWrite(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
+func (pc *ProcessInfoCache) handleWakeUpNewTask(_ uint64, sample *perf.Sample) {
+	parentPid := int(sample.TID)
+	childPid, _ := sample.GetSignedInt32("child_pid")
+
+	var startTime int64
+	startTimeSec, _ := sample.GetSignedInt64("start_time_sec")
+	if startTimeNsec, err := sample.GetSignedInt64("start_time_nsec"); err == nil {
+		startTime = (startTimeSec * 1e9) + startTimeNsec
+	} else {
+		startTime = startTimeSec
+	}
+
+	// references to sample cannot outlive this function, because
+	// the sample may be reused in EventMonitor.
+	sampleID := sample.SampleID
+	pc.maybeDeferAction(func() {
+		parentTask, parentLeader := pc.LookupTaskAndLeader(parentPid)
+		if parentTask.pendingClone.isExpired(sampleID.Time) {
+			parentTask.pendingClone = &cloneEvent{
+				timestamp: sampleID.Time,
+				childPid:  int(childPid),
+				childComm: parentTask.Command,
+			}
+		} else {
+			c := parentTask.pendingClone
+			parentTask.pendingClone = nil
+
+			childTask := pc.cache.LookupTask(int(childPid))
+			pc.handleSysClone(parentTask, parentLeader, childTask,
+				c.cloneFlags, parentTask.Command, sampleID,
+				startTime, c.stackStart)
+		}
+	})
+}
+
+func (pc *ProcessInfoCache) handleCgroupProcsWrite(_ uint64, sample *perf.Sample) {
 	// We're looking for container IDs, which are normally hex encoded
 	// sha256 hashes. Basically just ensure that we've got exactly 64
 	// characters. That should be good enough for now.
-	containerID := data["container_id"].(string)
-	if len(containerID) != 64 {
-		return nil, nil
+	containerID, _ := sample.GetString("container_id")
+	if containerID = sys.ContainerID(containerID); containerID == "" {
+		return
 	}
 
 	var (
+		buf         string
+		err         error
 		pid         int
 		threadgroup bool
+		vs32        int32
+		vs64        int64
+		vu64        uint64
 	)
 
-	if buf, ok := data["buf"].(string); ok {
+	if buf, err = sample.GetString("buf"); err == nil {
 		buf = strings.TrimSpace(buf)
-		if v, err := strconv.ParseInt(buf, 10, 32); err == nil {
-			pid = int(v)
+		if vs64, err = strconv.ParseInt(buf, 10, 32); err == nil {
+			pid = int(vs64)
 		} else {
 			// If there's an error parsing data written to this file, we
 			// want to know about it so that we can deal with it. Use a
 			// high logging level to ensure that.
 			glog.Warningf("Error parsing pid written to cgroup.procs: %v", err)
-			return nil, nil
+			return
 		}
-	} else if v, ok := data["tgid"].(uint64); ok {
-		pid = int(v)
+	} else if vu64, err = sample.GetUnsignedInt64("tgid"); err == nil {
+		pid = int(vu64)
 		threadgroup = true
-	} else if v, ok := data["pid"].(uint64); ok {
-		pid = int(v)
+	} else if vu64, err = sample.GetUnsignedInt64("pid"); err == nil {
+		pid = int(vu64)
 		threadgroup = false
 	}
-	if v, ok := data["threadgroup"].(int32); ok && v != 0 {
+	if vs32, err = sample.GetSignedInt32("threadgroup"); err == nil && vs32 != 0 {
 		threadgroup = true
 	}
 
@@ -1217,38 +1362,44 @@ func (pc *ProcessInfoCache) decodeCgroupProcsWrite(
 		}
 
 		glog.V(10).Infof("containerID(%d) = %s", task.PID, containerID)
-		changes := map[string]interface{}{
-			"ContainerID": containerID,
+		if containerID != task.ContainerID {
+			task.ContainerID = containerID
+			task.ContainerInfo = nil
 		}
-		task.Update(changes, sample.Time, pc.sensor.ProcFS)
 	})
-
-	return nil, nil
 }
 
-func commToString(comm []interface{}) string {
-	s := make([]byte, len(comm))
-	for i, c := range comm {
-		switch c := c.(type) {
-		case int8:
-			s[i] = byte(c)
-		case uint8:
-			// Kernel 2.6.32 erroneously reports unsigned
-			s[i] = byte(c)
-		}
-		if s[i] == 0 {
-			return string(s[:i])
+func commToString(comm interface{}) string {
+	// Most kernels report []int8, but 2.6.32 reports []uint8. Convert all
+	// cases to []byte to make a string.
+	var b []byte
+	switch v := comm.(type) {
+	case []int8:
+		var slice = struct {
+			addr     uintptr
+			len, cap int
+		}{uintptr(unsafe.Pointer(&v[0])), len(v), len(v)}
+		b = *(*[]byte)(unsafe.Pointer(&slice))
+	case []uint8:
+		b = []byte(v)
+	default:
+		return ""
+	}
+
+	for i, x := range b {
+		if x == 0 {
+			b = b[:i]
+			break
 		}
 	}
-	return string(s)
+	return string(b)
 }
 
 func (s *Subscription) registerProcessEventFilter(
 	eventID uint64,
 	expr *expression.Expression,
-	filterTypes expression.FieldTypeMap,
 ) {
-	if _, err := s.addEventSink(eventID, expr, filterTypes); err != nil {
+	if _, err := s.addEventSink(eventID, expr); err != nil {
 		s.logStatus(
 			fmt.Sprintf("Invalid process filter expression: %v", err))
 	}
@@ -1258,30 +1409,26 @@ func (s *Subscription) registerProcessEventFilter(
 // subscription.
 func (s *Subscription) RegisterProcessExecEventFilter(expr *expression.Expression) {
 	s.registerProcessEventFilter(
-		s.sensor.ProcessCache.ProcessExecEventID,
-		expr, ProcessExecEventTypes)
+		s.sensor.ProcessCache.ProcessExecEventID, expr)
 }
 
 // RegisterProcessExitEventFilter registers a process exit event filter with a
 // subscription.
 func (s *Subscription) RegisterProcessExitEventFilter(expr *expression.Expression) {
 	s.registerProcessEventFilter(
-		s.sensor.ProcessCache.ProcessExitEventID,
-		expr, ProcessExitEventTypes)
+		s.sensor.ProcessCache.ProcessExitEventID, expr)
 }
 
 // RegisterProcessForkEventFilter registers a process fork event filter with a
 // subscription.
 func (s *Subscription) RegisterProcessForkEventFilter(expr *expression.Expression) {
 	s.registerProcessEventFilter(
-		s.sensor.ProcessCache.ProcessForkEventID,
-		expr, ProcessForkEventTypes)
+		s.sensor.ProcessCache.ProcessForkEventID, expr)
 }
 
 // RegisterProcessUpdateEventFilter registers a process update event filter
 // with a subscription.
 func (s *Subscription) RegisterProcessUpdateEventFilter(expr *expression.Expression) {
 	s.registerProcessEventFilter(
-		s.sensor.ProcessCache.ProcessUpdateEventID,
-		expr, ProcessUpdateEventTypes)
+		s.sensor.ProcessCache.ProcessUpdateEventID, expr)
 }

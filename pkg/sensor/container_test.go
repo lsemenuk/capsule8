@@ -15,6 +15,7 @@
 package sensor
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
@@ -28,75 +29,80 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func TestContainerDecoders(t *testing.T) {
+func TestContainerHandlers(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	sample := &perf.SampleRecord{
+	sampleID := perf.SampleID{
 		Time: uint64(sys.CurrentMonotonicRaw()),
 	}
-	data := perf.TraceEventSampleData{
-		"__container__": ContainerInfo{
-			ID:         "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ./",
-			Name:       "capsule8-sensor-container",
-			ImageID:    "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz./",
-			ImageName:  "capsule8-sensor-image",
-			Pid:        872364,
-			ExitCode:   255,
-			Runtime:    ContainerRuntimeDocker,
-			State:      ContainerStateRunning,
-			JSONConfig: "This is the JSON config that isn't actually JSON",
-			OCIConfig:  "This is the OCI config that isn't real",
-		},
+	info := ContainerInfo{
+		ID:         "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ./",
+		Name:       "capsule8-sensor-container",
+		ImageID:    "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz./",
+		ImageName:  "capsule8-sensor-image",
+		Pid:        872364,
+		ExitCode:   255,
+		Runtime:    ContainerRuntimeDocker,
+		State:      ContainerStateRunning,
+		JSONConfig: "This is the JSON config that isn't actually JSON",
+		OCIConfig:  "This is the OCI config that isn't real",
 	}
 
 	type testCase struct {
-		decoder      perf.TraceEventDecoderFn
+		eventid      uint64
+		dispatch     func(perf.SampleID, *ContainerInfo)
 		expectedType interface{}
 	}
 	testCases := []testCase{
 		testCase{
-			decoder:      sensor.ContainerCache.decodeContainerCreatedEvent,
+			eventid:      sensor.ContainerCache.ContainerCreatedEventID,
+			dispatch:     sensor.ContainerCache.dispatchContainerCreatedEvent,
 			expectedType: ContainerCreatedTelemetryEvent{},
 		},
 		testCase{
-			decoder:      sensor.ContainerCache.decodeContainerDestroyedEvent,
+			eventid:      sensor.ContainerCache.ContainerDestroyedEventID,
+			dispatch:     sensor.ContainerCache.dispatchContainerDestroyedEvent,
 			expectedType: ContainerDestroyedTelemetryEvent{},
 		},
 		testCase{
-			decoder:      sensor.ContainerCache.decodeContainerExitedEvent,
+			eventid:      sensor.ContainerCache.ContainerExitedEventID,
+			dispatch:     sensor.ContainerCache.dispatchContainerExitedEvent,
 			expectedType: ContainerExitedTelemetryEvent{},
 		},
 		testCase{
-			decoder:      sensor.ContainerCache.decodeContainerRunningEvent,
+			eventid:      sensor.ContainerCache.ContainerRunningEventID,
+			dispatch:     sensor.ContainerCache.dispatchContainerRunningEvent,
 			expectedType: ContainerRunningTelemetryEvent{},
 		},
 		testCase{
-			decoder:      sensor.ContainerCache.decodeContainerUpdatedEvent,
+			eventid:      sensor.ContainerCache.ContainerUpdatedEventID,
+			dispatch:     sensor.ContainerCache.dispatchContainerUpdatedEvent,
 			expectedType: ContainerUpdatedTelemetryEvent{},
 		},
 	}
 
 	for _, tc := range testCases {
-		data["common_pid"] = int32(sensorPID)
-		i, err := tc.decoder(sample, data)
-		require.Nil(t, i)
-		require.NoError(t, err)
+		s := newTestSubscription(t, sensor)
+		dispatched := false
+		s.dispatchFn = func(event TelemetryEvent) {
+			e, ok := event.(TelemetryEvent)
+			require.True(t, ok)
+			require.IsType(t, tc.expectedType, event)
 
-		delete(data, "common_pid")
-		i, err = tc.decoder(sample, data)
-		require.NotNil(t, i)
-		require.NoError(t, err)
+			ok = testCommonTelemetryEventData(t, sensor, e)
+			require.True(t, ok)
 
-		e, ok := i.(TelemetryEvent)
-		require.True(t, ok)
-		require.IsType(t, tc.expectedType, i)
+			cted := e.CommonTelemetryEventData()
+			assert.Equal(t, info, cted.Container)
+			dispatched = true
+		}
 
-		ok = testCommonTelemetryEventData(t, sensor, e)
-		require.True(t, ok)
+		s.addEventSink(tc.eventid, nil)
+		sensor.eventMap.subscribe(s)
 
-		cted := e.CommonTelemetryEventData()
-		assert.Equal(t, data["__container__"], cted.Container)
+		tc.dispatch(sampleID, &info)
+		require.True(t, dispatched)
 	}
 }
 
@@ -169,6 +175,45 @@ func TestContainerCache(t *testing.T) {
 	assert.Equal(t, ContainerStateExited, info.State)
 }
 
+func TestContainerCacheLostRecordHandler(t *testing.T) {
+	sensor := newUnitTestSensor(t)
+	defer sensor.Stop()
+
+	var (
+		receivedLostEvent bool
+		lostEventType     LostRecordType
+		lostEventCount    uint64
+	)
+
+	s := newTestSubscription(t, sensor)
+	_, err := s.addEventSink(sensor.Monitor().ReserveEventID(), nil)
+	require.NoError(t, err)
+
+	dispatchFn := func(event TelemetryEvent) {
+		if e, ok := event.(LostRecordTelemetryEvent); ok {
+			receivedLostEvent = true
+			lostEventType = e.Type
+			lostEventCount = e.Lost
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s.Run(ctx, dispatchFn)
+
+	expectedLostType := LostRecordTypeContainer
+	expectedLostCount := uint64(238746)
+	sensor.ContainerCache.lostRecordHandler(123, 456, perf.SampleID{},
+		expectedLostCount)
+	cancel()
+
+	if assert.True(t, receivedLostEvent) {
+		assert.Equal(t, expectedLostType, lostEventType)
+		assert.Equal(t, expectedLostCount, lostEventCount)
+	}
+
+	assert.Equal(t, expectedLostCount, sensor.Metrics.KernelSamplesLost)
+}
+
 func verifyContainerEventRegistration(t *testing.T, s *Subscription, count int) {
 	if count > 0 {
 		assert.Len(t, s.eventSinks, count)
@@ -182,11 +227,6 @@ func TestContainerEventRegistration(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	e := expression.Equal(expression.Identifier("foo"), expression.Value("bar"))
-	expr, err := expression.NewExpression(e)
-	require.NotNil(t, expr)
-	require.NoError(t, err)
-
 	names := []string{
 		"RegisterContainerCreatedEventFilter",
 		"RegisterContainerRunningEventFilter",
@@ -198,9 +238,6 @@ func TestContainerEventRegistration(t *testing.T) {
 		s := newTestSubscription(t, sensor)
 		v := reflect.ValueOf(s)
 		m := v.MethodByName(name)
-
-		m.Call([]reflect.Value{reflect.ValueOf(expr)})
-		verifyContainerEventRegistration(t, s, -1)
 
 		var nilExpr *expression.Expression
 		m.Call([]reflect.Value{reflect.ValueOf(nilExpr)})

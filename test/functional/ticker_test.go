@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 	"github.com/golang/glog"
 )
 
@@ -41,25 +41,25 @@ func (tickTest *tickerTest) RunContainer(t *testing.T) {
 	// No container is needed for testing, nothing to do.
 }
 
-func (tickTest *tickerTest) CreateSubscription(t *testing.T) *api.Subscription {
-	tickerEvents := []*api.TickerEventFilter{
-		&api.TickerEventFilter{
+func (tickTest *tickerTest) CreateSubscription(t *testing.T) *telemetryAPI.Subscription {
+	tickerEvents := []*telemetryAPI.TickerEventFilter{
+		&telemetryAPI.TickerEventFilter{
 			Interval: int64(testInterval),
 		},
 	}
 
-	eventFilter := &api.EventFilter{
+	eventFilter := &telemetryAPI.EventFilter{
 		TickerEvents: tickerEvents,
 	}
 
-	return &api.Subscription{
+	return &telemetryAPI.Subscription{
 		EventFilter: eventFilter,
 	}
 }
 
-func (tickTest *tickerTest) HandleTelemetryEvent(t *testing.T, te *api.ReceivedTelemetryEvent) bool {
+func (tickTest *tickerTest) HandleTelemetryEvent(t *testing.T, te *telemetryAPI.ReceivedTelemetryEvent) bool {
 	switch event := te.Event.Event.(type) {
-	case *api.TelemetryEvent_Ticker:
+	case *telemetryAPI.TelemetryEvent_Ticker:
 		if tickTest.count == 0 {
 			tickTest.firstEventNanos = event.Ticker.Nanoseconds
 		}

@@ -24,14 +24,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDecodePerfCounterEvent(t *testing.T) {
+func TestHandlePerfCounterEvent(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
 	s := newTestSubscription(t, sensor)
 
-	sample := &perf.SampleRecord{
-		Time: uint64(sys.CurrentMonotonicRaw()),
+	sample := &perf.Sample{
+		SampleID: perf.SampleID{
+			Time: uint64(sys.CurrentMonotonicRaw()),
+		},
 	}
 	counters := []perf.CounterEventValue{
 		perf.CounterEventValue{
@@ -51,17 +53,22 @@ func TestDecodePerfCounterEvent(t *testing.T) {
 		},
 	}
 
-	i, err := s.decodePerfCounterEvent(sample, counters, 293847, 2340978)
-	require.NotNil(t, i)
-	require.NoError(t, err)
-	e, ok := i.(PerformanceTelemetryEvent)
-	require.True(t, ok)
+	dispatched := false
+	s.dispatchFn = func(event TelemetryEvent) {
+		e, ok := event.(PerformanceTelemetryEvent)
+		require.True(t, ok)
 
-	ok = testCommonTelemetryEventData(t, sensor, e)
-	require.True(t, ok)
-	assert.Equal(t, uint64(293847), e.TotalTimeEnabled)
-	assert.Equal(t, uint64(2340978), e.TotalTimeRunning)
-	assert.Equal(t, counters, e.Counters)
+		ok = testCommonTelemetryEventData(t, sensor, e)
+		require.True(t, ok)
+		assert.Equal(t, uint64(293847), e.TotalTimeEnabled)
+		assert.Equal(t, uint64(2340978), e.TotalTimeRunning)
+		assert.Equal(t, counters, e.Counters)
+		dispatched = true
+	}
+
+	eventid, _ := s.addTestEventSink(t, nil)
+	s.handlePerfCounterEvent(eventid, sample, counters, 293847, 2340978)
+	require.True(t, dispatched)
 }
 
 func verifyRegisterPerformanceEventFilter(t *testing.T, s *Subscription, count int) {

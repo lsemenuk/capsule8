@@ -17,7 +17,7 @@ package functional
 import (
 	"testing"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 	"github.com/golang/glog"
 	"github.com/golang/protobuf/ptypes/wrappers"
 )
@@ -50,10 +50,10 @@ func (st *procStressTest) RunContainer(t *testing.T) {
 	glog.V(2).Infof("Running container %s\n", st.testContainer.ImageID[0:12])
 }
 
-func (st *procStressTest) CreateSubscription(t *testing.T) *api.Subscription {
-	processEvents := []*api.ProcessEventFilter{
-		&api.ProcessEventFilter{
-			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
+func (st *procStressTest) CreateSubscription(t *testing.T) *telemetryAPI.Subscription {
+	processEvents := []*telemetryAPI.ProcessEventFilter{
+		&telemetryAPI.ProcessEventFilter{
+			Type: telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
 			ExecFilename: &wrappers.StringValue{
 				Value: testExecFilename,
 			},
@@ -62,30 +62,30 @@ func (st *procStressTest) CreateSubscription(t *testing.T) *api.Subscription {
 
 	// Subscribing to container created events are currently necessary
 	// to get imageIDs in other events.
-	containerEvents := []*api.ContainerEventFilter{
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
+	containerEvents := []*telemetryAPI.ContainerEventFilter{
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
 		},
 	}
 
-	eventFilter := &api.EventFilter{
+	eventFilter := &telemetryAPI.EventFilter{
 		ContainerEvents: containerEvents,
 		ProcessEvents:   processEvents,
 	}
 
-	return &api.Subscription{
+	return &telemetryAPI.Subscription{
 		EventFilter: eventFilter,
 	}
 }
 
-func (st *procStressTest) HandleTelemetryEvent(t *testing.T, telemetryEvent *api.ReceivedTelemetryEvent) bool {
+func (st *procStressTest) HandleTelemetryEvent(t *testing.T, telemetryEvent *telemetryAPI.ReceivedTelemetryEvent) bool {
 	switch event := telemetryEvent.Event.Event.(type) {
-	case *api.TelemetryEvent_Container:
+	case *telemetryAPI.TelemetryEvent_Container:
 		// Ignore
 
-	case *api.TelemetryEvent_Process:
+	case *telemetryAPI.TelemetryEvent_Process:
 		switch event.Process.Type {
-		case api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC:
+		case telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXEC:
 			if telemetryEvent.Event.ImageId != st.testContainer.ImageID {
 				break
 			}

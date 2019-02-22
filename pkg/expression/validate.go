@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"unicode"
 )
 
@@ -41,30 +42,40 @@ func validateIdentifier(ident string) error {
 	return nil
 }
 
-func validateBitwiseAnd(e binaryExpr) {
+func validateBitwiseAnd(e *binaryExpr) {
 	// lhs must be identifier; rhs must be an integer value
-	if _, ok := e.x.(identExpr); !ok {
+	if _, ok := e.x.(*identExpr); !ok {
 		exprRaise(errors.New("BITWISE-AND lhs must be an identifier"))
 	}
-	if v, ok := e.y.(valueExpr); !ok || !v.isInteger() {
+	if v, ok := e.y.(*valueExpr); !ok || !v.isInteger() {
 		exprRaise(errors.New("BITWISE-AND rhs must be an integer value"))
 	}
 }
 
 func validateKernelFilterNode(e expr) {
 	switch node := e.(type) {
-	case identExpr:
+	case *identExpr:
 		if err := validateIdentifier(node.name); err != nil {
 			exprRaise(err)
 		}
 
-	case valueExpr:
+	case *valueExpr:
 		vt := ValueTypeOf(node.v)
-		if !vt.IsInteger() && !vt.IsString() {
+		switch {
+		case vt.IsInteger():
+			// ok
+		case vt.IsString():
+			// Strings passed to the kernel filter cannot contain
+			// quotation mark characters. It is impossible to get
+			// them recognized by the kernel's parser.
+			if strings.IndexRune(node.v.(string), '"') != -1 {
+				exprRaise(errors.New("String literals cannot contain QUOTATION MARK"))
+			}
+		default:
 			exprRaise(errors.New("Value must be string or integer"))
 		}
 
-	case binaryExpr:
+	case *binaryExpr:
 		switch node.op {
 		case binaryOpLogicalAnd, binaryOpLogicalOr:
 			validateKernelFilterExpr(node.x)
@@ -72,10 +83,10 @@ func validateKernelFilterNode(e expr) {
 
 		case binaryOpEQ:
 			// lhs must be identifier; rhs must be value, can be any type
-			if _, ok := node.x.(identExpr); !ok {
+			if _, ok := node.x.(*identExpr); !ok {
 				exprRaise(errors.New("Comparison lhs must be an identifier"))
 			}
-			if _, ok := node.y.(valueExpr); !ok {
+			if _, ok := node.y.(*valueExpr); !ok {
 				exprRaise(errors.New("Comparison rhs must be a value"))
 			}
 			validateKernelFilterNode(node.x)
@@ -84,10 +95,11 @@ func validateKernelFilterNode(e expr) {
 		case binaryOpNE:
 			// if lhs is bitwise-and, rhs must be integer value 0
 			// if lhs is an identifier, rhs must be value of any type
-			if x, ok := node.x.(binaryExpr); ok && x.op == binaryOpBitwiseAnd {
+			if x, ok := node.x.(*binaryExpr); ok && x.op == binaryOpBitwiseAnd {
 				validateBitwiseAnd(x)
 
-				v, ok := node.y.(valueExpr)
+				var v *valueExpr
+				v, ok = node.y.(*valueExpr)
 				if !ok {
 					exprRaise(errors.New("Rhs of comparison with bitwise-and must be 0"))
 				}
@@ -104,10 +116,10 @@ func validateKernelFilterNode(e expr) {
 					exprRaise(errors.New("Rhs of comparison with bitwise-and must be 0"))
 				}
 			} else {
-				if _, ok := node.x.(identExpr); !ok {
+				if _, ok = node.x.(*identExpr); !ok {
 					exprRaise(errors.New("Comparison lhs must be an identifier"))
 				}
-				if _, ok := node.y.(valueExpr); !ok {
+				if _, ok = node.y.(*valueExpr); !ok {
 					exprRaise(errors.New("Comparison rhs must be a value"))
 				}
 				validateKernelFilterNode(node.x)
@@ -116,10 +128,10 @@ func validateKernelFilterNode(e expr) {
 
 		case binaryOpLT, binaryOpLE, binaryOpGT, binaryOpGE:
 			// lhs must be identifier; rhs must be value of integer type
-			if _, ok := node.x.(identExpr); !ok {
+			if _, ok := node.x.(*identExpr); !ok {
 				exprRaise(errors.New("Comparison lhs must be an identifier"))
 			}
-			if v, ok := node.y.(valueExpr); !ok || !v.isInteger() {
+			if v, ok := node.y.(*valueExpr); !ok || !v.isInteger() {
 				exprRaise(errors.New("Comparison rhs must be an integer value"))
 			}
 			validateKernelFilterNode(node.x)
@@ -127,14 +139,20 @@ func validateKernelFilterNode(e expr) {
 
 		case binaryOpLike:
 			// lhs must be identifier; rhs must be string value
-			if _, ok := node.x.(identExpr); !ok {
+			if _, ok := node.x.(*identExpr); !ok {
 				exprRaise(errors.New("Comparison lhs must be an identifier"))
 			}
-			if v, ok := node.y.(valueExpr); !ok || !v.isString() {
+			if v, ok := node.y.(*valueExpr); !ok || !v.isString() {
 				exprRaise(errors.New("Comparison rhs must be a string value"))
 			}
 			validateKernelFilterNode(node.x)
 			validateKernelFilterNode(node.y)
+		}
+
+	case *unaryExpr:
+		switch node.op {
+		case unaryOpNot:
+			validateKernelFilterNode(node.x)
 		}
 
 	default:
@@ -144,7 +162,7 @@ func validateKernelFilterNode(e expr) {
 
 func validateKernelFilterExpr(e expr) {
 	switch node := e.(type) {
-	case binaryExpr:
+	case *binaryExpr:
 		if node.op == binaryOpBitwiseAnd {
 			validateBitwiseAnd(node)
 		} else {
@@ -170,15 +188,15 @@ func validateKernelFilterTree(e expr) (err error) {
 	return
 }
 
-func validateBinaryExprTypes(e binaryExpr, types FieldTypeMap) (r ValueType) {
+func validateBinaryExprTypes(e *binaryExpr) (r ValueType) {
 	switch e.op {
 	case binaryOpLogicalAnd, binaryOpLogicalOr:
-		lhs := validateExprTypes(e.x, types)
+		lhs := validateExprTypes(e.x)
 		if lhs != ValueTypeBool {
 			exprRaise(fmt.Errorf("Lhs of AND/OR must be type BOOL; got %s",
 				ValueTypeStrings[lhs]))
 		}
-		rhs := validateExprTypes(e.y, types)
+		rhs := validateExprTypes(e.y)
 		if rhs != ValueTypeBool {
 			exprRaise(fmt.Errorf("Rhs of AND/OR must be type BOOL; got %s",
 				ValueTypeStrings[rhs]))
@@ -186,8 +204,8 @@ func validateBinaryExprTypes(e binaryExpr, types FieldTypeMap) (r ValueType) {
 		r = ValueTypeBool
 
 	case binaryOpEQ, binaryOpNE:
-		lhs := validateExprTypes(e.x, types)
-		rhs := validateExprTypes(e.y, types)
+		lhs := validateExprTypes(e.x)
+		rhs := validateExprTypes(e.y)
 		if lhs != rhs {
 			exprRaise(fmt.Errorf("Type mismatch (%s vs. %s)",
 				ValueTypeStrings[lhs], ValueTypeStrings[rhs]))
@@ -195,12 +213,12 @@ func validateBinaryExprTypes(e binaryExpr, types FieldTypeMap) (r ValueType) {
 		r = ValueTypeBool
 
 	case binaryOpLT, binaryOpLE, binaryOpGT, binaryOpGE:
-		lhs := validateExprTypes(e.x, types)
+		lhs := validateExprTypes(e.x)
 		if !lhs.IsNumeric() {
 			exprRaise(fmt.Errorf("Type for %s must be numeric; got %s",
 				binaryOpStrings[e.op], ValueTypeStrings[lhs]))
 		}
-		rhs := validateExprTypes(e.y, types)
+		rhs := validateExprTypes(e.y)
 		if lhs != rhs {
 			exprRaise(fmt.Errorf("Type mismatch (%s vs. %s)",
 				ValueTypeStrings[lhs], ValueTypeStrings[rhs]))
@@ -208,12 +226,12 @@ func validateBinaryExprTypes(e binaryExpr, types FieldTypeMap) (r ValueType) {
 		r = ValueTypeBool
 
 	case binaryOpLike:
-		lhs := validateExprTypes(e.x, types)
+		lhs := validateExprTypes(e.x)
 		if !lhs.IsString() {
 			exprRaise(fmt.Errorf("Type for LIKE must be STRING; got %s",
 				ValueTypeStrings[lhs]))
 		}
-		rhs := validateExprTypes(e.y, types)
+		rhs := validateExprTypes(e.y)
 		if lhs != rhs {
 			exprRaise(fmt.Errorf("Type mismatch (%s vs. %s)",
 				ValueTypeStrings[lhs], ValueTypeStrings[rhs]))
@@ -221,12 +239,12 @@ func validateBinaryExprTypes(e binaryExpr, types FieldTypeMap) (r ValueType) {
 		r = ValueTypeBool
 
 	case binaryOpBitwiseAnd:
-		lhs := validateExprTypes(e.x, types)
+		lhs := validateExprTypes(e.x)
 		if !lhs.IsInteger() {
 			exprRaise(fmt.Errorf("Type for %s must be an integer; got %s",
 				binaryOpStrings[e.op], ValueTypeStrings[lhs]))
 		}
-		rhs := validateExprTypes(e.y, types)
+		rhs := validateExprTypes(e.y)
 		if lhs != rhs {
 			exprRaise(fmt.Errorf("Type mismatch (%s vs. %s)",
 				ValueTypeStrings[lhs], ValueTypeStrings[rhs]))
@@ -238,27 +256,30 @@ func validateBinaryExprTypes(e binaryExpr, types FieldTypeMap) (r ValueType) {
 	return
 }
 
-func validateUnaryExprTypes(e unaryExpr, types FieldTypeMap) (r ValueType) {
+func validateUnaryExprTypes(e *unaryExpr) (r ValueType) {
 	switch e.op {
 	case unaryOpIsNull, unaryOpIsNotNull:
-		validateExprTypes(e.x, types)
+		validateExprTypes(e.x)
 		r = ValueTypeBool
+	case unaryOpNot:
+		r = validateExprTypes(e.x)
+		if r != ValueTypeBool {
+			exprRaise(fmt.Errorf("Operand of NOT must be type BOOL; got %s",
+				ValueTypeStrings[r]))
+		}
+
 	default:
 		exprRaise(fmt.Errorf("Illegal unary op type %d", e.op))
 	}
 	return
 }
 
-func validateExprTypes(e expr, types FieldTypeMap) (r ValueType) {
+func validateExprTypes(e expr) (r ValueType) {
 	switch node := e.(type) {
-	case identExpr:
-		if t, ok := types[node.name]; ok {
-			r = t
-		} else {
-			exprRaise(fmt.Errorf("Undefined identifier %q", node.name))
-		}
+	case *identExpr:
+		r = node.t
 
-	case valueExpr:
+	case *valueExpr:
 		if t := ValueTypeOf(node.v); t != ValueTypeUnspecified {
 			r = t
 		} else {
@@ -266,18 +287,18 @@ func validateExprTypes(e expr, types FieldTypeMap) (r ValueType) {
 				reflect.TypeOf(node.v)))
 		}
 
-	case binaryExpr:
-		r = validateBinaryExprTypes(node, types)
+	case *binaryExpr:
+		r = validateBinaryExprTypes(node)
 
-	case unaryExpr:
-		r = validateUnaryExprTypes(node, types)
+	case *unaryExpr:
+		r = validateUnaryExprTypes(node)
 	default:
 		exprRaise(fmt.Errorf("Unrecognized expression type %s", reflect.TypeOf(e)))
 	}
 	return
 }
 
-func validateTypes(e expr, types FieldTypeMap) (vt ValueType, err error) {
+func validateTypes(e expr) (vt ValueType, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if e, ok := r.(exprError); ok {
@@ -288,6 +309,6 @@ func validateTypes(e expr, types FieldTypeMap) (vt ValueType, err error) {
 		}
 	}()
 
-	vt = validateExprTypes(e, types)
+	vt = validateExprTypes(e)
 	return
 }

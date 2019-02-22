@@ -18,7 +18,7 @@ import (
 	"syscall"
 	"testing"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 	"github.com/capsule8/capsule8/pkg/expression"
 	"github.com/golang/glog"
 	"github.com/golang/protobuf/ptypes/wrappers"
@@ -66,7 +66,7 @@ func (st *syscallTest) RunContainer(t *testing.T) {
 	glog.V(2).Infof("Running container %s\n", st.testContainer.ImageID[0:12])
 }
 
-func (st *syscallTest) CreateSubscription(t *testing.T) *api.Subscription {
+func (st *syscallTest) CreateSubscription(t *testing.T) *telemetryAPI.Subscription {
 	idExpr := expression.Equal(
 		expression.Identifier("id"),
 		expression.Value(int64(syscall.SYS_ALARM)))
@@ -81,41 +81,41 @@ func (st *syscallTest) CreateSubscription(t *testing.T) *api.Subscription {
 			expression.Identifier("ret"),
 			expression.Value(int64(alarmSeconds2))))
 
-	syscallEvents := []*api.SyscallEventFilter{
-		&api.SyscallEventFilter{
-			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
+	syscallEvents := []*telemetryAPI.SyscallEventFilter{
+		&telemetryAPI.SyscallEventFilter{
+			Type: telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
 			Id:   &wrappers.Int64Value{Value: syscall.SYS_ALARM},
 			Arg0: &wrappers.UInt64Value{Value: alarmSeconds1},
 		},
-		&api.SyscallEventFilter{
-			Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT,
+		&telemetryAPI.SyscallEventFilter{
+			Type: telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT,
 			Id:   &wrappers.Int64Value{Value: syscall.SYS_ALARM},
 			Ret:  &wrappers.Int64Value{Value: alarmSeconds1},
 		},
-		&api.SyscallEventFilter{
-			Type:             api.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
+		&telemetryAPI.SyscallEventFilter{
+			Type:             telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
 			FilterExpression: enterExpr,
 		},
-		&api.SyscallEventFilter{
-			Type:             api.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT,
+		&telemetryAPI.SyscallEventFilter{
+			Type:             telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT,
 			FilterExpression: exitExpr,
 		},
 	}
 
-	eventFilter := &api.EventFilter{
+	eventFilter := &telemetryAPI.EventFilter{
 		SyscallEvents: syscallEvents,
 	}
 
-	return &api.Subscription{
+	return &telemetryAPI.Subscription{
 		EventFilter: eventFilter,
 	}
 }
 
-func (st *syscallTest) HandleTelemetryEvent(t *testing.T, te *api.ReceivedTelemetryEvent) bool {
+func (st *syscallTest) HandleTelemetryEvent(t *testing.T, te *telemetryAPI.ReceivedTelemetryEvent) bool {
 	switch event := te.Event.Event.(type) {
-	case *api.TelemetryEvent_Container:
+	case *telemetryAPI.TelemetryEvent_Container:
 		switch event.Container.Type {
-		case api.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED:
+		case telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED:
 			return true
 
 		default:
@@ -123,14 +123,14 @@ func (st *syscallTest) HandleTelemetryEvent(t *testing.T, te *api.ReceivedTeleme
 			return false
 		}
 
-	case *api.TelemetryEvent_Syscall:
+	case *telemetryAPI.TelemetryEvent_Syscall:
 		if event.Syscall.Id != syscall.SYS_ALARM {
 			t.Errorf("Expected syscall number %d, got %d\n",
 				syscall.SYS_ALARM, event.Syscall.Id)
 		}
 
 		switch event.Syscall.Type {
-		case api.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER:
+		case telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER:
 			if event.Syscall.Arg0 == alarmSeconds1 {
 				st.sawAlarm1Enter = true
 			} else if event.Syscall.Arg0 == alarmSeconds2 {
@@ -142,7 +142,7 @@ func (st *syscallTest) HandleTelemetryEvent(t *testing.T, te *api.ReceivedTeleme
 				return false
 			}
 
-		case api.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT:
+		case telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT:
 			if event.Syscall.Ret == alarmSeconds1 {
 				st.sawAlarm1Exit = true
 			} else if event.Syscall.Ret == alarmSeconds2 {

@@ -16,51 +16,52 @@ package procfs
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestNewFileSystem(t *testing.T) {
 	fs1, err := NewFileSystem("")
-	ok(t, err)
+	assert.NoError(t, err)
 	fs2, err := NewFileSystem("")
-	ok(t, err)
-	assert(t, fs1 == fs2,
-		"Default procfs is not a singleton")
-	assert(t, fs1.MountPoint == "/proc",
+	assert.NoError(t, err)
+	assert.Equal(t, fs1, fs2, "Default procfs is not a singleton")
+	assert.Equalf(t, "/proc", fs1.MountPoint,
 		"Default procfs filesystem is mounted at %q", fs1.MountPoint)
 }
 
 func TestBootID(t *testing.T) {
 	fs, err := NewFileSystem("testdata/proc")
-	ok(t, err)
+	assert.NoError(t, err)
 
 	id := fs.BootID()
-	equals(t, "8eb7a4c9-0b6f-4d7f-8f60-98c88eedf67c", id)
+	assert.Equal(t, "8eb7a4c9-0b6f-4d7f-8f60-98c88eedf67c", id)
 }
 
 func TestMaxPID(t *testing.T) {
 	fs, err := NewFileSystem("testdata/proc")
-	ok(t, err)
+	assert.NoError(t, err)
 
 	max := fs.MaxPID()
-	equals(t, uint(131072), max)
+	assert.Equal(t, uint(131072), max)
 }
 
 func TestNumCPU(t *testing.T) {
 	fs, err := NewFileSystem("testdata/proc")
-	ok(t, err)
+	assert.NoError(t, err)
 
 	ncpu := fs.NumCPU()
-	equals(t, int(2), ncpu)
+	assert.Equal(t, int(2), ncpu)
 }
 
 func TestReadFile(t *testing.T) {
 	fs, err := NewFileSystem("testdata/proc")
-	ok(t, err)
+	assert.NoError(t, err)
 
 	expectedBytes := []byte{'1', '3', '1', '0', '7', '2', '\n'}
 
 	actualBytes, err := fs.ReadFile("sys/kernel/pid_max")
-	ok(t, err)
+	assert.NoError(t, err)
 
-	equals(t, expectedBytes, actualBytes)
+	assert.Equal(t, expectedBytes, actualBytes)
 }

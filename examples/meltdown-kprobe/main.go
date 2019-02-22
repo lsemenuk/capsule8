@@ -26,7 +26,7 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 	"github.com/capsule8/capsule8/pkg/expression"
 )
 
@@ -56,7 +56,7 @@ func dialer(addr string, timeout time.Duration) (net.Conn, error) {
 	return net.DialTimeout(network, address, timeout)
 }
 
-func createSubscription() *api.Subscription {
+func createSubscription() *telemetryAPI.Subscription {
 	arguments := make(map[string]string)
 
 	arguments["signal"] = "%di:u64"
@@ -70,20 +70,20 @@ func createSubscription() *api.Subscription {
 			expression.Identifier("address"),
 			expression.Value(uint64(0xffff000000000000))))
 
-	kernelCallEvents := []*api.KernelFunctionCallFilter{
-		&api.KernelFunctionCallFilter{
-			Type:             api.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_ENTER,
+	kernelCallEvents := []*telemetryAPI.KernelFunctionCallFilter{
+		&telemetryAPI.KernelFunctionCallFilter{
+			Type:             telemetryAPI.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_ENTER,
 			Symbol:           "force_sig_info",
 			Arguments:        arguments,
 			FilterExpression: filterExpression,
 		},
 	}
 
-	eventFilter := &api.EventFilter{
+	eventFilter := &telemetryAPI.EventFilter{
 		KernelEvents: kernelCallEvents,
 	}
 
-	sub := &api.Subscription{
+	sub := &telemetryAPI.Subscription{
 		EventFilter: eventFilter,
 	}
 
@@ -98,14 +98,14 @@ func main() {
 		grpc.WithDialer(dialer),
 		grpc.WithInsecure())
 
-	c := api.NewTelemetryServiceClient(conn)
+	c := telemetryAPI.NewTelemetryServiceClient(conn)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "grpc.Dial: %s\n", err)
 		os.Exit(1)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	stream, err := c.GetEvents(ctx, &api.GetEventsRequest{
+	stream, err := c.GetEvents(ctx, &telemetryAPI.GetEventsRequest{
 		Subscription: createSubscription(),
 	})
 
@@ -124,7 +124,8 @@ func main() {
 	}()
 
 	for {
-		ev, err := stream.Recv()
+		var ev *telemetryAPI.GetEventsResponse
+		ev, err = stream.Recv()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Recv: %s\n", err)
 			os.Exit(1)

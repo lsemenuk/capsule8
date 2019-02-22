@@ -78,6 +78,7 @@ message TelemetryEvent {
                 KernelFunctionCallEvent kernel_call = 13;
                 NetworkEvent network                = 14;
                 PerformanceEvent performance        = 15;
+                UserFunctionCallEvent user_call     = 16;
 
                 //
                 // System-level events (containers, systemd, etc)
@@ -90,6 +91,7 @@ message TelemetryEvent {
                 //
                 ChargenEvent chargen = 100;
                 TickerEvent ticker   = 101;
+                LostRecordEvent lost = 102;
         }
 
         // Unix tid of the process thread associated with event
@@ -128,6 +130,71 @@ message TickerEvent {
         //
         // https://golang.org/pkg/time/#Time.UnixNano
         int64 nanoseconds = 2;
+}
+
+enum LostRecordEventType {
+        // LOST_RECORD_EVENT_TYPE_UNKNOWN is a lost record of unknown type.
+        LOST_RECORD_EVENT_TYPE_UNKNOWN = 0;
+        // LOST_RECORD_EVENT_TYPE_SUBSCRIPTION is a lost record from a
+        // subscription. It may include kprobes, uprobes, network events,
+        // syscalls, etc. but it does not include meta events like process,
+        // container, or file monitoring events. This type is only ever sent to
+        // a specific subscription that has lost a kernel generated event.
+        LOST_RECORD_EVENT_TYPE_SUBSCRIPTION = 1;
+        // LOST_RECORD_EVENT_TYPE_PROCESS is a lost record relating to process
+        // meta events. This type is broadcast to all subscriptions, regardless
+        // of whether they've explicitly subscribed to process events or not,
+        // because it affects everything.
+        LOST_RECORD_EVENT_TYPE_PROCESS = 2;
+        // LOST_RECORD_EVENT_TYPE_CONTAINER is a lost record relating to
+        // container meta events. This type is broadcast to all subscriptions,
+        // regardless of whether they've explicitly subscribed to process events
+        // or not, because it affects everything.
+        LOST_RECORD_EVENT_TYPE_CONTAINER = 3;
+        // LOST_RECORD_EVENT_TYPE_FILE_CREATE is a lost record relating to file
+        // create events. It is only sent to subscriptions that are subscribed
+        // to file create events.
+        LOST_RECORD_EVENT_TYPE_FILE_CREATE = 4;
+        // LOST_RECORD_EVENT_TYPE_FILE_DELETE is a lost record relating to file
+        // delete events. It is only sent to subscriptions that are subscribed
+        // to file delete events.
+        LOST_RECORD_EVENT_TYPE_FILE_DELETE = 5;
+        // LOST_RECORD_EVENT_TYPE_FILE_LINK is a lost record relating to file
+        // link events. It is only sent to subscriptions that are subscribed to
+        // file link events.
+        LOST_RECORD_EVENT_TYPE_FILE_LINK = 6;
+        // LOST_RECORD_EVENT_TYPE_FILE_SYMLINK is a lost record relating to file
+        // symlink events. It is only sent to subscriptions that are subscribed
+        // to file link events.
+        LOST_RECORD_EVENT_TYPE_FILE_SYMLINK = 7;
+        // LOST_RECORD_EVENT_TYPE_FILE_OPEN_MODIFY is a lost record relating to
+        // file open modify events. It is only sent to subscriptions that are
+        // subscribed to file open modify events.
+        LOST_RECORD_EVENT_TYPE_FILE_OPEN_MODIFY = 8;
+        // LOST_RECORD_EVENT_TYPE_FILE_CLOSE_MODIY is a lost record relating to
+        // file close modify events. It is only sent to subscriptions that are
+        // subscribed to file close modify events.
+        LOST_RECORD_EVENT_TYPE_FILE_CLOSE_MODIFY = 9;
+        // LOST_RECORD_EVENT_TYPE_FILE_MODIFY is a lost record relating to file
+        // modify events. It is only sent to subscriptions that are subscribed
+        // to file modify events.
+        LOST_RECORD_EVENT_TYPE_FILE_MODIFY = 10;
+        // LOST_RECORD_EVENT_TYPE_FILE_RENAME is a lost record relating to file
+        // rename events. It is only sent to subscriptions that are subscribed
+        // to file rename events.
+        LOST_RECORD_EVENT_TYPE_FILE_RENAME = 11;
+        // LOST_RECORD_EVENT_TYPE_FILE_ATTRIBUTE_CHANGE is a lost record
+        // relating to file attribute change events. It is only sent to
+        // subscriptions that are subscribed to file attribute change events.
+        LOST_RECORD_EVENT_TYPE_FILE_ATTRIBUTE_CHANGE = 12;
+}
+
+message LostRecordEvent {
+        // Number of lost records observed
+        uint64 lost = 1;
+
+        // Type of events lost
+        LostRecordEventType type = 2;
 }
 
 enum ContainerEventType {
@@ -213,6 +280,14 @@ message ProcessEvent {
         // Present when the event is a fork event. This is the Sensor's process
         // ID of the new child process.
         string fork_child_id = 11;
+
+        // Present when the event is a fork event. This is the flags parameter
+        // passed to sys_clone.
+        uint64 fork_clone_flags = 12;
+
+        // Present when the event is a fork event. This is the stack_start
+        // parameter passed to sys_clone.
+        uint64 fork_stack_start = 13;
 
         // Present when the event is an exec event. This is the filename of the
         // executable that was executed.
@@ -301,6 +376,30 @@ enum FileEventType {
 
         // The event is a file open event
         FILE_EVENT_TYPE_OPEN = 1;
+
+        // The event is a file create event
+        FILE_EVENT_TYPE_CREATE = 2;
+
+        // The event is a file delete event
+        FILE_EVENT_TYPE_DELETE = 3;
+
+        // The event is a file link event
+        FILE_EVENT_TYPE_LINK = 4;
+
+        // The event is a file open for modify event
+        FILE_EVENT_TYPE_OPEN_FOR_MODIFY = 5;
+
+        // The event is a file rename event
+        FILE_EVENT_TYPE_RENAME = 6;
+
+        // The event is a file modify event
+        FILE_EVENT_TYPE_MODIFY = 7;
+
+        // The event is a file close for modify event
+        FILE_EVENT_TYPE_CLOSE_FOR_MODIFY = 8;
+
+        // The event is a attribute change event
+        FILE_EVENT_TYPE_ATTRIBUTE_CHANGE = 9;
 }
 
 // FileEvent describes an event that occurred related to file operations
@@ -309,8 +408,8 @@ message FileEvent {
         // The type of event described by this FileEvent message
         FileEventType type = 1;
 
-        // Present when the event is a file open event. This is the filename of
-        // the file being opened.
+        // Present when the event is a file create, delete, link, modify, or
+        // open event. This is the filename of the file being affected.
         string filename = 10;
 
         // Present when the event is a file open event. This is the set of
@@ -318,9 +417,29 @@ message FileEvent {
         // etc.).
         sint32 open_flags = 11;
 
-        // Present when the event is a file open event. This is the set of file
-        // permissions used in a creat(2) system call.
+        // Present when the event is a file create or open event. This is the
+        // set of file permissions used in a creat(2) system call.
         sint32 open_mode = 12;
+
+        // Present when the event is a file link event. This is the name of the
+        // file being linked to.
+        string source_file = 13;
+
+        // Present when the event is a file link event. This is the name of the
+        // file linking to source the source file.
+        string target_file = 14;
+
+        // Present when the event is a file link event. This is true if the
+        // link is a symlink; otherwise, it is a hard link.
+        bool symlink = 15;
+
+        // Present when the event is a file rename event. This is the original
+        // name of the file being renamed.
+        string oldname = 16;
+
+        // Present when the event is a file rename event. This is the new name
+        // of the file being renamed.
+        string newname = 17;
 }
 
 message Process {
@@ -400,7 +519,84 @@ message KernelFunctionCallEvent {
                 };
         };
 
-        // Label repeated w/ a `mapEntry` option set to `true`.
+        // This is a map of argument names and values. The keys are strings
+        // that are the names of the arguments, and the values are the actual
+        // values for each field.
+        map<string, FieldValue> arguments = 1;
+}
+
+// Possible UserFunctionCallEvent types
+enum UserFunctionCallEventType {
+        // The type of event is unknown
+        USER_FUNCTION_CALL_EVENT_TYPE_UNKNOWN = 0;
+
+        // The event is a user function being entered.
+        USER_FUNCTION_CALL_EVENT_TYPE_ENTER = 1;
+
+        // The event is a user function being exited.
+        USER_FUNCTION_CALL_EVENT_TYPE_EXIT = 2;
+}
+
+// UserFunctionCallEvent describes an event that occurred related to user
+// functions being entered or exited.
+message UserFunctionCallEvent {
+        // Possible field types
+        enum FieldType {
+                // The field type is unknown
+                UNKNOWN = 0;
+
+                // The field type is an array of bytes
+                BYTES = 1;
+
+                // The field type is a string
+                STRING = 2;
+
+                // The field type is a signed 8-bit integer
+                SINT8 = 3;
+
+                // The field type is a signed 16-bit integer
+                SINT16 = 4;
+
+                // The field type is a signed 32-bit integer
+                SINT32 = 5;
+
+                // The field type is a signed 64-bit integer
+                SINT64 = 6;
+
+                // The field type is an unsigned 8-bit integer
+                UINT8 = 7;
+
+                // The field type is an unsigned 16-bit integer
+                UINT16 = 8;
+
+                // The field type is an unsigned 32-bit integer
+                UINT32 = 9;
+
+                // The field type is an unsigned 64-bit integer
+                UINT64 = 10;
+        }
+
+        // The representation of a field value, which is composed of type
+        // information and the value itself.
+        message FieldValue {
+                // The type represented by this field value.
+                FieldType field_type = 1;
+
+                oneof value {
+                        // An array of bytes
+                        bytes bytes_value = 2;
+
+                        // A string
+                        string string_value = 3;
+
+                        // A signed value (8-bit, 16-bit, 32-bit, or 64-bit)
+                        sint64 signed_value = 4;
+
+                        // An unsigned value (8-bit, 16--bit, 32-bit, or 64-bit)
+                        uint64 unsigned_value = 5;
+                };
+        };
+
         // This is a map of argument names and values. The keys are strings
         // that are the names of the arguments, and the values are the actual
         // values for each field.
