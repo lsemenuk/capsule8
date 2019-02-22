@@ -320,7 +320,7 @@ func (s *Sensor) Start() error {
 
 	s.kallsyms, err = s.ProcFS.KernelTextSymbolNames()
 	if err != nil {
-		glog.Warning("Could not load kernel symbols: %v", err)
+		glog.Warningf("Could not load kernel symbols: %v", err)
 	}
 
 	s.ContainerCache = NewContainerCache(s)

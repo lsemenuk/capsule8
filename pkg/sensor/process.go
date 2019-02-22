@@ -1189,7 +1189,7 @@ func (pc *ProcessInfoCache) decodeCgroupProcsWrite(
 			// If there's an error parsing data written to this file, we
 			// want to know about it so that we can deal with it. Use a
 			// high logging level to ensure that.
-			glog.Warning("Error parsing pid written to cgroup.procs: %v", err)
+			glog.Warningf("Error parsing pid written to cgroup.procs: %v", err)
 			return nil, nil
 		}
 	} else if v, ok := data["tgid"].(uint64); ok {
