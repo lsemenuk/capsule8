@@ -12,6 +12,109 @@ var _ = proto.Marshal
 var _ = fmt.Errorf
 var _ = math.Inf
 
+// This is a compile-time assertion to ensure that this generated file
+// is compatible with the proto package it is being compiled against.
+// A compilation error at this line likely means your copy of the
+// proto package needs to be updated.
+const _ = proto.ProtoPackageIsVersion2 // please upgrade the proto package
+
+type LostRecordEventType int32
+
+const (
+	// LOST_RECORD_EVENT_TYPE_UNKNOWN is a lost record of unknown type.
+	LostRecordEventType_LOST_RECORD_EVENT_TYPE_UNKNOWN LostRecordEventType = 0
+	// LOST_RECORD_EVENT_TYPE_SUBSCRIPTION is a lost record from a
+	// subscription. It may include kprobes, uprobes, network events,
+	// syscalls, etc. but it does not include meta events like process,
+	// container, or file monitoring events. This type is only ever sent to
+	// a specific subscription that has lost a kernel generated event.
+	LostRecordEventType_LOST_RECORD_EVENT_TYPE_SUBSCRIPTION LostRecordEventType = 1
+	// LOST_RECORD_EVENT_TYPE_PROCESS is a lost record relating to process
+	// meta events. This type is broadcast to all subscriptions, regardless
+	// of whether they've explicitly subscribed to process events or not,
+	// because it affects everything.
+	LostRecordEventType_LOST_RECORD_EVENT_TYPE_PROCESS LostRecordEventType = 2
+	// LOST_RECORD_EVENT_TYPE_CONTAINER is a lost record relating to
+	// container meta events. This type is broadcast to all subscriptions,
+	// regardless of whether they've explicitly subscribed to process events
+	// or not, because it affects everything.
+	LostRecordEventType_LOST_RECORD_EVENT_TYPE_CONTAINER LostRecordEventType = 3
+	// LOST_RECORD_EVENT_TYPE_FILE_CREATE is a lost record relating to file
+	// create events. It is only sent to subscriptions that are subscribed
+	// to file create events.
+	LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_CREATE LostRecordEventType = 4
+	// LOST_RECORD_EVENT_TYPE_FILE_DELETE is a lost record relating to file
+	// delete events. It is only sent to subscriptions that are subscribed
+	// to file delete events.
+	LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_DELETE LostRecordEventType = 5
+	// LOST_RECORD_EVENT_TYPE_FILE_LINK is a lost record relating to file
+	// link events. It is only sent to subscriptions that are subscribed to
+	// file link events.
+	LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_LINK LostRecordEventType = 6
+	// LOST_RECORD_EVENT_TYPE_FILE_SYMLINK is a lost record relating to file
+	// symlink events. It is only sent to subscriptions that are subscribed
+	// to file link events.
+	LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_SYMLINK LostRecordEventType = 7
+	// LOST_RECORD_EVENT_TYPE_FILE_OPEN_MODIFY is a lost record relating to
+	// file open modify events. It is only sent to subscriptions that are
+	// subscribed to file open modify events.
+	LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_OPEN_MODIFY LostRecordEventType = 8
+	// LOST_RECORD_EVENT_TYPE_FILE_CLOSE_MODIY is a lost record relating to
+	// file close modify events. It is only sent to subscriptions that are
+	// subscribed to file close modify events.
+	LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_CLOSE_MODIFY LostRecordEventType = 9
+	// LOST_RECORD_EVENT_TYPE_FILE_MODIFY is a lost record relating to file
+	// modify events. It is only sent to subscriptions that are subscribed
+	// to file modify events.
+	LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_MODIFY LostRecordEventType = 10
+	// LOST_RECORD_EVENT_TYPE_FILE_RENAME is a lost record relating to file
+	// rename events. It is only sent to subscriptions that are subscribed
+	// to file rename events.
+	LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_RENAME LostRecordEventType = 11
+	// LOST_RECORD_EVENT_TYPE_FILE_ATTRIBUTE_CHANGE is a lost record
+	// relating to file attribute change events. It is only sent to
+	// subscriptions that are subscribed to file attribute change events.
+	LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_ATTRIBUTE_CHANGE LostRecordEventType = 12
+)
+
+var LostRecordEventType_name = map[int32]string{
+	0:  "LOST_RECORD_EVENT_TYPE_UNKNOWN",
+	1:  "LOST_RECORD_EVENT_TYPE_SUBSCRIPTION",
+	2:  "LOST_RECORD_EVENT_TYPE_PROCESS",
+	3:  "LOST_RECORD_EVENT_TYPE_CONTAINER",
+	4:  "LOST_RECORD_EVENT_TYPE_FILE_CREATE",
+	5:  "LOST_RECORD_EVENT_TYPE_FILE_DELETE",
+	6:  "LOST_RECORD_EVENT_TYPE_FILE_LINK",
+	7:  "LOST_RECORD_EVENT_TYPE_FILE_SYMLINK",
+	8:  "LOST_RECORD_EVENT_TYPE_FILE_OPEN_MODIFY",
+	9:  "LOST_RECORD_EVENT_TYPE_FILE_CLOSE_MODIFY",
+	10: "LOST_RECORD_EVENT_TYPE_FILE_MODIFY",
+	11: "LOST_RECORD_EVENT_TYPE_FILE_RENAME",
+	12: "LOST_RECORD_EVENT_TYPE_FILE_ATTRIBUTE_CHANGE",
+}
+var LostRecordEventType_value = map[string]int32{
+	"LOST_RECORD_EVENT_TYPE_UNKNOWN":               0,
+	"LOST_RECORD_EVENT_TYPE_SUBSCRIPTION":          1,
+	"LOST_RECORD_EVENT_TYPE_PROCESS":               2,
+	"LOST_RECORD_EVENT_TYPE_CONTAINER":             3,
+	"LOST_RECORD_EVENT_TYPE_FILE_CREATE":           4,
+	"LOST_RECORD_EVENT_TYPE_FILE_DELETE":           5,
+	"LOST_RECORD_EVENT_TYPE_FILE_LINK":             6,
+	"LOST_RECORD_EVENT_TYPE_FILE_SYMLINK":          7,
+	"LOST_RECORD_EVENT_TYPE_FILE_OPEN_MODIFY":      8,
+	"LOST_RECORD_EVENT_TYPE_FILE_CLOSE_MODIFY":     9,
+	"LOST_RECORD_EVENT_TYPE_FILE_MODIFY":           10,
+	"LOST_RECORD_EVENT_TYPE_FILE_RENAME":           11,
+	"LOST_RECORD_EVENT_TYPE_FILE_ATTRIBUTE_CHANGE": 12,
+}
+
+func (x LostRecordEventType) String() string {
+	return proto.EnumName(LostRecordEventType_name, int32(x))
+}
+func (LostRecordEventType) EnumDescriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{0}
+}
+
 type ContainerEventType int32
 
 const (
@@ -43,7 +146,9 @@ var ContainerEventType_value = map[string]int32{
 func (x ContainerEventType) String() string {
 	return proto.EnumName(ContainerEventType_name, int32(x))
 }
-func (ContainerEventType) EnumDescriptor() ([]byte, []int) { return fileDescriptor1, []int{0} }
+func (ContainerEventType) EnumDescriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{1}
+}
 
 // Possible ProcessEvent types
 type ProcessEventType int32
@@ -79,7 +184,9 @@ var ProcessEventType_value = map[string]int32{
 func (x ProcessEventType) String() string {
 	return proto.EnumName(ProcessEventType_name, int32(x))
 }
-func (ProcessEventType) EnumDescriptor() ([]byte, []int) { return fileDescriptor1, []int{1} }
+func (ProcessEventType) EnumDescriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{2}
+}
 
 // Possible SyscallEvent types
 type SyscallEventType int32
@@ -107,7 +214,9 @@ var SyscallEventType_value = map[string]int32{
 func (x SyscallEventType) String() string {
 	return proto.EnumName(SyscallEventType_name, int32(x))
 }
-func (SyscallEventType) EnumDescriptor() ([]byte, []int) { return fileDescriptor1, []int{2} }
+func (SyscallEventType) EnumDescriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{3}
+}
 
 // Possible FileEvent types
 type FileEventType int32
@@ -117,21 +226,55 @@ const (
 	FileEventType_FILE_EVENT_TYPE_UNKNOWN FileEventType = 0
 	// The event is a file open event
 	FileEventType_FILE_EVENT_TYPE_OPEN FileEventType = 1
+	// The event is a file create event
+	FileEventType_FILE_EVENT_TYPE_CREATE FileEventType = 2
+	// The event is a file delete event
+	FileEventType_FILE_EVENT_TYPE_DELETE FileEventType = 3
+	// The event is a file link event
+	FileEventType_FILE_EVENT_TYPE_LINK FileEventType = 4
+	// The event is a file open for modify event
+	FileEventType_FILE_EVENT_TYPE_OPEN_FOR_MODIFY FileEventType = 5
+	// The event is a file rename event
+	FileEventType_FILE_EVENT_TYPE_RENAME FileEventType = 6
+	// The event is a file modify event
+	FileEventType_FILE_EVENT_TYPE_MODIFY FileEventType = 7
+	// The event is a file close for modify event
+	FileEventType_FILE_EVENT_TYPE_CLOSE_FOR_MODIFY FileEventType = 8
+	// The event is a attribute change event
+	FileEventType_FILE_EVENT_TYPE_ATTRIBUTE_CHANGE FileEventType = 9
 )
 
 var FileEventType_name = map[int32]string{
 	0: "FILE_EVENT_TYPE_UNKNOWN",
 	1: "FILE_EVENT_TYPE_OPEN",
+	2: "FILE_EVENT_TYPE_CREATE",
+	3: "FILE_EVENT_TYPE_DELETE",
+	4: "FILE_EVENT_TYPE_LINK",
+	5: "FILE_EVENT_TYPE_OPEN_FOR_MODIFY",
+	6: "FILE_EVENT_TYPE_RENAME",
+	7: "FILE_EVENT_TYPE_MODIFY",
+	8: "FILE_EVENT_TYPE_CLOSE_FOR_MODIFY",
+	9: "FILE_EVENT_TYPE_ATTRIBUTE_CHANGE",
 }
 var FileEventType_value = map[string]int32{
-	"FILE_EVENT_TYPE_UNKNOWN": 0,
-	"FILE_EVENT_TYPE_OPEN":    1,
+	"FILE_EVENT_TYPE_UNKNOWN":          0,
+	"FILE_EVENT_TYPE_OPEN":             1,
+	"FILE_EVENT_TYPE_CREATE":           2,
+	"FILE_EVENT_TYPE_DELETE":           3,
+	"FILE_EVENT_TYPE_LINK":             4,
+	"FILE_EVENT_TYPE_OPEN_FOR_MODIFY":  5,
+	"FILE_EVENT_TYPE_RENAME":           6,
+	"FILE_EVENT_TYPE_MODIFY":           7,
+	"FILE_EVENT_TYPE_CLOSE_FOR_MODIFY": 8,
+	"FILE_EVENT_TYPE_ATTRIBUTE_CHANGE": 9,
 }
 
 func (x FileEventType) String() string {
 	return proto.EnumName(FileEventType_name, int32(x))
 }
-func (FileEventType) EnumDescriptor() ([]byte, []int) { return fileDescriptor1, []int{3} }
+func (FileEventType) EnumDescriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{4}
+}
 
 // Possible KernelFunctionCallEvent types
 type KernelFunctionCallEventType int32
@@ -159,7 +302,39 @@ var KernelFunctionCallEventType_value = map[string]int32{
 func (x KernelFunctionCallEventType) String() string {
 	return proto.EnumName(KernelFunctionCallEventType_name, int32(x))
 }
-func (KernelFunctionCallEventType) EnumDescriptor() ([]byte, []int) { return fileDescriptor1, []int{4} }
+func (KernelFunctionCallEventType) EnumDescriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{5}
+}
+
+// Possible UserFunctionCallEvent types
+type UserFunctionCallEventType int32
+
+const (
+	// The type of event is unknown
+	UserFunctionCallEventType_USER_FUNCTION_CALL_EVENT_TYPE_UNKNOWN UserFunctionCallEventType = 0
+	// The event is a user function being entered.
+	UserFunctionCallEventType_USER_FUNCTION_CALL_EVENT_TYPE_ENTER UserFunctionCallEventType = 1
+	// The event is a user function being exited.
+	UserFunctionCallEventType_USER_FUNCTION_CALL_EVENT_TYPE_EXIT UserFunctionCallEventType = 2
+)
+
+var UserFunctionCallEventType_name = map[int32]string{
+	0: "USER_FUNCTION_CALL_EVENT_TYPE_UNKNOWN",
+	1: "USER_FUNCTION_CALL_EVENT_TYPE_ENTER",
+	2: "USER_FUNCTION_CALL_EVENT_TYPE_EXIT",
+}
+var UserFunctionCallEventType_value = map[string]int32{
+	"USER_FUNCTION_CALL_EVENT_TYPE_UNKNOWN": 0,
+	"USER_FUNCTION_CALL_EVENT_TYPE_ENTER":   1,
+	"USER_FUNCTION_CALL_EVENT_TYPE_EXIT":    2,
+}
+
+func (x UserFunctionCallEventType) String() string {
+	return proto.EnumName(UserFunctionCallEventType_name, int32(x))
+}
+func (UserFunctionCallEventType) EnumDescriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{6}
+}
 
 // Possible network event types
 type NetworkEventType int32
@@ -230,7 +405,9 @@ var NetworkEventType_value = map[string]int32{
 func (x NetworkEventType) String() string {
 	return proto.EnumName(NetworkEventType_name, int32(x))
 }
-func (NetworkEventType) EnumDescriptor() ([]byte, []int) { return fileDescriptor1, []int{5} }
+func (NetworkEventType) EnumDescriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{7}
+}
 
 // Possible performance event types
 type PerformanceEventType int32
@@ -262,7 +439,9 @@ var PerformanceEventType_value = map[string]int32{
 func (x PerformanceEventType) String() string {
 	return proto.EnumName(PerformanceEventType_name, int32(x))
 }
-func (PerformanceEventType) EnumDescriptor() ([]byte, []int) { return fileDescriptor1, []int{6} }
+func (PerformanceEventType) EnumDescriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{8}
+}
 
 // Possible field types
 type KernelFunctionCallEvent_FieldType int32
@@ -323,47 +502,109 @@ func (x KernelFunctionCallEvent_FieldType) String() string {
 	return proto.EnumName(KernelFunctionCallEvent_FieldType_name, int32(x))
 }
 func (KernelFunctionCallEvent_FieldType) EnumDescriptor() ([]byte, []int) {
-	return fileDescriptor1, []int{8, 0}
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{9, 0}
+}
+
+// Possible field types
+type UserFunctionCallEvent_FieldType int32
+
+const (
+	// The field type is unknown
+	UserFunctionCallEvent_UNKNOWN UserFunctionCallEvent_FieldType = 0
+	// The field type is an array of bytes
+	UserFunctionCallEvent_BYTES UserFunctionCallEvent_FieldType = 1
+	// The field type is a string
+	UserFunctionCallEvent_STRING UserFunctionCallEvent_FieldType = 2
+	// The field type is a signed 8-bit integer
+	UserFunctionCallEvent_SINT8 UserFunctionCallEvent_FieldType = 3
+	// The field type is a signed 16-bit integer
+	UserFunctionCallEvent_SINT16 UserFunctionCallEvent_FieldType = 4
+	// The field type is a signed 32-bit integer
+	UserFunctionCallEvent_SINT32 UserFunctionCallEvent_FieldType = 5
+	// The field type is a signed 64-bit integer
+	UserFunctionCallEvent_SINT64 UserFunctionCallEvent_FieldType = 6
+	// The field type is an unsigned 8-bit integer
+	UserFunctionCallEvent_UINT8 UserFunctionCallEvent_FieldType = 7
+	// The field type is an unsigned 16-bit integer
+	UserFunctionCallEvent_UINT16 UserFunctionCallEvent_FieldType = 8
+	// The field type is an unsigned 32-bit integer
+	UserFunctionCallEvent_UINT32 UserFunctionCallEvent_FieldType = 9
+	// The field type is an unsigned 64-bit integer
+	UserFunctionCallEvent_UINT64 UserFunctionCallEvent_FieldType = 10
+)
+
+var UserFunctionCallEvent_FieldType_name = map[int32]string{
+	0:  "UNKNOWN",
+	1:  "BYTES",
+	2:  "STRING",
+	3:  "SINT8",
+	4:  "SINT16",
+	5:  "SINT32",
+	6:  "SINT64",
+	7:  "UINT8",
+	8:  "UINT16",
+	9:  "UINT32",
+	10: "UINT64",
+}
+var UserFunctionCallEvent_FieldType_value = map[string]int32{
+	"UNKNOWN": 0,
+	"BYTES":   1,
+	"STRING":  2,
+	"SINT8":   3,
+	"SINT16":  4,
+	"SINT32":  5,
+	"SINT64":  6,
+	"UINT8":   7,
+	"UINT16":  8,
+	"UINT32":  9,
+	"UINT64":  10,
+}
+
+func (x UserFunctionCallEvent_FieldType) String() string {
+	return proto.EnumName(UserFunctionCallEvent_FieldType_name, int32(x))
+}
+func (UserFunctionCallEvent_FieldType) EnumDescriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{10, 0}
 }
 
 // An event observed by the Sensor.
 type TelemetryEvent struct {
 	// Unique identifier for the event
-	Id string `protobuf:"bytes,1,opt,name=id" json:"id,omitempty"`
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	// Unique process identifier associated with the event to differentiate
 	// reused values of the pid below.
-	ProcessId string `protobuf:"bytes,2,opt,name=process_id,json=processId" json:"process_id,omitempty"`
+	ProcessId string `protobuf:"bytes,2,opt,name=process_id,json=processId,proto3" json:"process_id,omitempty"`
 	// Kernel's PID of the task associated with the event. This
 	// corresponds the userland's TID.
-	ProcessPid int32 `protobuf:"varint,3,opt,name=process_pid,json=processPid" json:"process_pid,omitempty"`
+	ProcessPid int32 `protobuf:"varint,3,opt,name=process_pid,json=processPid,proto3" json:"process_pid,omitempty"`
 	// Container identifier associated with the event
-	ContainerId string `protobuf:"bytes,4,opt,name=container_id,json=containerId" json:"container_id,omitempty"`
+	ContainerId string `protobuf:"bytes,4,opt,name=container_id,json=containerId,proto3" json:"container_id,omitempty"`
 	// Sensor identifier of the sensor instance that observed the event
-	SensorId string `protobuf:"bytes,5,opt,name=sensor_id,json=sensorId" json:"sensor_id,omitempty"`
+	SensorId string `protobuf:"bytes,5,opt,name=sensor_id,json=sensorId,proto3" json:"sensor_id,omitempty"`
 	// Sequence number from some unspecified starting point unique
 	// to the Sensor. Provides a strict linear ordering of events with
 	// the same sensor_id where no two events can have the same sequence
 	// number. If it is present, it must be greater than zero. A zero
 	// value indicates that there is no sequence number associated with
 	// the event.
-	SensorSequenceNumber uint64 `protobuf:"varint,6,opt,name=sensor_sequence_number,json=sensorSequenceNumber" json:"sensor_sequence_number,omitempty"`
+	SensorSequenceNumber uint64 `protobuf:"varint,6,opt,name=sensor_sequence_number,json=sensorSequenceNumber,proto3" json:"sensor_sequence_number,omitempty"`
 	// Monotonic nanosecond timestamp from some unspecified starting
 	// point unique to the Sensor. Can only be used to calculate time
 	// intervals between events with the same sensor_id.
-	SensorMonotimeNanos int64 `protobuf:"varint,7,opt,name=sensor_monotime_nanos,json=sensorMonotimeNanos" json:"sensor_monotime_nanos,omitempty"`
+	SensorMonotimeNanos int64 `protobuf:"varint,7,opt,name=sensor_monotime_nanos,json=sensorMonotimeNanos,proto3" json:"sensor_monotime_nanos,omitempty"`
 	// Process Lineage contains one process context for each process in the
 	// hierarchy, starting with the current process, up to the root of the
 	// process namespace.
-	ProcessLineage []*Process `protobuf:"bytes,8,rep,name=process_lineage,json=processLineage" json:"process_lineage,omitempty"`
+	ProcessLineage []*Process `protobuf:"bytes,8,rep,name=process_lineage,json=processLineage,proto3" json:"process_lineage,omitempty"`
 	// Name of container associated with the event
-	ContainerName string `protobuf:"bytes,30,opt,name=container_name,json=containerName" json:"container_name,omitempty"`
+	ContainerName string `protobuf:"bytes,30,opt,name=container_name,json=containerName,proto3" json:"container_name,omitempty"`
 	// Unique identifier of the container image
-	ImageId string `protobuf:"bytes,31,opt,name=image_id,json=imageId" json:"image_id,omitempty"`
+	ImageId string `protobuf:"bytes,31,opt,name=image_id,json=imageId,proto3" json:"image_id,omitempty"`
 	//
 	// Name of the container image (i.e. "busybox" or
 	// "gcr.io/google_containers/nginx-ingress-controller")
 	//
-	ImageName string `protobuf:"bytes,32,opt,name=image_name,json=imageName" json:"image_name,omitempty"`
+	ImageName string `protobuf:"bytes,32,opt,name=image_name,json=imageName,proto3" json:"image_name,omitempty"`
 	// Types that are valid to be assigned to Event:
 	//	*TelemetryEvent_Syscall
 	//	*TelemetryEvent_Process
@@ -371,72 +612,47 @@ type TelemetryEvent struct {
 	//	*TelemetryEvent_KernelCall
 	//	*TelemetryEvent_Network
 	//	*TelemetryEvent_Performance
+	//	*TelemetryEvent_UserCall
 	//	*TelemetryEvent_Container
 	//	*TelemetryEvent_Chargen
 	//	*TelemetryEvent_Ticker
+	//	*TelemetryEvent_Lost
 	Event isTelemetryEvent_Event `protobuf_oneof:"event"`
 	// CPU on which the event occurred
-	Cpu int32 `protobuf:"varint,201,opt,name=cpu" json:"cpu,omitempty"`
+	Cpu int32 `protobuf:"varint,201,opt,name=cpu,proto3" json:"cpu,omitempty"`
 	// Credentials for the process associated with the event
-	Credentials *Credentials `protobuf:"bytes,202,opt,name=credentials" json:"credentials,omitempty"`
+	Credentials *Credentials `protobuf:"bytes,202,opt,name=credentials,proto3" json:"credentials,omitempty"`
 	// Kernel's TGID of the task associated with the event. This
 	// corresponds the userland's PID.
-	ProcessTgid int32 `protobuf:"varint,203,opt,name=process_tgid,json=processTgid" json:"process_tgid,omitempty"`
+	ProcessTgid          int32    `protobuf:"varint,203,opt,name=process_tgid,json=processTgid,proto3" json:"process_tgid,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
-func (m *TelemetryEvent) Reset()                    { *m = TelemetryEvent{} }
-func (m *TelemetryEvent) String() string            { return proto.CompactTextString(m) }
-func (*TelemetryEvent) ProtoMessage()               {}
-func (*TelemetryEvent) Descriptor() ([]byte, []int) { return fileDescriptor1, []int{0} }
-
-type isTelemetryEvent_Event interface {
-	isTelemetryEvent_Event()
+func (m *TelemetryEvent) Reset()         { *m = TelemetryEvent{} }
+func (m *TelemetryEvent) String() string { return proto.CompactTextString(m) }
+func (*TelemetryEvent) ProtoMessage()    {}
+func (*TelemetryEvent) Descriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{0}
+}
+func (m *TelemetryEvent) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_TelemetryEvent.Unmarshal(m, b)
+}
+func (m *TelemetryEvent) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_TelemetryEvent.Marshal(b, m, deterministic)
+}
+func (dst *TelemetryEvent) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_TelemetryEvent.Merge(dst, src)
+}
+func (m *TelemetryEvent) XXX_Size() int {
+	return xxx_messageInfo_TelemetryEvent.Size(m)
+}
+func (m *TelemetryEvent) XXX_DiscardUnknown() {
+	xxx_messageInfo_TelemetryEvent.DiscardUnknown(m)
 }
 
-type TelemetryEvent_Syscall struct {
-	Syscall *SyscallEvent `protobuf:"bytes,10,opt,name=syscall,oneof"`
-}
-type TelemetryEvent_Process struct {
-	Process *ProcessEvent `protobuf:"bytes,11,opt,name=process,oneof"`
-}
-type TelemetryEvent_File struct {
-	File *FileEvent `protobuf:"bytes,12,opt,name=file,oneof"`
-}
-type TelemetryEvent_KernelCall struct {
-	KernelCall *KernelFunctionCallEvent `protobuf:"bytes,13,opt,name=kernel_call,json=kernelCall,oneof"`
-}
-type TelemetryEvent_Network struct {
-	Network *NetworkEvent `protobuf:"bytes,14,opt,name=network,oneof"`
-}
-type TelemetryEvent_Performance struct {
-	Performance *PerformanceEvent `protobuf:"bytes,15,opt,name=performance,oneof"`
-}
-type TelemetryEvent_Container struct {
-	Container *ContainerEvent `protobuf:"bytes,20,opt,name=container,oneof"`
-}
-type TelemetryEvent_Chargen struct {
-	Chargen *ChargenEvent `protobuf:"bytes,100,opt,name=chargen,oneof"`
-}
-type TelemetryEvent_Ticker struct {
-	Ticker *TickerEvent `protobuf:"bytes,101,opt,name=ticker,oneof"`
-}
-
-func (*TelemetryEvent_Syscall) isTelemetryEvent_Event()     {}
-func (*TelemetryEvent_Process) isTelemetryEvent_Event()     {}
-func (*TelemetryEvent_File) isTelemetryEvent_Event()        {}
-func (*TelemetryEvent_KernelCall) isTelemetryEvent_Event()  {}
-func (*TelemetryEvent_Network) isTelemetryEvent_Event()     {}
-func (*TelemetryEvent_Performance) isTelemetryEvent_Event() {}
-func (*TelemetryEvent_Container) isTelemetryEvent_Event()   {}
-func (*TelemetryEvent_Chargen) isTelemetryEvent_Event()     {}
-func (*TelemetryEvent_Ticker) isTelemetryEvent_Event()      {}
-
-func (m *TelemetryEvent) GetEvent() isTelemetryEvent_Event {
-	if m != nil {
-		return m.Event
-	}
-	return nil
-}
+var xxx_messageInfo_TelemetryEvent proto.InternalMessageInfo
 
 func (m *TelemetryEvent) GetId() string {
 	if m != nil {
@@ -515,6 +731,83 @@ func (m *TelemetryEvent) GetImageName() string {
 	return ""
 }
 
+type isTelemetryEvent_Event interface {
+	isTelemetryEvent_Event()
+}
+
+type TelemetryEvent_Syscall struct {
+	Syscall *SyscallEvent `protobuf:"bytes,10,opt,name=syscall,proto3,oneof"`
+}
+
+type TelemetryEvent_Process struct {
+	Process *ProcessEvent `protobuf:"bytes,11,opt,name=process,proto3,oneof"`
+}
+
+type TelemetryEvent_File struct {
+	File *FileEvent `protobuf:"bytes,12,opt,name=file,proto3,oneof"`
+}
+
+type TelemetryEvent_KernelCall struct {
+	KernelCall *KernelFunctionCallEvent `protobuf:"bytes,13,opt,name=kernel_call,json=kernelCall,proto3,oneof"`
+}
+
+type TelemetryEvent_Network struct {
+	Network *NetworkEvent `protobuf:"bytes,14,opt,name=network,proto3,oneof"`
+}
+
+type TelemetryEvent_Performance struct {
+	Performance *PerformanceEvent `protobuf:"bytes,15,opt,name=performance,proto3,oneof"`
+}
+
+type TelemetryEvent_UserCall struct {
+	UserCall *UserFunctionCallEvent `protobuf:"bytes,16,opt,name=user_call,json=userCall,proto3,oneof"`
+}
+
+type TelemetryEvent_Container struct {
+	Container *ContainerEvent `protobuf:"bytes,20,opt,name=container,proto3,oneof"`
+}
+
+type TelemetryEvent_Chargen struct {
+	Chargen *ChargenEvent `protobuf:"bytes,100,opt,name=chargen,proto3,oneof"`
+}
+
+type TelemetryEvent_Ticker struct {
+	Ticker *TickerEvent `protobuf:"bytes,101,opt,name=ticker,proto3,oneof"`
+}
+
+type TelemetryEvent_Lost struct {
+	Lost *LostRecordEvent `protobuf:"bytes,102,opt,name=lost,proto3,oneof"`
+}
+
+func (*TelemetryEvent_Syscall) isTelemetryEvent_Event() {}
+
+func (*TelemetryEvent_Process) isTelemetryEvent_Event() {}
+
+func (*TelemetryEvent_File) isTelemetryEvent_Event() {}
+
+func (*TelemetryEvent_KernelCall) isTelemetryEvent_Event() {}
+
+func (*TelemetryEvent_Network) isTelemetryEvent_Event() {}
+
+func (*TelemetryEvent_Performance) isTelemetryEvent_Event() {}
+
+func (*TelemetryEvent_UserCall) isTelemetryEvent_Event() {}
+
+func (*TelemetryEvent_Container) isTelemetryEvent_Event() {}
+
+func (*TelemetryEvent_Chargen) isTelemetryEvent_Event() {}
+
+func (*TelemetryEvent_Ticker) isTelemetryEvent_Event() {}
+
+func (*TelemetryEvent_Lost) isTelemetryEvent_Event() {}
+
+func (m *TelemetryEvent) GetEvent() isTelemetryEvent_Event {
+	if m != nil {
+		return m.Event
+	}
+	return nil
+}
+
 func (m *TelemetryEvent) GetSyscall() *SyscallEvent {
 	if x, ok := m.GetEvent().(*TelemetryEvent_Syscall); ok {
 		return x.Syscall
@@ -557,6 +850,13 @@ func (m *TelemetryEvent) GetPerformance() *PerformanceEvent {
 	return nil
 }
 
+func (m *TelemetryEvent) GetUserCall() *UserFunctionCallEvent {
+	if x, ok := m.GetEvent().(*TelemetryEvent_UserCall); ok {
+		return x.UserCall
+	}
+	return nil
+}
+
 func (m *TelemetryEvent) GetContainer() *ContainerEvent {
 	if x, ok := m.GetEvent().(*TelemetryEvent_Container); ok {
 		return x.Container
@@ -574,6 +874,13 @@ func (m *TelemetryEvent) GetChargen() *ChargenEvent {
 func (m *TelemetryEvent) GetTicker() *TickerEvent {
 	if x, ok := m.GetEvent().(*TelemetryEvent_Ticker); ok {
 		return x.Ticker
+	}
+	return nil
+}
+
+func (m *TelemetryEvent) GetLost() *LostRecordEvent {
+	if x, ok := m.GetEvent().(*TelemetryEvent_Lost); ok {
+		return x.Lost
 	}
 	return nil
 }
@@ -608,9 +915,11 @@ func (*TelemetryEvent) XXX_OneofFuncs() (func(msg proto.Message, b *proto.Buffer
 		(*TelemetryEvent_KernelCall)(nil),
 		(*TelemetryEvent_Network)(nil),
 		(*TelemetryEvent_Performance)(nil),
+		(*TelemetryEvent_UserCall)(nil),
 		(*TelemetryEvent_Container)(nil),
 		(*TelemetryEvent_Chargen)(nil),
 		(*TelemetryEvent_Ticker)(nil),
+		(*TelemetryEvent_Lost)(nil),
 	}
 }
 
@@ -648,6 +957,11 @@ func _TelemetryEvent_OneofMarshaler(msg proto.Message, b *proto.Buffer) error {
 		if err := b.EncodeMessage(x.Performance); err != nil {
 			return err
 		}
+	case *TelemetryEvent_UserCall:
+		b.EncodeVarint(16<<3 | proto.WireBytes)
+		if err := b.EncodeMessage(x.UserCall); err != nil {
+			return err
+		}
 	case *TelemetryEvent_Container:
 		b.EncodeVarint(20<<3 | proto.WireBytes)
 		if err := b.EncodeMessage(x.Container); err != nil {
@@ -661,6 +975,11 @@ func _TelemetryEvent_OneofMarshaler(msg proto.Message, b *proto.Buffer) error {
 	case *TelemetryEvent_Ticker:
 		b.EncodeVarint(101<<3 | proto.WireBytes)
 		if err := b.EncodeMessage(x.Ticker); err != nil {
+			return err
+		}
+	case *TelemetryEvent_Lost:
+		b.EncodeVarint(102<<3 | proto.WireBytes)
+		if err := b.EncodeMessage(x.Lost); err != nil {
 			return err
 		}
 	case nil:
@@ -721,6 +1040,14 @@ func _TelemetryEvent_OneofUnmarshaler(msg proto.Message, tag, wire int, b *proto
 		err := b.DecodeMessage(msg)
 		m.Event = &TelemetryEvent_Performance{msg}
 		return true, err
+	case 16: // event.user_call
+		if wire != proto.WireBytes {
+			return true, proto.ErrInternalBadWireType
+		}
+		msg := new(UserFunctionCallEvent)
+		err := b.DecodeMessage(msg)
+		m.Event = &TelemetryEvent_UserCall{msg}
+		return true, err
 	case 20: // event.container
 		if wire != proto.WireBytes {
 			return true, proto.ErrInternalBadWireType
@@ -745,6 +1072,14 @@ func _TelemetryEvent_OneofUnmarshaler(msg proto.Message, tag, wire int, b *proto
 		err := b.DecodeMessage(msg)
 		m.Event = &TelemetryEvent_Ticker{msg}
 		return true, err
+	case 102: // event.lost
+		if wire != proto.WireBytes {
+			return true, proto.ErrInternalBadWireType
+		}
+		msg := new(LostRecordEvent)
+		err := b.DecodeMessage(msg)
+		m.Event = &TelemetryEvent_Lost{msg}
+		return true, err
 	default:
 		return false, nil
 	}
@@ -756,47 +1091,57 @@ func _TelemetryEvent_OneofSizer(msg proto.Message) (n int) {
 	switch x := m.Event.(type) {
 	case *TelemetryEvent_Syscall:
 		s := proto.Size(x.Syscall)
-		n += proto.SizeVarint(10<<3 | proto.WireBytes)
+		n += 1 // tag and wire
 		n += proto.SizeVarint(uint64(s))
 		n += s
 	case *TelemetryEvent_Process:
 		s := proto.Size(x.Process)
-		n += proto.SizeVarint(11<<3 | proto.WireBytes)
+		n += 1 // tag and wire
 		n += proto.SizeVarint(uint64(s))
 		n += s
 	case *TelemetryEvent_File:
 		s := proto.Size(x.File)
-		n += proto.SizeVarint(12<<3 | proto.WireBytes)
+		n += 1 // tag and wire
 		n += proto.SizeVarint(uint64(s))
 		n += s
 	case *TelemetryEvent_KernelCall:
 		s := proto.Size(x.KernelCall)
-		n += proto.SizeVarint(13<<3 | proto.WireBytes)
+		n += 1 // tag and wire
 		n += proto.SizeVarint(uint64(s))
 		n += s
 	case *TelemetryEvent_Network:
 		s := proto.Size(x.Network)
-		n += proto.SizeVarint(14<<3 | proto.WireBytes)
+		n += 1 // tag and wire
 		n += proto.SizeVarint(uint64(s))
 		n += s
 	case *TelemetryEvent_Performance:
 		s := proto.Size(x.Performance)
-		n += proto.SizeVarint(15<<3 | proto.WireBytes)
+		n += 1 // tag and wire
+		n += proto.SizeVarint(uint64(s))
+		n += s
+	case *TelemetryEvent_UserCall:
+		s := proto.Size(x.UserCall)
+		n += 2 // tag and wire
 		n += proto.SizeVarint(uint64(s))
 		n += s
 	case *TelemetryEvent_Container:
 		s := proto.Size(x.Container)
-		n += proto.SizeVarint(20<<3 | proto.WireBytes)
+		n += 2 // tag and wire
 		n += proto.SizeVarint(uint64(s))
 		n += s
 	case *TelemetryEvent_Chargen:
 		s := proto.Size(x.Chargen)
-		n += proto.SizeVarint(100<<3 | proto.WireBytes)
+		n += 2 // tag and wire
 		n += proto.SizeVarint(uint64(s))
 		n += s
 	case *TelemetryEvent_Ticker:
 		s := proto.Size(x.Ticker)
-		n += proto.SizeVarint(101<<3 | proto.WireBytes)
+		n += 2 // tag and wire
+		n += proto.SizeVarint(uint64(s))
+		n += s
+	case *TelemetryEvent_Lost:
+		s := proto.Size(x.Lost)
+		n += 2 // tag and wire
 		n += proto.SizeVarint(uint64(s))
 		n += s
 	case nil:
@@ -809,15 +1154,37 @@ func _TelemetryEvent_OneofSizer(msg proto.Message) (n int) {
 type ChargenEvent struct {
 	// Index of the first character in this Event in relation to all of
 	// the characters that have been generated in this stream.
-	Index uint64 `protobuf:"varint,1,opt,name=index" json:"index,omitempty"`
+	Index uint64 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
 	// The next one or more characters in the autogenerated stream
-	Characters string `protobuf:"bytes,2,opt,name=characters" json:"characters,omitempty"`
+	Characters           string   `protobuf:"bytes,2,opt,name=characters,proto3" json:"characters,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
-func (m *ChargenEvent) Reset()                    { *m = ChargenEvent{} }
-func (m *ChargenEvent) String() string            { return proto.CompactTextString(m) }
-func (*ChargenEvent) ProtoMessage()               {}
-func (*ChargenEvent) Descriptor() ([]byte, []int) { return fileDescriptor1, []int{1} }
+func (m *ChargenEvent) Reset()         { *m = ChargenEvent{} }
+func (m *ChargenEvent) String() string { return proto.CompactTextString(m) }
+func (*ChargenEvent) ProtoMessage()    {}
+func (*ChargenEvent) Descriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{1}
+}
+func (m *ChargenEvent) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_ChargenEvent.Unmarshal(m, b)
+}
+func (m *ChargenEvent) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_ChargenEvent.Marshal(b, m, deterministic)
+}
+func (dst *ChargenEvent) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ChargenEvent.Merge(dst, src)
+}
+func (m *ChargenEvent) XXX_Size() int {
+	return xxx_messageInfo_ChargenEvent.Size(m)
+}
+func (m *ChargenEvent) XXX_DiscardUnknown() {
+	xxx_messageInfo_ChargenEvent.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_ChargenEvent proto.InternalMessageInfo
 
 func (m *ChargenEvent) GetIndex() uint64 {
 	if m != nil {
@@ -837,17 +1204,39 @@ type TickerEvent struct {
 	// The number of seconds elapsed since January 1, 1970 UTC.
 	//
 	// https://golang.org/pkg/time/#Time.Unix
-	Seconds int64 `protobuf:"varint,1,opt,name=seconds" json:"seconds,omitempty"`
+	Seconds int64 `protobuf:"varint,1,opt,name=seconds,proto3" json:"seconds,omitempty"`
 	// The number of nanoseconds elapsed since January 1, 1970 UTC
 	//
 	// https://golang.org/pkg/time/#Time.UnixNano
-	Nanoseconds int64 `protobuf:"varint,2,opt,name=nanoseconds" json:"nanoseconds,omitempty"`
+	Nanoseconds          int64    `protobuf:"varint,2,opt,name=nanoseconds,proto3" json:"nanoseconds,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
-func (m *TickerEvent) Reset()                    { *m = TickerEvent{} }
-func (m *TickerEvent) String() string            { return proto.CompactTextString(m) }
-func (*TickerEvent) ProtoMessage()               {}
-func (*TickerEvent) Descriptor() ([]byte, []int) { return fileDescriptor1, []int{2} }
+func (m *TickerEvent) Reset()         { *m = TickerEvent{} }
+func (m *TickerEvent) String() string { return proto.CompactTextString(m) }
+func (*TickerEvent) ProtoMessage()    {}
+func (*TickerEvent) Descriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{2}
+}
+func (m *TickerEvent) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_TickerEvent.Unmarshal(m, b)
+}
+func (m *TickerEvent) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_TickerEvent.Marshal(b, m, deterministic)
+}
+func (dst *TickerEvent) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_TickerEvent.Merge(dst, src)
+}
+func (m *TickerEvent) XXX_Size() int {
+	return xxx_messageInfo_TickerEvent.Size(m)
+}
+func (m *TickerEvent) XXX_DiscardUnknown() {
+	xxx_messageInfo_TickerEvent.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_TickerEvent proto.InternalMessageInfo
 
 func (m *TickerEvent) GetSeconds() int64 {
 	if m != nil {
@@ -863,40 +1252,110 @@ func (m *TickerEvent) GetNanoseconds() int64 {
 	return 0
 }
 
+type LostRecordEvent struct {
+	// Number of lost records observed
+	Lost uint64 `protobuf:"varint,1,opt,name=lost,proto3" json:"lost,omitempty"`
+	// Type of events lost
+	Type                 LostRecordEventType `protobuf:"varint,2,opt,name=type,proto3,enum=capsule8.api.v0.LostRecordEventType" json:"type,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}            `json:"-"`
+	XXX_unrecognized     []byte              `json:"-"`
+	XXX_sizecache        int32               `json:"-"`
+}
+
+func (m *LostRecordEvent) Reset()         { *m = LostRecordEvent{} }
+func (m *LostRecordEvent) String() string { return proto.CompactTextString(m) }
+func (*LostRecordEvent) ProtoMessage()    {}
+func (*LostRecordEvent) Descriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{3}
+}
+func (m *LostRecordEvent) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_LostRecordEvent.Unmarshal(m, b)
+}
+func (m *LostRecordEvent) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_LostRecordEvent.Marshal(b, m, deterministic)
+}
+func (dst *LostRecordEvent) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_LostRecordEvent.Merge(dst, src)
+}
+func (m *LostRecordEvent) XXX_Size() int {
+	return xxx_messageInfo_LostRecordEvent.Size(m)
+}
+func (m *LostRecordEvent) XXX_DiscardUnknown() {
+	xxx_messageInfo_LostRecordEvent.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_LostRecordEvent proto.InternalMessageInfo
+
+func (m *LostRecordEvent) GetLost() uint64 {
+	if m != nil {
+		return m.Lost
+	}
+	return 0
+}
+
+func (m *LostRecordEvent) GetType() LostRecordEventType {
+	if m != nil {
+		return m.Type
+	}
+	return LostRecordEventType_LOST_RECORD_EVENT_TYPE_UNKNOWN
+}
+
 // ContainerEvent describes a Docker container or Rkt App lifecycle event
 type ContainerEvent struct {
-	Type ContainerEventType `protobuf:"varint,1,opt,name=type,enum=capsule8.api.v0.ContainerEventType" json:"type,omitempty"`
-	Name string             `protobuf:"bytes,2,opt,name=name" json:"name,omitempty"`
+	Type ContainerEventType `protobuf:"varint,1,opt,name=type,proto3,enum=capsule8.api.v0.ContainerEventType" json:"type,omitempty"`
+	Name string             `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	// Unique identifier of the container image
-	ImageId string `protobuf:"bytes,10,opt,name=image_id,json=imageId" json:"image_id,omitempty"`
+	ImageId string `protobuf:"bytes,10,opt,name=image_id,json=imageId,proto3" json:"image_id,omitempty"`
 	//
 	// Name of the container image (i.e. "busybox" or
 	// "gcr.io/google_containers/nginx-ingress-controller")
 	//
-	ImageName string `protobuf:"bytes,11,opt,name=image_name,json=imageName" json:"image_name,omitempty"`
+	ImageName string `protobuf:"bytes,11,opt,name=image_name,json=imageName,proto3" json:"image_name,omitempty"`
 	// Host process identifier of the container's init process.
-	HostPid int32 `protobuf:"zigzag32,20,opt,name=host_pid,json=hostPid" json:"host_pid,omitempty"`
+	HostPid int32 `protobuf:"zigzag32,20,opt,name=host_pid,json=hostPid,proto3" json:"host_pid,omitempty"`
 	// Optional, only included on CONTAINER_EVENT_TYPE_EXIT events
-	ExitCode int32 `protobuf:"zigzag32,30,opt,name=exit_code,json=exitCode" json:"exit_code,omitempty"`
+	ExitCode int32 `protobuf:"zigzag32,30,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
 	// The exit status will typically one of the values defined in
 	// stdlib.h like EXIT_SUCCESS, EXIT_FAILURE, or EXIT_USAGE.
-	ExitStatus uint32 `protobuf:"varint,31,opt,name=exit_status,json=exitStatus" json:"exit_status,omitempty"`
+	ExitStatus uint32 `protobuf:"varint,31,opt,name=exit_status,json=exitStatus,proto3" json:"exit_status,omitempty"`
 	// If non-zero, this is the signal number that the process
 	// was terminated with.
-	ExitSignal uint32 `protobuf:"varint,32,opt,name=exit_signal,json=exitSignal" json:"exit_signal,omitempty"`
+	ExitSignal uint32 `protobuf:"varint,32,opt,name=exit_signal,json=exitSignal,proto3" json:"exit_signal,omitempty"`
 	// If true, indicates that the process dumped a core when
 	// it terminated.
-	ExitCoreDumped bool `protobuf:"varint,33,opt,name=exit_core_dumped,json=exitCoreDumped" json:"exit_core_dumped,omitempty"`
+	ExitCoreDumped bool `protobuf:"varint,33,opt,name=exit_core_dumped,json=exitCoreDumped,proto3" json:"exit_core_dumped,omitempty"`
 	// Docker container configuration file
-	DockerConfigJson string `protobuf:"bytes,100,opt,name=docker_config_json,json=dockerConfigJson" json:"docker_config_json,omitempty"`
+	DockerConfigJson string `protobuf:"bytes,100,opt,name=docker_config_json,json=dockerConfigJson,proto3" json:"docker_config_json,omitempty"`
 	// OCI container configuration file
-	OciConfigJson string `protobuf:"bytes,101,opt,name=oci_config_json,json=ociConfigJson" json:"oci_config_json,omitempty"`
+	OciConfigJson        string   `protobuf:"bytes,101,opt,name=oci_config_json,json=ociConfigJson,proto3" json:"oci_config_json,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
-func (m *ContainerEvent) Reset()                    { *m = ContainerEvent{} }
-func (m *ContainerEvent) String() string            { return proto.CompactTextString(m) }
-func (*ContainerEvent) ProtoMessage()               {}
-func (*ContainerEvent) Descriptor() ([]byte, []int) { return fileDescriptor1, []int{3} }
+func (m *ContainerEvent) Reset()         { *m = ContainerEvent{} }
+func (m *ContainerEvent) String() string { return proto.CompactTextString(m) }
+func (*ContainerEvent) ProtoMessage()    {}
+func (*ContainerEvent) Descriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{4}
+}
+func (m *ContainerEvent) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_ContainerEvent.Unmarshal(m, b)
+}
+func (m *ContainerEvent) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_ContainerEvent.Marshal(b, m, deterministic)
+}
+func (dst *ContainerEvent) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ContainerEvent.Merge(dst, src)
+}
+func (m *ContainerEvent) XXX_Size() int {
+	return xxx_messageInfo_ContainerEvent.Size(m)
+}
+func (m *ContainerEvent) XXX_DiscardUnknown() {
+	xxx_messageInfo_ContainerEvent.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_ContainerEvent proto.InternalMessageInfo
 
 func (m *ContainerEvent) GetType() ContainerEventType {
 	if m != nil {
@@ -979,41 +1438,69 @@ func (m *ContainerEvent) GetOciConfigJson() string {
 // and exiting as detected by the Sensor.
 type ProcessEvent struct {
 	// The type of event described by this ProcessEvent message
-	Type ProcessEventType `protobuf:"varint,1,opt,name=type,enum=capsule8.api.v0.ProcessEventType" json:"type,omitempty"`
+	Type ProcessEventType `protobuf:"varint,1,opt,name=type,proto3,enum=capsule8.api.v0.ProcessEventType" json:"type,omitempty"`
 	// Present when the event is a fork event. This is the PID of the
 	// new child process.
-	ForkChildPid int32 `protobuf:"zigzag32,10,opt,name=fork_child_pid,json=forkChildPid" json:"fork_child_pid,omitempty"`
+	ForkChildPid int32 `protobuf:"zigzag32,10,opt,name=fork_child_pid,json=forkChildPid,proto3" json:"fork_child_pid,omitempty"`
 	// Present when the event is a fork event. This is the Sensor's process
 	// ID of the new child process.
-	ForkChildId string `protobuf:"bytes,11,opt,name=fork_child_id,json=forkChildId" json:"fork_child_id,omitempty"`
+	ForkChildId string `protobuf:"bytes,11,opt,name=fork_child_id,json=forkChildId,proto3" json:"fork_child_id,omitempty"`
+	// Present when the event is a fork event. This is the flags parameter
+	// passed to sys_clone.
+	ForkCloneFlags uint64 `protobuf:"varint,12,opt,name=fork_clone_flags,json=forkCloneFlags,proto3" json:"fork_clone_flags,omitempty"`
+	// Present when the event is a fork event. This is the stack_start
+	// parameter passed to sys_clone.
+	ForkStackStart uint64 `protobuf:"varint,13,opt,name=fork_stack_start,json=forkStackStart,proto3" json:"fork_stack_start,omitempty"`
 	// Present when the event is an exec event. This is the filename of the
 	// executable that was executed.
-	ExecFilename string `protobuf:"bytes,20,opt,name=exec_filename,json=execFilename" json:"exec_filename,omitempty"`
+	ExecFilename string `protobuf:"bytes,20,opt,name=exec_filename,json=execFilename,proto3" json:"exec_filename,omitempty"`
 	// Present when the event is an exec event. Repeated for each argument
 	// passed to the executable on the command-line.
-	ExecCommandLine []string `protobuf:"bytes,21,rep,name=exec_command_line,json=execCommandLine" json:"exec_command_line,omitempty"`
+	ExecCommandLine []string `protobuf:"bytes,21,rep,name=exec_command_line,json=execCommandLine,proto3" json:"exec_command_line,omitempty"`
 	// Present when the event is an exit event. This is the exit code that
 	// the process exited with.
-	ExitCode int32 `protobuf:"zigzag32,30,opt,name=exit_code,json=exitCode" json:"exit_code,omitempty"`
+	ExitCode int32 `protobuf:"zigzag32,30,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
 	// Present when the event is an exit event. This will typically be one9
 	// of the values defined in stdlib.h like EXIT_SUCCESS, EXIT_FAILURE,
 	// or EXIT_USAGE.
-	ExitStatus uint32 `protobuf:"varint,31,opt,name=exit_status,json=exitStatus" json:"exit_status,omitempty"`
+	ExitStatus uint32 `protobuf:"varint,31,opt,name=exit_status,json=exitStatus,proto3" json:"exit_status,omitempty"`
 	// Present when the event is an exit event. If non-zero, this is the
 	// signal number that the process was terminated with.
-	ExitSignal uint32 `protobuf:"varint,32,opt,name=exit_signal,json=exitSignal" json:"exit_signal,omitempty"`
+	ExitSignal uint32 `protobuf:"varint,32,opt,name=exit_signal,json=exitSignal,proto3" json:"exit_signal,omitempty"`
 	// Present when the event is an exit event. If true, indicates that the
 	// process dumped a core when it terminated.
-	ExitCoreDumped bool `protobuf:"varint,33,opt,name=exit_core_dumped,json=exitCoreDumped" json:"exit_core_dumped,omitempty"`
+	ExitCoreDumped bool `protobuf:"varint,33,opt,name=exit_core_dumped,json=exitCoreDumped,proto3" json:"exit_core_dumped,omitempty"`
 	// Present when the event is an update event that informs of an update
 	// to the process's current working directory.
-	UpdateCwd string `protobuf:"bytes,40,opt,name=update_cwd,json=updateCwd" json:"update_cwd,omitempty"`
+	UpdateCwd            string   `protobuf:"bytes,40,opt,name=update_cwd,json=updateCwd,proto3" json:"update_cwd,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
-func (m *ProcessEvent) Reset()                    { *m = ProcessEvent{} }
-func (m *ProcessEvent) String() string            { return proto.CompactTextString(m) }
-func (*ProcessEvent) ProtoMessage()               {}
-func (*ProcessEvent) Descriptor() ([]byte, []int) { return fileDescriptor1, []int{4} }
+func (m *ProcessEvent) Reset()         { *m = ProcessEvent{} }
+func (m *ProcessEvent) String() string { return proto.CompactTextString(m) }
+func (*ProcessEvent) ProtoMessage()    {}
+func (*ProcessEvent) Descriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{5}
+}
+func (m *ProcessEvent) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_ProcessEvent.Unmarshal(m, b)
+}
+func (m *ProcessEvent) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_ProcessEvent.Marshal(b, m, deterministic)
+}
+func (dst *ProcessEvent) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ProcessEvent.Merge(dst, src)
+}
+func (m *ProcessEvent) XXX_Size() int {
+	return xxx_messageInfo_ProcessEvent.Size(m)
+}
+func (m *ProcessEvent) XXX_DiscardUnknown() {
+	xxx_messageInfo_ProcessEvent.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_ProcessEvent proto.InternalMessageInfo
 
 func (m *ProcessEvent) GetType() ProcessEventType {
 	if m != nil {
@@ -1034,6 +1521,20 @@ func (m *ProcessEvent) GetForkChildId() string {
 		return m.ForkChildId
 	}
 	return ""
+}
+
+func (m *ProcessEvent) GetForkCloneFlags() uint64 {
+	if m != nil {
+		return m.ForkCloneFlags
+	}
+	return 0
+}
+
+func (m *ProcessEvent) GetForkStackStart() uint64 {
+	if m != nil {
+		return m.ForkStackStart
+	}
+	return 0
 }
 
 func (m *ProcessEvent) GetExecFilename() string {
@@ -1089,36 +1590,58 @@ func (m *ProcessEvent) GetUpdateCwd() string {
 // made or returning as detected by the Sensor.
 type SyscallEvent struct {
 	// The type of event described by this SyscallEvent message
-	Type SyscallEventType `protobuf:"varint,1,opt,name=type,enum=capsule8.api.v0.SyscallEventType" json:"type,omitempty"`
+	Type SyscallEventType `protobuf:"varint,1,opt,name=type,proto3,enum=capsule8.api.v0.SyscallEventType" json:"type,omitempty"`
 	// The syscall number for either enter or exit events.
-	Id int64 `protobuf:"varint,2,opt,name=id" json:"id,omitempty"`
+	Id int64 `protobuf:"varint,2,opt,name=id,proto3" json:"id,omitempty"`
 	// Present when the event is an enter event. This is the first
 	// argument passed to the system call.
-	Arg0 uint64 `protobuf:"varint,10,opt,name=arg0" json:"arg0,omitempty"`
+	Arg0 uint64 `protobuf:"varint,10,opt,name=arg0,proto3" json:"arg0,omitempty"`
 	// Present when the event is an enter event. This is the second
 	// argument passed to the system call.
-	Arg1 uint64 `protobuf:"varint,11,opt,name=arg1" json:"arg1,omitempty"`
+	Arg1 uint64 `protobuf:"varint,11,opt,name=arg1,proto3" json:"arg1,omitempty"`
 	// Present when the event is an enter event. This is the third
 	// argument passed to the system call.
-	Arg2 uint64 `protobuf:"varint,12,opt,name=arg2" json:"arg2,omitempty"`
+	Arg2 uint64 `protobuf:"varint,12,opt,name=arg2,proto3" json:"arg2,omitempty"`
 	// Present when the event is an enter event. This is the fourth
 	// argument passed to the system call.
-	Arg3 uint64 `protobuf:"varint,13,opt,name=arg3" json:"arg3,omitempty"`
+	Arg3 uint64 `protobuf:"varint,13,opt,name=arg3,proto3" json:"arg3,omitempty"`
 	// Present when the event is an enter event. This is the fifth
 	// argument passed to the system call.
-	Arg4 uint64 `protobuf:"varint,14,opt,name=arg4" json:"arg4,omitempty"`
+	Arg4 uint64 `protobuf:"varint,14,opt,name=arg4,proto3" json:"arg4,omitempty"`
 	// Present when the event is an enter event. This is the sixth
 	// argument passed to the system call.
-	Arg5 uint64 `protobuf:"varint,15,opt,name=arg5" json:"arg5,omitempty"`
+	Arg5 uint64 `protobuf:"varint,15,opt,name=arg5,proto3" json:"arg5,omitempty"`
 	// Present when the event is an exit event. This is the value that was
 	// returned from the system call.
-	Ret int64 `protobuf:"varint,20,opt,name=ret" json:"ret,omitempty"`
+	Ret                  int64    `protobuf:"varint,20,opt,name=ret,proto3" json:"ret,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
-func (m *SyscallEvent) Reset()                    { *m = SyscallEvent{} }
-func (m *SyscallEvent) String() string            { return proto.CompactTextString(m) }
-func (*SyscallEvent) ProtoMessage()               {}
-func (*SyscallEvent) Descriptor() ([]byte, []int) { return fileDescriptor1, []int{5} }
+func (m *SyscallEvent) Reset()         { *m = SyscallEvent{} }
+func (m *SyscallEvent) String() string { return proto.CompactTextString(m) }
+func (*SyscallEvent) ProtoMessage()    {}
+func (*SyscallEvent) Descriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{6}
+}
+func (m *SyscallEvent) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_SyscallEvent.Unmarshal(m, b)
+}
+func (m *SyscallEvent) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_SyscallEvent.Marshal(b, m, deterministic)
+}
+func (dst *SyscallEvent) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_SyscallEvent.Merge(dst, src)
+}
+func (m *SyscallEvent) XXX_Size() int {
+	return xxx_messageInfo_SyscallEvent.Size(m)
+}
+func (m *SyscallEvent) XXX_DiscardUnknown() {
+	xxx_messageInfo_SyscallEvent.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_SyscallEvent proto.InternalMessageInfo
 
 func (m *SyscallEvent) GetType() SyscallEventType {
 	if m != nil {
@@ -1187,23 +1710,60 @@ func (m *SyscallEvent) GetRet() int64 {
 // occurring as detected by the Sensor.
 type FileEvent struct {
 	// The type of event described by this FileEvent message
-	Type FileEventType `protobuf:"varint,1,opt,name=type,enum=capsule8.api.v0.FileEventType" json:"type,omitempty"`
-	// Present when the event is a file open event. This is the filename of
-	// the file being opened.
-	Filename string `protobuf:"bytes,10,opt,name=filename" json:"filename,omitempty"`
+	Type FileEventType `protobuf:"varint,1,opt,name=type,proto3,enum=capsule8.api.v0.FileEventType" json:"type,omitempty"`
+	// Present when the event is a file create, delete, link, modify, or
+	// open event. This is the filename of the file being affected.
+	Filename string `protobuf:"bytes,10,opt,name=filename,proto3" json:"filename,omitempty"`
 	// Present when the event is a file open event. This is the set of
 	// flags with which the file was opened (e.g., O_RDONLY, O_NONBLOCK,
 	// etc.).
-	OpenFlags int32 `protobuf:"zigzag32,11,opt,name=open_flags,json=openFlags" json:"open_flags,omitempty"`
-	// Present when the event is a file open event. This is the set of file
-	// permissions used in a creat(2) system call.
-	OpenMode int32 `protobuf:"zigzag32,12,opt,name=open_mode,json=openMode" json:"open_mode,omitempty"`
+	OpenFlags int32 `protobuf:"zigzag32,11,opt,name=open_flags,json=openFlags,proto3" json:"open_flags,omitempty"`
+	// Present when the event is a file create or open event. This is the
+	// set of file permissions used in a creat(2) system call.
+	OpenMode int32 `protobuf:"zigzag32,12,opt,name=open_mode,json=openMode,proto3" json:"open_mode,omitempty"`
+	// Present when the event is a file link event. This is the name of the
+	// file being linked to.
+	SourceFile string `protobuf:"bytes,13,opt,name=source_file,json=sourceFile,proto3" json:"source_file,omitempty"`
+	// Present when the event is a file link event. This is the name of the
+	// file linking to source the source file.
+	TargetFile string `protobuf:"bytes,14,opt,name=target_file,json=targetFile,proto3" json:"target_file,omitempty"`
+	// Present when the event is a file link event. This is true if the
+	// link is a symlink; otherwise, it is a hard link.
+	Symlink bool `protobuf:"varint,15,opt,name=symlink,proto3" json:"symlink,omitempty"`
+	// Present when the event is a file rename event. This is the original
+	// name of the file being renamed.
+	Oldname string `protobuf:"bytes,16,opt,name=oldname,proto3" json:"oldname,omitempty"`
+	// Present when the event is a file rename event. This is the new name
+	// of the file being renamed.
+	Newname              string   `protobuf:"bytes,17,opt,name=newname,proto3" json:"newname,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
-func (m *FileEvent) Reset()                    { *m = FileEvent{} }
-func (m *FileEvent) String() string            { return proto.CompactTextString(m) }
-func (*FileEvent) ProtoMessage()               {}
-func (*FileEvent) Descriptor() ([]byte, []int) { return fileDescriptor1, []int{6} }
+func (m *FileEvent) Reset()         { *m = FileEvent{} }
+func (m *FileEvent) String() string { return proto.CompactTextString(m) }
+func (*FileEvent) ProtoMessage()    {}
+func (*FileEvent) Descriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{7}
+}
+func (m *FileEvent) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_FileEvent.Unmarshal(m, b)
+}
+func (m *FileEvent) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_FileEvent.Marshal(b, m, deterministic)
+}
+func (dst *FileEvent) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_FileEvent.Merge(dst, src)
+}
+func (m *FileEvent) XXX_Size() int {
+	return xxx_messageInfo_FileEvent.Size(m)
+}
+func (m *FileEvent) XXX_DiscardUnknown() {
+	xxx_messageInfo_FileEvent.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_FileEvent proto.InternalMessageInfo
 
 func (m *FileEvent) GetType() FileEventType {
 	if m != nil {
@@ -1233,15 +1793,72 @@ func (m *FileEvent) GetOpenMode() int32 {
 	return 0
 }
 
-type Process struct {
-	Pid     int32  `protobuf:"zigzag32,1,opt,name=pid" json:"pid,omitempty"`
-	Command string `protobuf:"bytes,2,opt,name=command" json:"command,omitempty"`
+func (m *FileEvent) GetSourceFile() string {
+	if m != nil {
+		return m.SourceFile
+	}
+	return ""
 }
 
-func (m *Process) Reset()                    { *m = Process{} }
-func (m *Process) String() string            { return proto.CompactTextString(m) }
-func (*Process) ProtoMessage()               {}
-func (*Process) Descriptor() ([]byte, []int) { return fileDescriptor1, []int{7} }
+func (m *FileEvent) GetTargetFile() string {
+	if m != nil {
+		return m.TargetFile
+	}
+	return ""
+}
+
+func (m *FileEvent) GetSymlink() bool {
+	if m != nil {
+		return m.Symlink
+	}
+	return false
+}
+
+func (m *FileEvent) GetOldname() string {
+	if m != nil {
+		return m.Oldname
+	}
+	return ""
+}
+
+func (m *FileEvent) GetNewname() string {
+	if m != nil {
+		return m.Newname
+	}
+	return ""
+}
+
+type Process struct {
+	Pid                  int32    `protobuf:"zigzag32,1,opt,name=pid,proto3" json:"pid,omitempty"`
+	Command              string   `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
+}
+
+func (m *Process) Reset()         { *m = Process{} }
+func (m *Process) String() string { return proto.CompactTextString(m) }
+func (*Process) ProtoMessage()    {}
+func (*Process) Descriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{8}
+}
+func (m *Process) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_Process.Unmarshal(m, b)
+}
+func (m *Process) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_Process.Marshal(b, m, deterministic)
+}
+func (dst *Process) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_Process.Merge(dst, src)
+}
+func (m *Process) XXX_Size() int {
+	return xxx_messageInfo_Process.Size(m)
+}
+func (m *Process) XXX_DiscardUnknown() {
+	xxx_messageInfo_Process.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_Process proto.InternalMessageInfo
 
 func (m *Process) GetPid() int32 {
 	if m != nil {
@@ -1260,17 +1877,38 @@ func (m *Process) GetCommand() string {
 // KernelFunctionCallEvent describes an event that occurred related to kernel
 // functions being entered or exited.
 type KernelFunctionCallEvent struct {
-	// Label repeated w/ a `mapEntry` option set to `true`.
 	// This is a map of argument names and values. The keys are strings
 	// that are the names of the arguments, and the values are the actual
 	// values for each field.
-	Arguments map[string]*KernelFunctionCallEvent_FieldValue `protobuf:"bytes,1,rep,name=arguments" json:"arguments,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Arguments            map[string]*KernelFunctionCallEvent_FieldValue `protobuf:"bytes,1,rep,name=arguments,proto3" json:"arguments,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+	XXX_NoUnkeyedLiteral struct{}                                       `json:"-"`
+	XXX_unrecognized     []byte                                         `json:"-"`
+	XXX_sizecache        int32                                          `json:"-"`
 }
 
-func (m *KernelFunctionCallEvent) Reset()                    { *m = KernelFunctionCallEvent{} }
-func (m *KernelFunctionCallEvent) String() string            { return proto.CompactTextString(m) }
-func (*KernelFunctionCallEvent) ProtoMessage()               {}
-func (*KernelFunctionCallEvent) Descriptor() ([]byte, []int) { return fileDescriptor1, []int{8} }
+func (m *KernelFunctionCallEvent) Reset()         { *m = KernelFunctionCallEvent{} }
+func (m *KernelFunctionCallEvent) String() string { return proto.CompactTextString(m) }
+func (*KernelFunctionCallEvent) ProtoMessage()    {}
+func (*KernelFunctionCallEvent) Descriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{9}
+}
+func (m *KernelFunctionCallEvent) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_KernelFunctionCallEvent.Unmarshal(m, b)
+}
+func (m *KernelFunctionCallEvent) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_KernelFunctionCallEvent.Marshal(b, m, deterministic)
+}
+func (dst *KernelFunctionCallEvent) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_KernelFunctionCallEvent.Merge(dst, src)
+}
+func (m *KernelFunctionCallEvent) XXX_Size() int {
+	return xxx_messageInfo_KernelFunctionCallEvent.Size(m)
+}
+func (m *KernelFunctionCallEvent) XXX_DiscardUnknown() {
+	xxx_messageInfo_KernelFunctionCallEvent.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_KernelFunctionCallEvent proto.InternalMessageInfo
 
 func (m *KernelFunctionCallEvent) GetArguments() map[string]*KernelFunctionCallEvent_FieldValue {
 	if m != nil {
@@ -1283,20 +1921,47 @@ func (m *KernelFunctionCallEvent) GetArguments() map[string]*KernelFunctionCallE
 // information and the value itself.
 type KernelFunctionCallEvent_FieldValue struct {
 	// The type represented by this field value.
-	FieldType KernelFunctionCallEvent_FieldType `protobuf:"varint,1,opt,name=field_type,json=fieldType,enum=capsule8.api.v0.KernelFunctionCallEvent_FieldType" json:"field_type,omitempty"`
+	FieldType KernelFunctionCallEvent_FieldType `protobuf:"varint,1,opt,name=field_type,json=fieldType,proto3,enum=capsule8.api.v0.KernelFunctionCallEvent_FieldType" json:"field_type,omitempty"`
 	// Types that are valid to be assigned to Value:
 	//	*KernelFunctionCallEvent_FieldValue_BytesValue
 	//	*KernelFunctionCallEvent_FieldValue_StringValue
 	//	*KernelFunctionCallEvent_FieldValue_SignedValue
 	//	*KernelFunctionCallEvent_FieldValue_UnsignedValue
-	Value isKernelFunctionCallEvent_FieldValue_Value `protobuf_oneof:"value"`
+	Value                isKernelFunctionCallEvent_FieldValue_Value `protobuf_oneof:"value"`
+	XXX_NoUnkeyedLiteral struct{}                                   `json:"-"`
+	XXX_unrecognized     []byte                                     `json:"-"`
+	XXX_sizecache        int32                                      `json:"-"`
 }
 
 func (m *KernelFunctionCallEvent_FieldValue) Reset()         { *m = KernelFunctionCallEvent_FieldValue{} }
 func (m *KernelFunctionCallEvent_FieldValue) String() string { return proto.CompactTextString(m) }
 func (*KernelFunctionCallEvent_FieldValue) ProtoMessage()    {}
 func (*KernelFunctionCallEvent_FieldValue) Descriptor() ([]byte, []int) {
-	return fileDescriptor1, []int{8, 0}
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{9, 0}
+}
+func (m *KernelFunctionCallEvent_FieldValue) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_KernelFunctionCallEvent_FieldValue.Unmarshal(m, b)
+}
+func (m *KernelFunctionCallEvent_FieldValue) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_KernelFunctionCallEvent_FieldValue.Marshal(b, m, deterministic)
+}
+func (dst *KernelFunctionCallEvent_FieldValue) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_KernelFunctionCallEvent_FieldValue.Merge(dst, src)
+}
+func (m *KernelFunctionCallEvent_FieldValue) XXX_Size() int {
+	return xxx_messageInfo_KernelFunctionCallEvent_FieldValue.Size(m)
+}
+func (m *KernelFunctionCallEvent_FieldValue) XXX_DiscardUnknown() {
+	xxx_messageInfo_KernelFunctionCallEvent_FieldValue.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_KernelFunctionCallEvent_FieldValue proto.InternalMessageInfo
+
+func (m *KernelFunctionCallEvent_FieldValue) GetFieldType() KernelFunctionCallEvent_FieldType {
+	if m != nil {
+		return m.FieldType
+	}
+	return KernelFunctionCallEvent_UNKNOWN
 }
 
 type isKernelFunctionCallEvent_FieldValue_Value interface {
@@ -1306,19 +1971,25 @@ type isKernelFunctionCallEvent_FieldValue_Value interface {
 type KernelFunctionCallEvent_FieldValue_BytesValue struct {
 	BytesValue []byte `protobuf:"bytes,2,opt,name=bytes_value,json=bytesValue,proto3,oneof"`
 }
+
 type KernelFunctionCallEvent_FieldValue_StringValue struct {
-	StringValue string `protobuf:"bytes,3,opt,name=string_value,json=stringValue,oneof"`
-}
-type KernelFunctionCallEvent_FieldValue_SignedValue struct {
-	SignedValue int64 `protobuf:"zigzag64,4,opt,name=signed_value,json=signedValue,oneof"`
-}
-type KernelFunctionCallEvent_FieldValue_UnsignedValue struct {
-	UnsignedValue uint64 `protobuf:"varint,5,opt,name=unsigned_value,json=unsignedValue,oneof"`
+	StringValue string `protobuf:"bytes,3,opt,name=string_value,json=stringValue,proto3,oneof"`
 }
 
-func (*KernelFunctionCallEvent_FieldValue_BytesValue) isKernelFunctionCallEvent_FieldValue_Value()  {}
+type KernelFunctionCallEvent_FieldValue_SignedValue struct {
+	SignedValue int64 `protobuf:"zigzag64,4,opt,name=signed_value,json=signedValue,proto3,oneof"`
+}
+
+type KernelFunctionCallEvent_FieldValue_UnsignedValue struct {
+	UnsignedValue uint64 `protobuf:"varint,5,opt,name=unsigned_value,json=unsignedValue,proto3,oneof"`
+}
+
+func (*KernelFunctionCallEvent_FieldValue_BytesValue) isKernelFunctionCallEvent_FieldValue_Value() {}
+
 func (*KernelFunctionCallEvent_FieldValue_StringValue) isKernelFunctionCallEvent_FieldValue_Value() {}
+
 func (*KernelFunctionCallEvent_FieldValue_SignedValue) isKernelFunctionCallEvent_FieldValue_Value() {}
+
 func (*KernelFunctionCallEvent_FieldValue_UnsignedValue) isKernelFunctionCallEvent_FieldValue_Value() {
 }
 
@@ -1327,13 +1998,6 @@ func (m *KernelFunctionCallEvent_FieldValue) GetValue() isKernelFunctionCallEven
 		return m.Value
 	}
 	return nil
-}
-
-func (m *KernelFunctionCallEvent_FieldValue) GetFieldType() KernelFunctionCallEvent_FieldType {
-	if m != nil {
-		return m.FieldType
-	}
-	return KernelFunctionCallEvent_UNKNOWN
 }
 
 func (m *KernelFunctionCallEvent_FieldValue) GetBytesValue() []byte {
@@ -1438,18 +2102,265 @@ func _KernelFunctionCallEvent_FieldValue_OneofSizer(msg proto.Message) (n int) {
 	// value
 	switch x := m.Value.(type) {
 	case *KernelFunctionCallEvent_FieldValue_BytesValue:
-		n += proto.SizeVarint(2<<3 | proto.WireBytes)
+		n += 1 // tag and wire
 		n += proto.SizeVarint(uint64(len(x.BytesValue)))
 		n += len(x.BytesValue)
 	case *KernelFunctionCallEvent_FieldValue_StringValue:
-		n += proto.SizeVarint(3<<3 | proto.WireBytes)
+		n += 1 // tag and wire
 		n += proto.SizeVarint(uint64(len(x.StringValue)))
 		n += len(x.StringValue)
 	case *KernelFunctionCallEvent_FieldValue_SignedValue:
-		n += proto.SizeVarint(4<<3 | proto.WireVarint)
+		n += 1 // tag and wire
 		n += proto.SizeVarint(uint64(uint64(x.SignedValue<<1) ^ uint64((int64(x.SignedValue) >> 63))))
 	case *KernelFunctionCallEvent_FieldValue_UnsignedValue:
-		n += proto.SizeVarint(5<<3 | proto.WireVarint)
+		n += 1 // tag and wire
+		n += proto.SizeVarint(uint64(x.UnsignedValue))
+	case nil:
+	default:
+		panic(fmt.Sprintf("proto: unexpected type %T in oneof", x))
+	}
+	return n
+}
+
+// UserFunctionCallEvent describes an event that occurred related to user
+// functions being entered or exited.
+type UserFunctionCallEvent struct {
+	// This is a map of argument names and values. The keys are strings
+	// that are the names of the arguments, and the values are the actual
+	// values for each field.
+	Arguments            map[string]*UserFunctionCallEvent_FieldValue `protobuf:"bytes,1,rep,name=arguments,proto3" json:"arguments,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+	XXX_NoUnkeyedLiteral struct{}                                     `json:"-"`
+	XXX_unrecognized     []byte                                       `json:"-"`
+	XXX_sizecache        int32                                        `json:"-"`
+}
+
+func (m *UserFunctionCallEvent) Reset()         { *m = UserFunctionCallEvent{} }
+func (m *UserFunctionCallEvent) String() string { return proto.CompactTextString(m) }
+func (*UserFunctionCallEvent) ProtoMessage()    {}
+func (*UserFunctionCallEvent) Descriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{10}
+}
+func (m *UserFunctionCallEvent) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_UserFunctionCallEvent.Unmarshal(m, b)
+}
+func (m *UserFunctionCallEvent) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_UserFunctionCallEvent.Marshal(b, m, deterministic)
+}
+func (dst *UserFunctionCallEvent) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_UserFunctionCallEvent.Merge(dst, src)
+}
+func (m *UserFunctionCallEvent) XXX_Size() int {
+	return xxx_messageInfo_UserFunctionCallEvent.Size(m)
+}
+func (m *UserFunctionCallEvent) XXX_DiscardUnknown() {
+	xxx_messageInfo_UserFunctionCallEvent.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_UserFunctionCallEvent proto.InternalMessageInfo
+
+func (m *UserFunctionCallEvent) GetArguments() map[string]*UserFunctionCallEvent_FieldValue {
+	if m != nil {
+		return m.Arguments
+	}
+	return nil
+}
+
+// The representation of a field value, which is composed of type
+// information and the value itself.
+type UserFunctionCallEvent_FieldValue struct {
+	// The type represented by this field value.
+	FieldType UserFunctionCallEvent_FieldType `protobuf:"varint,1,opt,name=field_type,json=fieldType,proto3,enum=capsule8.api.v0.UserFunctionCallEvent_FieldType" json:"field_type,omitempty"`
+	// Types that are valid to be assigned to Value:
+	//	*UserFunctionCallEvent_FieldValue_BytesValue
+	//	*UserFunctionCallEvent_FieldValue_StringValue
+	//	*UserFunctionCallEvent_FieldValue_SignedValue
+	//	*UserFunctionCallEvent_FieldValue_UnsignedValue
+	Value                isUserFunctionCallEvent_FieldValue_Value `protobuf_oneof:"value"`
+	XXX_NoUnkeyedLiteral struct{}                                 `json:"-"`
+	XXX_unrecognized     []byte                                   `json:"-"`
+	XXX_sizecache        int32                                    `json:"-"`
+}
+
+func (m *UserFunctionCallEvent_FieldValue) Reset()         { *m = UserFunctionCallEvent_FieldValue{} }
+func (m *UserFunctionCallEvent_FieldValue) String() string { return proto.CompactTextString(m) }
+func (*UserFunctionCallEvent_FieldValue) ProtoMessage()    {}
+func (*UserFunctionCallEvent_FieldValue) Descriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{10, 0}
+}
+func (m *UserFunctionCallEvent_FieldValue) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_UserFunctionCallEvent_FieldValue.Unmarshal(m, b)
+}
+func (m *UserFunctionCallEvent_FieldValue) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_UserFunctionCallEvent_FieldValue.Marshal(b, m, deterministic)
+}
+func (dst *UserFunctionCallEvent_FieldValue) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_UserFunctionCallEvent_FieldValue.Merge(dst, src)
+}
+func (m *UserFunctionCallEvent_FieldValue) XXX_Size() int {
+	return xxx_messageInfo_UserFunctionCallEvent_FieldValue.Size(m)
+}
+func (m *UserFunctionCallEvent_FieldValue) XXX_DiscardUnknown() {
+	xxx_messageInfo_UserFunctionCallEvent_FieldValue.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_UserFunctionCallEvent_FieldValue proto.InternalMessageInfo
+
+func (m *UserFunctionCallEvent_FieldValue) GetFieldType() UserFunctionCallEvent_FieldType {
+	if m != nil {
+		return m.FieldType
+	}
+	return UserFunctionCallEvent_UNKNOWN
+}
+
+type isUserFunctionCallEvent_FieldValue_Value interface {
+	isUserFunctionCallEvent_FieldValue_Value()
+}
+
+type UserFunctionCallEvent_FieldValue_BytesValue struct {
+	BytesValue []byte `protobuf:"bytes,2,opt,name=bytes_value,json=bytesValue,proto3,oneof"`
+}
+
+type UserFunctionCallEvent_FieldValue_StringValue struct {
+	StringValue string `protobuf:"bytes,3,opt,name=string_value,json=stringValue,proto3,oneof"`
+}
+
+type UserFunctionCallEvent_FieldValue_SignedValue struct {
+	SignedValue int64 `protobuf:"zigzag64,4,opt,name=signed_value,json=signedValue,proto3,oneof"`
+}
+
+type UserFunctionCallEvent_FieldValue_UnsignedValue struct {
+	UnsignedValue uint64 `protobuf:"varint,5,opt,name=unsigned_value,json=unsignedValue,proto3,oneof"`
+}
+
+func (*UserFunctionCallEvent_FieldValue_BytesValue) isUserFunctionCallEvent_FieldValue_Value() {}
+
+func (*UserFunctionCallEvent_FieldValue_StringValue) isUserFunctionCallEvent_FieldValue_Value() {}
+
+func (*UserFunctionCallEvent_FieldValue_SignedValue) isUserFunctionCallEvent_FieldValue_Value() {}
+
+func (*UserFunctionCallEvent_FieldValue_UnsignedValue) isUserFunctionCallEvent_FieldValue_Value() {}
+
+func (m *UserFunctionCallEvent_FieldValue) GetValue() isUserFunctionCallEvent_FieldValue_Value {
+	if m != nil {
+		return m.Value
+	}
+	return nil
+}
+
+func (m *UserFunctionCallEvent_FieldValue) GetBytesValue() []byte {
+	if x, ok := m.GetValue().(*UserFunctionCallEvent_FieldValue_BytesValue); ok {
+		return x.BytesValue
+	}
+	return nil
+}
+
+func (m *UserFunctionCallEvent_FieldValue) GetStringValue() string {
+	if x, ok := m.GetValue().(*UserFunctionCallEvent_FieldValue_StringValue); ok {
+		return x.StringValue
+	}
+	return ""
+}
+
+func (m *UserFunctionCallEvent_FieldValue) GetSignedValue() int64 {
+	if x, ok := m.GetValue().(*UserFunctionCallEvent_FieldValue_SignedValue); ok {
+		return x.SignedValue
+	}
+	return 0
+}
+
+func (m *UserFunctionCallEvent_FieldValue) GetUnsignedValue() uint64 {
+	if x, ok := m.GetValue().(*UserFunctionCallEvent_FieldValue_UnsignedValue); ok {
+		return x.UnsignedValue
+	}
+	return 0
+}
+
+// XXX_OneofFuncs is for the internal use of the proto package.
+func (*UserFunctionCallEvent_FieldValue) XXX_OneofFuncs() (func(msg proto.Message, b *proto.Buffer) error, func(msg proto.Message, tag, wire int, b *proto.Buffer) (bool, error), func(msg proto.Message) (n int), []interface{}) {
+	return _UserFunctionCallEvent_FieldValue_OneofMarshaler, _UserFunctionCallEvent_FieldValue_OneofUnmarshaler, _UserFunctionCallEvent_FieldValue_OneofSizer, []interface{}{
+		(*UserFunctionCallEvent_FieldValue_BytesValue)(nil),
+		(*UserFunctionCallEvent_FieldValue_StringValue)(nil),
+		(*UserFunctionCallEvent_FieldValue_SignedValue)(nil),
+		(*UserFunctionCallEvent_FieldValue_UnsignedValue)(nil),
+	}
+}
+
+func _UserFunctionCallEvent_FieldValue_OneofMarshaler(msg proto.Message, b *proto.Buffer) error {
+	m := msg.(*UserFunctionCallEvent_FieldValue)
+	// value
+	switch x := m.Value.(type) {
+	case *UserFunctionCallEvent_FieldValue_BytesValue:
+		b.EncodeVarint(2<<3 | proto.WireBytes)
+		b.EncodeRawBytes(x.BytesValue)
+	case *UserFunctionCallEvent_FieldValue_StringValue:
+		b.EncodeVarint(3<<3 | proto.WireBytes)
+		b.EncodeStringBytes(x.StringValue)
+	case *UserFunctionCallEvent_FieldValue_SignedValue:
+		b.EncodeVarint(4<<3 | proto.WireVarint)
+		b.EncodeZigzag64(uint64(x.SignedValue))
+	case *UserFunctionCallEvent_FieldValue_UnsignedValue:
+		b.EncodeVarint(5<<3 | proto.WireVarint)
+		b.EncodeVarint(uint64(x.UnsignedValue))
+	case nil:
+	default:
+		return fmt.Errorf("UserFunctionCallEvent_FieldValue.Value has unexpected type %T", x)
+	}
+	return nil
+}
+
+func _UserFunctionCallEvent_FieldValue_OneofUnmarshaler(msg proto.Message, tag, wire int, b *proto.Buffer) (bool, error) {
+	m := msg.(*UserFunctionCallEvent_FieldValue)
+	switch tag {
+	case 2: // value.bytes_value
+		if wire != proto.WireBytes {
+			return true, proto.ErrInternalBadWireType
+		}
+		x, err := b.DecodeRawBytes(true)
+		m.Value = &UserFunctionCallEvent_FieldValue_BytesValue{x}
+		return true, err
+	case 3: // value.string_value
+		if wire != proto.WireBytes {
+			return true, proto.ErrInternalBadWireType
+		}
+		x, err := b.DecodeStringBytes()
+		m.Value = &UserFunctionCallEvent_FieldValue_StringValue{x}
+		return true, err
+	case 4: // value.signed_value
+		if wire != proto.WireVarint {
+			return true, proto.ErrInternalBadWireType
+		}
+		x, err := b.DecodeZigzag64()
+		m.Value = &UserFunctionCallEvent_FieldValue_SignedValue{int64(x)}
+		return true, err
+	case 5: // value.unsigned_value
+		if wire != proto.WireVarint {
+			return true, proto.ErrInternalBadWireType
+		}
+		x, err := b.DecodeVarint()
+		m.Value = &UserFunctionCallEvent_FieldValue_UnsignedValue{x}
+		return true, err
+	default:
+		return false, nil
+	}
+}
+
+func _UserFunctionCallEvent_FieldValue_OneofSizer(msg proto.Message) (n int) {
+	m := msg.(*UserFunctionCallEvent_FieldValue)
+	// value
+	switch x := m.Value.(type) {
+	case *UserFunctionCallEvent_FieldValue_BytesValue:
+		n += 1 // tag and wire
+		n += proto.SizeVarint(uint64(len(x.BytesValue)))
+		n += len(x.BytesValue)
+	case *UserFunctionCallEvent_FieldValue_StringValue:
+		n += 1 // tag and wire
+		n += proto.SizeVarint(uint64(len(x.StringValue)))
+		n += len(x.StringValue)
+	case *UserFunctionCallEvent_FieldValue_SignedValue:
+		n += 1 // tag and wire
+		n += proto.SizeVarint(uint64(uint64(x.SignedValue<<1) ^ uint64((int64(x.SignedValue) >> 63))))
+	case *UserFunctionCallEvent_FieldValue_UnsignedValue:
+		n += 1 // tag and wire
 		n += proto.SizeVarint(uint64(x.UnsignedValue))
 	case nil:
 	default:
@@ -1462,28 +2373,50 @@ func _KernelFunctionCallEvent_FieldValue_OneofSizer(msg proto.Message) (n int) {
 // occurring as detected by the Sensor.
 type NetworkEvent struct {
 	// The type of event described by this NetworkEvent message.
-	Type NetworkEventType `protobuf:"varint,1,opt,name=type,enum=capsule8.api.v0.NetworkEventType" json:"type,omitempty"`
+	Type NetworkEventType `protobuf:"varint,1,opt,name=type,proto3,enum=capsule8.api.v0.NetworkEventType" json:"type,omitempty"`
 	// Present when the event describes a network event that is an attempt
 	// to perform a network related action. This is the socket descriptor
 	// used to perform the action.
-	Sockfd uint64 `protobuf:"varint,10,opt,name=sockfd" json:"sockfd,omitempty"`
+	Sockfd uint64 `protobuf:"varint,10,opt,name=sockfd,proto3" json:"sockfd,omitempty"`
 	// Present when the event describes a network event that is an attempt
 	// to perform a network related action that includes an address. This
 	// is that address.
-	Address *NetworkAddress `protobuf:"bytes,11,opt,name=address" json:"address,omitempty"`
+	Address *NetworkAddress `protobuf:"bytes,11,opt,name=address,proto3" json:"address,omitempty"`
 	// Present when the event describes a network event that is the result
 	// of an attempted network related action. This is the return code from
 	// the system call.
-	Result int64 `protobuf:"zigzag64,12,opt,name=result" json:"result,omitempty"`
+	Result int64 `protobuf:"zigzag64,12,opt,name=result,proto3" json:"result,omitempty"`
 	// Present only when the event describes a listen attempt. This is the
 	// value of the backlog argument passed to listen(2).
-	Backlog uint64 `protobuf:"varint,13,opt,name=backlog" json:"backlog,omitempty"`
+	Backlog              uint64   `protobuf:"varint,13,opt,name=backlog,proto3" json:"backlog,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
-func (m *NetworkEvent) Reset()                    { *m = NetworkEvent{} }
-func (m *NetworkEvent) String() string            { return proto.CompactTextString(m) }
-func (*NetworkEvent) ProtoMessage()               {}
-func (*NetworkEvent) Descriptor() ([]byte, []int) { return fileDescriptor1, []int{9} }
+func (m *NetworkEvent) Reset()         { *m = NetworkEvent{} }
+func (m *NetworkEvent) String() string { return proto.CompactTextString(m) }
+func (*NetworkEvent) ProtoMessage()    {}
+func (*NetworkEvent) Descriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{11}
+}
+func (m *NetworkEvent) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_NetworkEvent.Unmarshal(m, b)
+}
+func (m *NetworkEvent) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_NetworkEvent.Marshal(b, m, deterministic)
+}
+func (dst *NetworkEvent) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_NetworkEvent.Merge(dst, src)
+}
+func (m *NetworkEvent) XXX_Size() int {
+	return xxx_messageInfo_NetworkEvent.Size(m)
+}
+func (m *NetworkEvent) XXX_DiscardUnknown() {
+	xxx_messageInfo_NetworkEvent.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_NetworkEvent proto.InternalMessageInfo
 
 func (m *NetworkEvent) GetType() NetworkEventType {
 	if m != nil {
@@ -1524,18 +2457,40 @@ func (m *NetworkEvent) GetBacklog() uint64 {
 // the perf config value and its associated counter value.
 type PerformanceEventValue struct {
 	// The type of performance event counter.
-	Type PerformanceEventType `protobuf:"varint,1,opt,name=type,enum=capsule8.api.v0.PerformanceEventType" json:"type,omitempty"`
+	Type PerformanceEventType `protobuf:"varint,1,opt,name=type,proto3,enum=capsule8.api.v0.PerformanceEventType" json:"type,omitempty"`
 	// The config value used in the registration of the event group.
-	Config uint64 `protobuf:"varint,2,opt,name=config" json:"config,omitempty"`
+	Config uint64 `protobuf:"varint,2,opt,name=config,proto3" json:"config,omitempty"`
 	// The current value of the counter associated with the type and config
 	// value pair.
-	Value uint64 `protobuf:"varint,3,opt,name=value" json:"value,omitempty"`
+	Value                uint64   `protobuf:"varint,3,opt,name=value,proto3" json:"value,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
-func (m *PerformanceEventValue) Reset()                    { *m = PerformanceEventValue{} }
-func (m *PerformanceEventValue) String() string            { return proto.CompactTextString(m) }
-func (*PerformanceEventValue) ProtoMessage()               {}
-func (*PerformanceEventValue) Descriptor() ([]byte, []int) { return fileDescriptor1, []int{10} }
+func (m *PerformanceEventValue) Reset()         { *m = PerformanceEventValue{} }
+func (m *PerformanceEventValue) String() string { return proto.CompactTextString(m) }
+func (*PerformanceEventValue) ProtoMessage()    {}
+func (*PerformanceEventValue) Descriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{12}
+}
+func (m *PerformanceEventValue) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_PerformanceEventValue.Unmarshal(m, b)
+}
+func (m *PerformanceEventValue) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_PerformanceEventValue.Marshal(b, m, deterministic)
+}
+func (dst *PerformanceEventValue) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_PerformanceEventValue.Merge(dst, src)
+}
+func (m *PerformanceEventValue) XXX_Size() int {
+	return xxx_messageInfo_PerformanceEventValue.Size(m)
+}
+func (m *PerformanceEventValue) XXX_DiscardUnknown() {
+	xxx_messageInfo_PerformanceEventValue.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_PerformanceEventValue proto.InternalMessageInfo
 
 func (m *PerformanceEventValue) GetType() PerformanceEventType {
 	if m != nil {
@@ -1564,20 +2519,42 @@ type PerformanceEvent struct {
 	// The total amount of time that the event has been enabled in the
 	// sensor. This corresponds to PERF_FORMAT_TOTAL_TIME_ENABLED that is
 	// reported by the kernel with the event sample.
-	TotalTimeEnabled uint64 `protobuf:"varint,1,opt,name=total_time_enabled,json=totalTimeEnabled" json:"total_time_enabled,omitempty"`
+	TotalTimeEnabled uint64 `protobuf:"varint,1,opt,name=total_time_enabled,json=totalTimeEnabled,proto3" json:"total_time_enabled,omitempty"`
 	// The total amount of time that the event subscription has been running
 	// in the sensor. This corresponds to PERF_FORMAT_TOTAL_TIME_RUNNING
 	// that is reported by the kernel with the event sample.
-	TotalTimeRunning uint64 `protobuf:"varint,2,opt,name=total_time_running,json=totalTimeRunning" json:"total_time_running,omitempty"`
+	TotalTimeRunning uint64 `protobuf:"varint,2,opt,name=total_time_running,json=totalTimeRunning,proto3" json:"total_time_running,omitempty"`
 	// These are the counter values reported by the kernel with the event
 	// sample.
-	Values []*PerformanceEventValue `protobuf:"bytes,3,rep,name=values" json:"values,omitempty"`
+	Values               []*PerformanceEventValue `protobuf:"bytes,3,rep,name=values,proto3" json:"values,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}                 `json:"-"`
+	XXX_unrecognized     []byte                   `json:"-"`
+	XXX_sizecache        int32                    `json:"-"`
 }
 
-func (m *PerformanceEvent) Reset()                    { *m = PerformanceEvent{} }
-func (m *PerformanceEvent) String() string            { return proto.CompactTextString(m) }
-func (*PerformanceEvent) ProtoMessage()               {}
-func (*PerformanceEvent) Descriptor() ([]byte, []int) { return fileDescriptor1, []int{11} }
+func (m *PerformanceEvent) Reset()         { *m = PerformanceEvent{} }
+func (m *PerformanceEvent) String() string { return proto.CompactTextString(m) }
+func (*PerformanceEvent) ProtoMessage()    {}
+func (*PerformanceEvent) Descriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_event_bffb729b8bf2d70b, []int{13}
+}
+func (m *PerformanceEvent) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_PerformanceEvent.Unmarshal(m, b)
+}
+func (m *PerformanceEvent) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_PerformanceEvent.Marshal(b, m, deterministic)
+}
+func (dst *PerformanceEvent) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_PerformanceEvent.Merge(dst, src)
+}
+func (m *PerformanceEvent) XXX_Size() int {
+	return xxx_messageInfo_PerformanceEvent.Size(m)
+}
+func (m *PerformanceEvent) XXX_DiscardUnknown() {
+	xxx_messageInfo_PerformanceEvent.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_PerformanceEvent proto.InternalMessageInfo
 
 func (m *PerformanceEvent) GetTotalTimeEnabled() uint64 {
 	if m != nil {
@@ -1604,152 +2581,190 @@ func init() {
 	proto.RegisterType((*TelemetryEvent)(nil), "capsule8.api.v0.TelemetryEvent")
 	proto.RegisterType((*ChargenEvent)(nil), "capsule8.api.v0.ChargenEvent")
 	proto.RegisterType((*TickerEvent)(nil), "capsule8.api.v0.TickerEvent")
+	proto.RegisterType((*LostRecordEvent)(nil), "capsule8.api.v0.LostRecordEvent")
 	proto.RegisterType((*ContainerEvent)(nil), "capsule8.api.v0.ContainerEvent")
 	proto.RegisterType((*ProcessEvent)(nil), "capsule8.api.v0.ProcessEvent")
 	proto.RegisterType((*SyscallEvent)(nil), "capsule8.api.v0.SyscallEvent")
 	proto.RegisterType((*FileEvent)(nil), "capsule8.api.v0.FileEvent")
 	proto.RegisterType((*Process)(nil), "capsule8.api.v0.Process")
 	proto.RegisterType((*KernelFunctionCallEvent)(nil), "capsule8.api.v0.KernelFunctionCallEvent")
+	proto.RegisterMapType((map[string]*KernelFunctionCallEvent_FieldValue)(nil), "capsule8.api.v0.KernelFunctionCallEvent.ArgumentsEntry")
 	proto.RegisterType((*KernelFunctionCallEvent_FieldValue)(nil), "capsule8.api.v0.KernelFunctionCallEvent.FieldValue")
+	proto.RegisterType((*UserFunctionCallEvent)(nil), "capsule8.api.v0.UserFunctionCallEvent")
+	proto.RegisterMapType((map[string]*UserFunctionCallEvent_FieldValue)(nil), "capsule8.api.v0.UserFunctionCallEvent.ArgumentsEntry")
+	proto.RegisterType((*UserFunctionCallEvent_FieldValue)(nil), "capsule8.api.v0.UserFunctionCallEvent.FieldValue")
 	proto.RegisterType((*NetworkEvent)(nil), "capsule8.api.v0.NetworkEvent")
 	proto.RegisterType((*PerformanceEventValue)(nil), "capsule8.api.v0.PerformanceEventValue")
 	proto.RegisterType((*PerformanceEvent)(nil), "capsule8.api.v0.PerformanceEvent")
+	proto.RegisterEnum("capsule8.api.v0.LostRecordEventType", LostRecordEventType_name, LostRecordEventType_value)
 	proto.RegisterEnum("capsule8.api.v0.ContainerEventType", ContainerEventType_name, ContainerEventType_value)
 	proto.RegisterEnum("capsule8.api.v0.ProcessEventType", ProcessEventType_name, ProcessEventType_value)
 	proto.RegisterEnum("capsule8.api.v0.SyscallEventType", SyscallEventType_name, SyscallEventType_value)
 	proto.RegisterEnum("capsule8.api.v0.FileEventType", FileEventType_name, FileEventType_value)
 	proto.RegisterEnum("capsule8.api.v0.KernelFunctionCallEventType", KernelFunctionCallEventType_name, KernelFunctionCallEventType_value)
+	proto.RegisterEnum("capsule8.api.v0.UserFunctionCallEventType", UserFunctionCallEventType_name, UserFunctionCallEventType_value)
 	proto.RegisterEnum("capsule8.api.v0.NetworkEventType", NetworkEventType_name, NetworkEventType_value)
 	proto.RegisterEnum("capsule8.api.v0.PerformanceEventType", PerformanceEventType_name, PerformanceEventType_value)
 	proto.RegisterEnum("capsule8.api.v0.KernelFunctionCallEvent_FieldType", KernelFunctionCallEvent_FieldType_name, KernelFunctionCallEvent_FieldType_value)
+	proto.RegisterEnum("capsule8.api.v0.UserFunctionCallEvent_FieldType", UserFunctionCallEvent_FieldType_name, UserFunctionCallEvent_FieldType_value)
 }
 
-func init() { proto.RegisterFile("capsule8/api/v0/telemetry_event.proto", fileDescriptor1) }
+func init() {
+	proto.RegisterFile("capsule8/api/v0/telemetry_event.proto", fileDescriptor_telemetry_event_bffb729b8bf2d70b)
+}
 
-var fileDescriptor1 = []byte{
-	// 1972 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xcc, 0x58, 0x3f, 0x77, 0xdb, 0xc8,
-	0x11, 0x37, 0x44, 0x4a, 0x22, 0x87, 0x14, 0x0d, 0x6d, 0xe4, 0x3b, 0x58, 0xb2, 0x2d, 0x8a, 0xf2,
-	0x1f, 0x46, 0xc9, 0x93, 0x6d, 0xca, 0xf6, 0xf9, 0x52, 0xe4, 0x1e, 0x0d, 0x81, 0x31, 0x4f, 0x32,
-	0xa8, 0x2c, 0x21, 0xfb, 0x5c, 0xe1, 0x41, 0xc0, 0x8a, 0x46, 0x44, 0x02, 0x3c, 0x00, 0xb4, 0xad,
-	0x2e, 0x2f, 0x55, 0x9a, 0x14, 0xa9, 0x52, 0xa6, 0x4d, 0x95, 0x7c, 0x8d, 0xdc, 0xe5, 0x43, 0xe4,
-	0xe5, 0x13, 0xa4, 0x49, 0x9d, 0x97, 0xb7, 0xb3, 0x0b, 0xfe, 0x91, 0x08, 0xeb, 0xd2, 0x5d, 0xb7,
-	0xfb, 0x9b, 0xdf, 0x0c, 0x66, 0x76, 0x66, 0x67, 0x87, 0x84, 0x7b, 0xae, 0x33, 0x8c, 0x47, 0x7d,
-	0xf6, 0xfc, 0xa1, 0x33, 0xf4, 0x1f, 0xbe, 0x7f, 0xf4, 0x30, 0x61, 0x7d, 0x36, 0x60, 0x49, 0x74,
-	0x6e, 0xb3, 0xf7, 0x2c, 0x48, 0x76, 0x87, 0x51, 0x98, 0x84, 0xe4, 0x7a, 0x4a, 0xdb, 0x75, 0x86,
-	0xfe, 0xee, 0xfb, 0x47, 0xeb, 0x1b, 0x97, 0xf4, 0xce, 0x87, 0x2c, 0x16, 0xec, 0xda, 0xbf, 0x0b,
-	0x50, 0xb1, 0x52, 0x3b, 0x06, 0x37, 0x43, 0x2a, 0xb0, 0xe0, 0x7b, 0x9a, 0x52, 0x55, 0xea, 0x45,
-	0xba, 0xe0, 0x7b, 0xe4, 0x36, 0xc0, 0x30, 0x0a, 0x5d, 0x16, 0xc7, 0xb6, 0xef, 0x69, 0x0b, 0x88,
-	0x17, 0x25, 0xd2, 0xf6, 0xc8, 0x26, 0x94, 0x52, 0xf1, 0xd0, 0xf7, 0xb4, 0x5c, 0x55, 0xa9, 0x2f,
-	0xd2, 0x54, 0xe3, 0xc8, 0xf7, 0xc8, 0x16, 0x94, 0xdd, 0x30, 0x48, 0x1c, 0x3f, 0x60, 0x11, 0xb7,
-	0x90, 0x47, 0x0b, 0xa5, 0x31, 0xd6, 0xf6, 0xc8, 0x06, 0x14, 0x63, 0x16, 0xc4, 0x21, 0xca, 0x17,
-	0x51, 0x5e, 0x10, 0x40, 0xdb, 0x23, 0x4f, 0xe0, 0x33, 0x29, 0x8c, 0xd9, 0xb7, 0x23, 0x16, 0xb8,
-	0xcc, 0x0e, 0x46, 0x83, 0x13, 0x16, 0x69, 0x4b, 0x55, 0xa5, 0x9e, 0xa7, 0x6b, 0x42, 0xda, 0x95,
-	0x42, 0x13, 0x65, 0xa4, 0x01, 0x37, 0xa4, 0xd6, 0x20, 0x0c, 0xc2, 0xc4, 0x1f, 0x30, 0x3b, 0x70,
-	0x82, 0x30, 0xd6, 0x96, 0xab, 0x4a, 0x3d, 0x47, 0x7f, 0x22, 0x84, 0xaf, 0xa4, 0xcc, 0xe4, 0x22,
-	0xd2, 0x84, 0xeb, 0x69, 0x28, 0x7d, 0x3f, 0x60, 0x4e, 0x8f, 0x69, 0x85, 0x6a, 0xae, 0x5e, 0x6a,
-	0x68, 0xbb, 0x17, 0x0e, 0x75, 0xf7, 0x48, 0xf0, 0x68, 0x45, 0x2a, 0x1c, 0x0a, 0x3e, 0xb9, 0x07,
-	0x95, 0x49, 0xb0, 0x81, 0x33, 0x60, 0xda, 0x1d, 0x0c, 0x67, 0x65, 0x8c, 0x9a, 0xce, 0x80, 0x91,
-	0x9b, 0x50, 0xf0, 0x07, 0x4e, 0x8f, 0xf1, 0x78, 0x37, 0x91, 0xb0, 0x8c, 0xfb, 0x36, 0x1e, 0xb7,
-	0x10, 0xa1, 0x76, 0x55, 0x1c, 0x37, 0x22, 0xa8, 0xf9, 0x25, 0x2c, 0xc7, 0xe7, 0xb1, 0xeb, 0xf4,
-	0xfb, 0x1a, 0x54, 0x95, 0x7a, 0xa9, 0x71, 0xfb, 0x92, 0x6f, 0x5d, 0x21, 0xc7, 0x6c, 0xbe, 0xbc,
-	0x46, 0x53, 0x3e, 0x57, 0x95, 0xde, 0x6a, 0xa5, 0x0c, 0x55, 0x19, 0xd6, 0x58, 0x55, 0xf2, 0xc9,
-	0x23, 0xc8, 0x9f, 0xfa, 0x7d, 0xa6, 0x95, 0x51, 0x6f, 0xfd, 0x92, 0x5e, 0xcb, 0xef, 0xb3, 0x54,
-	0x09, 0x99, 0xe4, 0x00, 0x4a, 0x67, 0x2c, 0x0a, 0x58, 0xdf, 0x46, 0x5f, 0x57, 0x50, 0xb1, 0x7e,
-	0x49, 0xf1, 0x00, 0x39, 0xad, 0x51, 0xe0, 0x26, 0x7e, 0x18, 0xe8, 0x53, 0x6e, 0x83, 0x50, 0xd7,
-	0xa5, 0xe7, 0x01, 0x4b, 0x3e, 0x84, 0xd1, 0x99, 0x56, 0xc9, 0xf0, 0xdc, 0x14, 0xf2, 0xb1, 0xe7,
-	0x92, 0x4f, 0x0c, 0x28, 0x0d, 0x59, 0x74, 0x1a, 0x46, 0x03, 0x27, 0x70, 0x99, 0x76, 0x1d, 0xd5,
-	0xb7, 0x2e, 0x07, 0x3e, 0xe1, 0xa4, 0x26, 0xa6, 0xf5, 0xc8, 0x57, 0x50, 0x1c, 0x67, 0x50, 0x5b,
-	0x43, 0x23, 0x9b, 0x97, 0x8c, 0xe8, 0x29, 0x23, 0x35, 0x31, 0xd1, 0xe1, 0x21, 0xb8, 0xef, 0x9c,
-	0xa8, 0xc7, 0x02, 0xcd, 0xcb, 0x08, 0x41, 0x17, 0xf2, 0x71, 0x08, 0x92, 0x4f, 0x9e, 0xc1, 0x52,
-	0xe2, 0xbb, 0x67, 0x2c, 0xd2, 0x18, 0x6a, 0xde, 0xba, 0xa4, 0x69, 0xa1, 0x38, 0x55, 0x94, 0x6c,
-	0xb2, 0x0a, 0x39, 0x77, 0x38, 0xd2, 0xbe, 0x53, 0xf0, 0x4a, 0xf2, 0x35, 0xf9, 0x0a, 0x4a, 0x6e,
-	0xc4, 0x3c, 0x16, 0x24, 0xbe, 0xd3, 0x8f, 0xb5, 0xef, 0x95, 0x0c, 0x83, 0xfa, 0x84, 0x44, 0xa7,
-	0x35, 0x48, 0x0d, 0xca, 0xe9, 0x15, 0x49, 0x7a, 0xbe, 0xa7, 0xfd, 0x43, 0x18, 0x4f, 0x5b, 0x80,
-	0xd5, 0xf3, 0xbd, 0x17, 0xcb, 0xb0, 0x88, 0x0d, 0xe9, 0xeb, 0xa5, 0xc2, 0xdf, 0x15, 0xf5, 0x3b,
-	0x65, 0x2c, 0xb5, 0x13, 0xdf, 0xab, 0xed, 0x43, 0x79, 0x3a, 0x50, 0xb2, 0x06, 0x8b, 0x7e, 0xe0,
-	0xb1, 0x8f, 0xd8, 0x71, 0xf2, 0x54, 0x6c, 0xc8, 0x1d, 0x00, 0x1e, 0xbe, 0xe3, 0x26, 0x2c, 0x8a,
-	0x65, 0xd3, 0x99, 0x42, 0x6a, 0x6d, 0x28, 0x4d, 0x05, 0x4d, 0x34, 0x58, 0x8e, 0x99, 0x1b, 0x06,
-	0x5e, 0x8c, 0x66, 0x72, 0x34, 0xdd, 0x92, 0x2a, 0x94, 0xf0, 0xde, 0x4b, 0xe9, 0x02, 0x4a, 0xa7,
-	0xa1, 0xda, 0x1f, 0x73, 0x50, 0x99, 0xcd, 0x1c, 0xf9, 0x02, 0xf2, 0xbc, 0x49, 0xa2, 0xad, 0x4a,
-	0x63, 0xfb, 0x8a, 0x44, 0x5b, 0xe7, 0x43, 0x46, 0x51, 0x81, 0x10, 0xc8, 0xe3, 0xb5, 0x15, 0x0e,
-	0xe3, 0x7a, 0xe6, 0xae, 0xc3, 0xa7, 0xee, 0x7a, 0xe9, 0xe2, 0x5d, 0xbf, 0x09, 0x85, 0x77, 0x61,
-	0x9c, 0x60, 0x5f, 0xe5, 0x35, 0xb7, 0x4a, 0x97, 0xf9, 0x9e, 0x37, 0xd5, 0x0d, 0x28, 0xb2, 0x8f,
-	0x7e, 0x62, 0xbb, 0xa1, 0x27, 0x5a, 0xcc, 0x2a, 0x2d, 0x70, 0x40, 0x0f, 0x3d, 0xc6, 0x5b, 0x32,
-	0x0a, 0xe3, 0xc4, 0x49, 0x46, 0x31, 0x36, 0x98, 0x15, 0x0a, 0x1c, 0xea, 0x22, 0x32, 0x21, 0xf8,
-	0xbd, 0xc0, 0xe9, 0x63, 0x93, 0x49, 0x09, 0x88, 0x90, 0x3a, 0xa8, 0xd2, 0x7c, 0xc4, 0x6c, 0x6f,
-	0x34, 0x18, 0x32, 0x4f, 0xdb, 0xaa, 0x2a, 0xf5, 0x02, 0xad, 0x88, 0xaf, 0x44, 0x6c, 0x1f, 0x51,
-	0xf2, 0x73, 0x20, 0x5e, 0xc8, 0x13, 0x61, 0xbb, 0x61, 0x70, 0xea, 0xf7, 0xec, 0xdf, 0xc4, 0xa1,
-	0x28, 0xf1, 0x22, 0x55, 0x85, 0x44, 0x47, 0xc1, 0xd7, 0x71, 0x18, 0x90, 0xfb, 0x70, 0x3d, 0x74,
-	0xfd, 0x19, 0x2a, 0x13, 0xfd, 0x31, 0x74, 0xfd, 0x09, 0xaf, 0xf6, 0xfb, 0x1c, 0x94, 0xa7, 0x7b,
-	0x11, 0x79, 0x3a, 0x93, 0x91, 0xad, 0x4f, 0x36, 0xae, 0xa9, 0x7c, 0xdc, 0x85, 0xca, 0x69, 0x18,
-	0x9d, 0xd9, 0xee, 0x3b, 0xbf, 0xef, 0xe1, 0x39, 0x02, 0x9e, 0x55, 0x99, 0xa3, 0x3a, 0x07, 0xf9,
-	0x61, 0xd6, 0x60, 0x65, 0x8a, 0xe5, 0x7b, 0x32, 0x13, 0xa5, 0x31, 0xa9, 0xed, 0x91, 0x6d, 0x58,
-	0x61, 0x1f, 0x99, 0x6b, 0xf3, 0xe6, 0x86, 0xd9, 0x5a, 0x43, 0x4e, 0x99, 0x83, 0x2d, 0x89, 0x91,
-	0x1d, 0x58, 0x45, 0x92, 0x1b, 0x0e, 0x06, 0x4e, 0xe0, 0xe1, 0x2b, 0xa2, 0xdd, 0xa8, 0xe6, 0xea,
-	0x45, 0x7a, 0x9d, 0x0b, 0x74, 0x81, 0xf3, 0xc7, 0xe2, 0xc7, 0x93, 0xc1, 0xdb, 0x00, 0xa3, 0xa1,
-	0xe7, 0x24, 0xcc, 0x76, 0x3f, 0x78, 0x5a, 0x5d, 0x14, 0xa1, 0x40, 0xf4, 0x0f, 0x5e, 0xed, 0x9f,
-	0x0a, 0x94, 0xa7, 0x5f, 0x94, 0x2b, 0x53, 0x31, 0x4d, 0x9e, 0x4a, 0x85, 0x18, 0x2b, 0xc4, 0xfd,
-	0xe3, 0x63, 0x05, 0x81, 0xbc, 0x13, 0xf5, 0x1e, 0x61, 0x42, 0xf2, 0x14, 0xd7, 0x12, 0x7b, 0x8c,
-	0xe7, 0x2f, 0xb0, 0xc7, 0x12, 0x6b, 0xe0, 0xd3, 0x23, 0xb0, 0x86, 0xc4, 0xf6, 0xf0, 0x55, 0x11,
-	0xd8, 0x9e, 0xc4, 0x9e, 0xe0, 0x03, 0x21, 0xb0, 0x27, 0x12, 0x7b, 0x8a, 0x5d, 0x5f, 0x60, 0x4f,
-	0x89, 0x0a, 0xb9, 0x88, 0x25, 0x98, 0xbe, 0x1c, 0xe5, 0xcb, 0xda, 0x9f, 0x14, 0x28, 0x8e, 0x1f,
-	0x30, 0xd2, 0x98, 0x09, 0xef, 0x4e, 0xf6, 0x53, 0x37, 0x15, 0xdb, 0x3a, 0x14, 0xc6, 0x75, 0x21,
-	0xae, 0xf8, 0x78, 0xcf, 0x8f, 0x37, 0x1c, 0xb2, 0xc0, 0x3e, 0xed, 0x3b, 0x3d, 0xf1, 0xf0, 0xae,
-	0xd2, 0x22, 0x47, 0x5a, 0x1c, 0xe0, 0x65, 0x80, 0xe2, 0x01, 0x2f, 0x83, 0xb2, 0x28, 0x03, 0x0e,
-	0xbc, 0x0a, 0x3d, 0x56, 0x7b, 0x0a, 0xcb, 0xb2, 0xb0, 0xb9, 0xdb, 0x43, 0x39, 0x96, 0xad, 0x52,
-	0xbe, 0xe4, 0x3d, 0x4f, 0xd6, 0x99, 0x6c, 0x37, 0xe9, 0xb6, 0xf6, 0x9f, 0x3c, 0x7c, 0x9e, 0xf1,
-	0xb0, 0x92, 0x63, 0x28, 0x3a, 0x51, 0x6f, 0x34, 0x60, 0x41, 0xc2, 0x7b, 0x25, 0x9f, 0x6e, 0xbe,
-	0xf8, 0xa1, 0xaf, 0xf2, 0x6e, 0x33, 0xd5, 0x34, 0x82, 0x24, 0x3a, 0xa7, 0x13, 0x4b, 0xeb, 0xff,
-	0x55, 0x00, 0x5a, 0x3e, 0xeb, 0x7b, 0xaf, 0x9d, 0xfe, 0x88, 0x91, 0x5f, 0x03, 0x9c, 0xf2, 0x9d,
-	0x3d, 0x75, 0x94, 0x8d, 0x1f, 0xfc, 0x19, 0x34, 0x84, 0xc7, 0x5b, 0x3c, 0x4d, 0x97, 0x64, 0x0b,
-	0x4a, 0x27, 0xe7, 0x09, 0x8b, 0xed, 0xf7, 0xfc, 0x0b, 0x18, 0x72, 0x99, 0x8f, 0x09, 0x08, 0x8a,
-	0xaf, 0x6e, 0x43, 0x39, 0x4e, 0x22, 0x3f, 0xe8, 0x49, 0x0e, 0x9f, 0x45, 0x8b, 0xfc, 0x25, 0x17,
-	0xe8, 0x84, 0xe4, 0xf7, 0x02, 0xe6, 0x49, 0x12, 0x1f, 0x47, 0x09, 0x92, 0x10, 0x15, 0xa4, 0x07,
-	0x50, 0x19, 0x05, 0x33, 0x34, 0x3e, 0x95, 0xe6, 0x5f, 0x5e, 0xa3, 0x2b, 0x29, 0x8e, 0x44, 0xfe,
-	0xd6, 0xa1, 0x7c, 0xfd, 0x5b, 0xa8, 0xcc, 0x9e, 0x0e, 0xcf, 0xd8, 0x19, 0x3b, 0x97, 0x83, 0x34,
-	0x5f, 0x92, 0xb6, 0x24, 0xa3, 0xf3, 0xa5, 0xc6, 0xde, 0xff, 0x77, 0x20, 0xf8, 0x41, 0x2a, 0x2c,
-	0xfc, 0x62, 0xe1, 0xb9, 0x52, 0xfb, 0x03, 0xd6, 0x6d, 0x7a, 0x3e, 0x25, 0x58, 0x3e, 0x36, 0x0f,
-	0xcc, 0xce, 0x1b, 0x53, 0xbd, 0x46, 0x8a, 0xb0, 0xf8, 0xe2, 0xad, 0x65, 0x74, 0x55, 0x85, 0x00,
-	0x2c, 0x75, 0x2d, 0xda, 0x36, 0x7f, 0xa5, 0x2e, 0x70, 0xb8, 0xdb, 0x36, 0xad, 0xe7, 0x6a, 0x0e,
-	0xe1, 0xb6, 0x69, 0x3d, 0x7e, 0xa6, 0xe6, 0xd3, 0xf5, 0x5e, 0x43, 0x5d, 0x4c, 0xd7, 0xcf, 0x9e,
-	0xa8, 0x4b, 0x9c, 0x7e, 0x8c, 0xf4, 0x65, 0x0e, 0x1f, 0x0b, 0x7a, 0x21, 0x5d, 0xef, 0x35, 0xd4,
-	0x62, 0xba, 0x7e, 0xf6, 0x44, 0x85, 0xda, 0xf7, 0x0a, 0x94, 0xa7, 0xc7, 0xb0, 0x2b, 0x3b, 0xc5,
-	0x34, 0x79, 0xea, 0x36, 0x7d, 0x06, 0x4b, 0x71, 0xe8, 0x9e, 0x9d, 0x7a, 0xb2, 0x37, 0xc8, 0x1d,
-	0x1f, 0xa1, 0x1c, 0xcf, 0x8b, 0x26, 0xf3, 0xeb, 0x66, 0x96, 0xc5, 0xa6, 0xa0, 0xd1, 0x94, 0xcf,
-	0x4d, 0x46, 0x2c, 0x1e, 0xf5, 0x13, 0xbc, 0x62, 0x84, 0xca, 0x1d, 0xbf, 0x43, 0x27, 0x8e, 0x7b,
-	0xd6, 0x0f, 0x7b, 0xb2, 0x97, 0xa4, 0xdb, 0xda, 0x6f, 0x15, 0xb8, 0x71, 0x71, 0x28, 0x14, 0xb5,
-	0xf1, 0xe5, 0x4c, 0x54, 0xf7, 0xae, 0x1c, 0x25, 0x67, 0x23, 0x13, 0x4f, 0x1f, 0x56, 0x40, 0x9e,
-	0xca, 0x1d, 0x9f, 0x81, 0x26, 0x15, 0x9b, 0x97, 0x39, 0xae, 0xfd, 0x55, 0x01, 0xf5, 0xa2, 0x31,
-	0xfe, 0xde, 0x26, 0x61, 0xe2, 0xf4, 0x6d, 0xfc, 0x49, 0xc3, 0x02, 0xe7, 0xa4, 0xcf, 0x3c, 0x39,
-	0x3b, 0xa9, 0x28, 0xb1, 0xfc, 0x01, 0x33, 0x04, 0x7e, 0x81, 0x1d, 0x8d, 0x82, 0xc0, 0x0f, 0xd2,
-	0x8f, 0x4f, 0xd8, 0x54, 0xe0, 0xe4, 0x97, 0xb0, 0x84, 0x5f, 0x8e, 0xb5, 0x1c, 0x36, 0x86, 0xfb,
-	0x57, 0xc6, 0x26, 0x6a, 0x52, 0x6a, 0xed, 0xfc, 0x4b, 0x01, 0x72, 0x79, 0x34, 0x22, 0x55, 0xb8,
-	0xa5, 0x77, 0x4c, 0xab, 0xd9, 0x36, 0x0d, 0x6a, 0x1b, 0xaf, 0x0d, 0xd3, 0xb2, 0xad, 0xb7, 0x47,
-	0x86, 0x3d, 0x29, 0xd7, 0x2c, 0x86, 0x4e, 0x8d, 0xa6, 0x65, 0xec, 0xab, 0x4a, 0x26, 0x83, 0x1e,
-	0x9b, 0xa6, 0xa8, 0xed, 0x4d, 0xd8, 0x98, 0xcb, 0x30, 0xbe, 0x69, 0x73, 0x13, 0x39, 0x52, 0x83,
-	0x3b, 0x73, 0x09, 0xfb, 0x46, 0xd7, 0xa2, 0x9d, 0xb7, 0xc6, 0xbe, 0x9a, 0xcf, 0x76, 0xf5, 0x68,
-	0x1f, 0x1d, 0x59, 0xdc, 0xf9, 0x0b, 0x4f, 0xca, 0x85, 0x61, 0x83, 0xdc, 0x81, 0xf5, 0x23, 0xda,
-	0xd1, 0x8d, 0x6e, 0x77, 0x7e, 0x7c, 0x1b, 0xf0, 0xf9, 0x1c, 0x79, 0xab, 0x43, 0x0f, 0x54, 0x25,
-	0x43, 0x68, 0x7c, 0x63, 0xe8, 0xea, 0x42, 0xa6, 0xb0, 0x6d, 0xa9, 0x39, 0x72, 0x1b, 0x6e, 0xce,
-	0xfb, 0x2c, 0xfa, 0xaa, 0xe6, 0x77, 0x06, 0xa0, 0x5e, 0x7c, 0x8b, 0xb9, 0xa7, 0xdd, 0xb7, 0x5d,
-	0xbd, 0x79, 0x78, 0x38, 0xdf, 0xd3, 0x5b, 0xa0, 0xcd, 0x91, 0x1b, 0xa6, 0x65, 0x50, 0xe1, 0xea,
-	0x3c, 0x29, 0xf7, 0x66, 0x61, 0xa7, 0x05, 0x2b, 0x33, 0x6f, 0x23, 0x67, 0xb7, 0xda, 0x87, 0xc6,
-	0xfc, 0x0f, 0x69, 0xb0, 0x76, 0x51, 0xd8, 0x39, 0x32, 0x4c, 0x55, 0xd9, 0xf9, 0xb3, 0x02, 0x1b,
-	0x19, 0x8d, 0x10, 0xcd, 0xfe, 0x0c, 0x1e, 0x1c, 0x18, 0xd4, 0x34, 0x0e, 0xed, 0xd6, 0xb1, 0xa9,
-	0x5b, 0xed, 0x8e, 0x69, 0x67, 0xc7, 0xf3, 0x53, 0xb8, 0x77, 0x15, 0x39, 0x0d, 0xae, 0x0e, 0x77,
-	0xaf, 0xa4, 0x8a, 0x48, 0x7f, 0x97, 0x07, 0xf5, 0x62, 0xef, 0xe2, 0x27, 0x6b, 0x1a, 0xd6, 0x9b,
-	0x0e, 0x3d, 0x98, 0xef, 0xc9, 0x7d, 0xa8, 0xcd, 0x91, 0xeb, 0x1d, 0xd3, 0x34, 0x74, 0xcb, 0x6e,
-	0x5a, 0x96, 0xf1, 0xea, 0xc8, 0x52, 0x15, 0x72, 0x0f, 0xb6, 0x3e, 0xc1, 0xa3, 0x46, 0xf7, 0xf8,
-	0xd0, 0x52, 0x17, 0xc8, 0x36, 0x6c, 0xce, 0xa1, 0xbd, 0x68, 0x9b, 0xfb, 0x63, 0x5b, 0x58, 0xf2,
-	0x59, 0x24, 0x69, 0x28, 0x9f, 0xf1, 0xbd, 0xc3, 0x76, 0xd7, 0x32, 0xcc, 0xb1, 0xa9, 0x45, 0x72,
-	0x17, 0xaa, 0xd9, 0x34, 0x69, 0x6c, 0x29, 0xc3, 0x58, 0x53, 0xd7, 0x8d, 0xa3, 0x49, 0x8c, 0xcb,
-	0x19, 0xc6, 0x24, 0x4d, 0x1a, 0x2b, 0x64, 0x18, 0xeb, 0x1a, 0xe6, 0xbe, 0xd5, 0x19, 0x1b, 0x2b,
-	0x66, 0x18, 0x93, 0x34, 0x69, 0x0c, 0xc8, 0x03, 0xd8, 0x9e, 0xc3, 0xa2, 0x86, 0xfe, 0xba, 0x45,
-	0x3b, 0xaf, 0xc6, 0xe6, 0x4a, 0x19, 0x79, 0x1a, 0x13, 0xa5, 0xc1, 0xf2, 0xce, 0xdf, 0x14, 0x58,
-	0x9b, 0xd7, 0xea, 0xf9, 0xa1, 0x1f, 0x19, 0xb4, 0xd5, 0xa1, 0xaf, 0x9a, 0xa6, 0x9e, 0x51, 0xfd,
-	0xdb, 0xb0, 0x99, 0xc1, 0x79, 0xd9, 0xa4, 0xfb, 0x6f, 0x9a, 0xd4, 0x50, 0x15, 0x5e, 0xbb, 0x57,
-	0x90, 0x6c, 0xbd, 0xa9, 0xbf, 0x34, 0x44, 0x35, 0x64, 0x50, 0xbb, 0x9d, 0x96, 0x85, 0xf6, 0x72,
-	0x27, 0x4b, 0xf8, 0x97, 0xdf, 0xde, 0xff, 0x02, 0x00, 0x00, 0xff, 0xff, 0x17, 0x91, 0x9f, 0xbf,
-	0x49, 0x14, 0x00, 0x00,
+var fileDescriptor_telemetry_event_bffb729b8bf2d70b = []byte{
+	// 2430 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xd4, 0x59, 0xcd, 0x73, 0xdb, 0xc6,
+	0x15, 0x0f, 0x48, 0x4a, 0x22, 0x1f, 0x29, 0x19, 0xde, 0xd8, 0x09, 0x2c, 0xc5, 0x16, 0x4d, 0xf9,
+	0x83, 0x51, 0x32, 0x8e, 0x2d, 0x7f, 0xc4, 0xe9, 0xa1, 0x19, 0x1a, 0x82, 0x62, 0x46, 0x12, 0xa8,
+	0x2e, 0xa1, 0x24, 0x3e, 0x61, 0x60, 0x60, 0xc5, 0xa0, 0x22, 0x01, 0x06, 0x00, 0xed, 0xe8, 0xd6,
+	0xe9, 0xbd, 0x87, 0x9e, 0x7a, 0xec, 0xb1, 0x39, 0xb5, 0x7f, 0x43, 0x6f, 0x4d, 0xfa, 0x2f, 0x74,
+	0xa6, 0xd3, 0x7b, 0xa7, 0xa7, 0x1e, 0x3b, 0x9d, 0xce, 0xbe, 0x5d, 0xf0, 0x43, 0x04, 0x44, 0xe7,
+	0x96, 0x5e, 0x34, 0xd8, 0xdf, 0xfb, 0xbd, 0xb7, 0x6f, 0xdf, 0x7b, 0xfb, 0x76, 0x57, 0x84, 0xdb,
+	0xae, 0x33, 0x8c, 0x47, 0x7d, 0xf6, 0xf4, 0x23, 0x67, 0xe8, 0x7f, 0xf4, 0xea, 0xfe, 0x47, 0x09,
+	0xeb, 0xb3, 0x01, 0x4b, 0xa2, 0x33, 0x9b, 0xbd, 0x62, 0x41, 0x72, 0x6f, 0x18, 0x85, 0x49, 0x48,
+	0x2e, 0xa5, 0xb4, 0x7b, 0xce, 0xd0, 0xbf, 0xf7, 0xea, 0xfe, 0xfa, 0xc6, 0x9c, 0xde, 0xd9, 0x90,
+	0xc5, 0x82, 0xdd, 0xf8, 0x57, 0x05, 0xd6, 0xac, 0xd4, 0x8e, 0xc1, 0xcd, 0x90, 0x35, 0x28, 0xf8,
+	0x9e, 0xa6, 0xd4, 0x95, 0x66, 0x85, 0x16, 0x7c, 0x8f, 0x5c, 0x07, 0x18, 0x46, 0xa1, 0xcb, 0xe2,
+	0xd8, 0xf6, 0x3d, 0xad, 0x80, 0x78, 0x45, 0x22, 0x6d, 0x8f, 0x6c, 0x42, 0x35, 0x15, 0x0f, 0x7d,
+	0x4f, 0x2b, 0xd6, 0x95, 0xe6, 0x12, 0x4d, 0x35, 0x8e, 0x7c, 0x8f, 0xdc, 0x84, 0x9a, 0x1b, 0x06,
+	0x89, 0xe3, 0x07, 0x2c, 0xe2, 0x16, 0x4a, 0x68, 0xa1, 0x3a, 0xc6, 0xda, 0x1e, 0xd9, 0x80, 0x4a,
+	0xcc, 0x82, 0x38, 0x44, 0xf9, 0x12, 0xca, 0xcb, 0x02, 0x68, 0x7b, 0xe4, 0x11, 0xbc, 0x23, 0x85,
+	0x31, 0xfb, 0x66, 0xc4, 0x02, 0x97, 0xd9, 0xc1, 0x68, 0xf0, 0x92, 0x45, 0xda, 0x72, 0x5d, 0x69,
+	0x96, 0xe8, 0x15, 0x21, 0xed, 0x4a, 0xa1, 0x89, 0x32, 0xb2, 0x03, 0x57, 0xa5, 0xd6, 0x20, 0x0c,
+	0xc2, 0xc4, 0x1f, 0x30, 0x3b, 0x70, 0x82, 0x30, 0xd6, 0x56, 0xea, 0x4a, 0xb3, 0x48, 0xdf, 0x16,
+	0xc2, 0x43, 0x29, 0x33, 0xb9, 0x88, 0xb4, 0xe0, 0x52, 0xba, 0x94, 0xbe, 0x1f, 0x30, 0xa7, 0xc7,
+	0xb4, 0x72, 0xbd, 0xd8, 0xac, 0xee, 0x68, 0xf7, 0xce, 0x05, 0xf5, 0xde, 0x91, 0xe0, 0xd1, 0x35,
+	0xa9, 0x70, 0x20, 0xf8, 0xe4, 0x36, 0xac, 0x4d, 0x16, 0x1b, 0x38, 0x03, 0xa6, 0xdd, 0xc0, 0xe5,
+	0xac, 0x8e, 0x51, 0xd3, 0x19, 0x30, 0x72, 0x0d, 0xca, 0xfe, 0xc0, 0xe9, 0x31, 0xbe, 0xde, 0x4d,
+	0x24, 0xac, 0xe0, 0xb8, 0x8d, 0xe1, 0x16, 0x22, 0xd4, 0xae, 0x8b, 0x70, 0x23, 0x82, 0x9a, 0x9f,
+	0xc0, 0x4a, 0x7c, 0x16, 0xbb, 0x4e, 0xbf, 0xaf, 0x41, 0x5d, 0x69, 0x56, 0x77, 0xae, 0xcf, 0xf9,
+	0xd6, 0x15, 0x72, 0xcc, 0xe6, 0xf3, 0xb7, 0x68, 0xca, 0xe7, 0xaa, 0xd2, 0x5b, 0xad, 0x9a, 0xa3,
+	0x2a, 0x97, 0x35, 0x56, 0x95, 0x7c, 0x72, 0x1f, 0x4a, 0x27, 0x7e, 0x9f, 0x69, 0x35, 0xd4, 0x5b,
+	0x9f, 0xd3, 0xdb, 0xf3, 0xfb, 0x2c, 0x55, 0x42, 0x26, 0xd9, 0x87, 0xea, 0x29, 0x8b, 0x02, 0xd6,
+	0xb7, 0xd1, 0xd7, 0x55, 0x54, 0x6c, 0xce, 0x29, 0xee, 0x23, 0x67, 0x6f, 0x14, 0xb8, 0x89, 0x1f,
+	0x06, 0xfa, 0x94, 0xdb, 0x20, 0xd4, 0x75, 0xe9, 0x79, 0xc0, 0x92, 0xd7, 0x61, 0x74, 0xaa, 0xad,
+	0xe5, 0x78, 0x6e, 0x0a, 0xf9, 0xd8, 0x73, 0xc9, 0x27, 0x06, 0x54, 0x87, 0x2c, 0x3a, 0x09, 0xa3,
+	0x81, 0x13, 0xb8, 0x4c, 0xbb, 0x84, 0xea, 0x37, 0xe7, 0x17, 0x3e, 0xe1, 0xa4, 0x26, 0xa6, 0xf5,
+	0x88, 0x01, 0x95, 0x51, 0xcc, 0x22, 0xb1, 0x18, 0x15, 0x8d, 0xdc, 0x99, 0x33, 0x72, 0x1c, 0xb3,
+	0x28, 0x6b, 0x29, 0x65, 0xae, 0x8a, 0x0b, 0xf9, 0x14, 0x2a, 0xe3, 0x42, 0xd0, 0xae, 0xa0, 0x99,
+	0xcd, 0x39, 0x33, 0x7a, 0xca, 0x48, 0xf5, 0x27, 0x3a, 0x3c, 0x12, 0xee, 0xd7, 0x4e, 0xd4, 0x63,
+	0x81, 0xe6, 0xe5, 0x44, 0x42, 0x17, 0xf2, 0x71, 0x24, 0x24, 0x9f, 0x3c, 0x81, 0xe5, 0xc4, 0x77,
+	0x4f, 0x59, 0xa4, 0x31, 0xd4, 0x7c, 0x6f, 0x4e, 0xd3, 0x42, 0x71, 0xaa, 0x28, 0xd9, 0xe4, 0x09,
+	0x94, 0xfa, 0x61, 0x9c, 0x68, 0x27, 0xa8, 0x55, 0x9f, 0xd3, 0x3a, 0x08, 0xe3, 0x84, 0x32, 0x37,
+	0x8c, 0xbc, 0x71, 0x05, 0x70, 0x3e, 0xb9, 0x0c, 0x45, 0x77, 0x38, 0xd2, 0xbe, 0x57, 0xb0, 0x23,
+	0xf0, 0x6f, 0xf2, 0x29, 0x54, 0xdd, 0x88, 0x79, 0x2c, 0x48, 0x7c, 0xa7, 0x1f, 0x6b, 0x3f, 0x28,
+	0x39, 0x8e, 0xe8, 0x13, 0x12, 0x9d, 0xd6, 0x20, 0x0d, 0xa8, 0xa5, 0x3b, 0x34, 0xe9, 0xf9, 0x9e,
+	0xf6, 0x57, 0x61, 0x3c, 0xed, 0x40, 0x56, 0xcf, 0xf7, 0x9e, 0xad, 0xc0, 0x12, 0xf6, 0xc3, 0xcf,
+	0x97, 0xcb, 0x7f, 0x51, 0xd4, 0xef, 0x95, 0xb1, 0xd4, 0x4e, 0x7c, 0xaf, 0xb1, 0x0b, 0xb5, 0xe9,
+	0x00, 0x91, 0x2b, 0xb0, 0xe4, 0x07, 0x1e, 0xfb, 0x16, 0x1b, 0x5e, 0x89, 0x8a, 0x01, 0xb9, 0x01,
+	0xc0, 0xc3, 0xe6, 0xb8, 0x09, 0x8b, 0x62, 0xd9, 0xf3, 0xa6, 0x90, 0x46, 0x1b, 0xaa, 0x53, 0xc1,
+	0x22, 0x1a, 0xac, 0xc4, 0xcc, 0x0d, 0x03, 0x2f, 0x46, 0x33, 0x45, 0x9a, 0x0e, 0x49, 0x1d, 0xaa,
+	0xd8, 0x76, 0xa4, 0xb4, 0x80, 0xd2, 0x69, 0xa8, 0x61, 0xc3, 0xa5, 0x73, 0x11, 0x24, 0x44, 0x46,
+	0x5c, 0xb8, 0x24, 0xa2, 0xf9, 0x14, 0x4a, 0xbc, 0x6f, 0xa3, 0x85, 0xb5, 0x9d, 0x5b, 0x8b, 0xb2,
+	0x60, 0x9d, 0x0d, 0x19, 0x45, 0x8d, 0xc6, 0x6f, 0x8b, 0xb0, 0x36, 0x5b, 0x52, 0xe4, 0x63, 0x69,
+	0x4c, 0x41, 0x63, 0x5b, 0x0b, 0x2a, 0x70, 0x62, 0x8b, 0x7b, 0x86, 0x6d, 0x49, 0x44, 0x04, 0xbf,
+	0x67, 0x7a, 0x19, 0x5c, 0xd4, 0xcb, 0xaa, 0xe7, 0x7b, 0xd9, 0x35, 0x28, 0x7f, 0x1d, 0xc6, 0x09,
+	0x9e, 0x1b, 0x7c, 0x33, 0x5c, 0xa6, 0x2b, 0x7c, 0xcc, 0x0f, 0x8d, 0x0d, 0xa8, 0xb0, 0x6f, 0xfd,
+	0xc4, 0x76, 0x43, 0x4f, 0xb4, 0xd0, 0xcb, 0xb4, 0xcc, 0x01, 0x3d, 0xf4, 0x18, 0x3f, 0x72, 0x50,
+	0x18, 0x27, 0x4e, 0x32, 0x8a, 0xb1, 0x81, 0xae, 0x52, 0xe0, 0x50, 0x17, 0x91, 0x09, 0xc1, 0xef,
+	0x05, 0x4e, 0x1f, 0x9b, 0x68, 0x4a, 0x40, 0x84, 0x34, 0x41, 0x95, 0xe6, 0x23, 0x66, 0x7b, 0xa3,
+	0xc1, 0x90, 0x79, 0xda, 0xcd, 0xba, 0xd2, 0x2c, 0xd3, 0x35, 0x31, 0x4b, 0xc4, 0x76, 0x11, 0x25,
+	0x1f, 0x02, 0xf1, 0x42, 0x9e, 0x69, 0xdb, 0x0d, 0x83, 0x13, 0xbf, 0x67, 0xff, 0x32, 0x0e, 0xc5,
+	0xde, 0xab, 0x50, 0x55, 0x48, 0x74, 0x14, 0x7c, 0x1e, 0x87, 0x01, 0xb9, 0x03, 0x97, 0x42, 0xd7,
+	0x9f, 0xa1, 0x32, 0xd1, 0xff, 0x43, 0xd7, 0x9f, 0xf0, 0x1a, 0x7f, 0x2b, 0x42, 0x6d, 0xba, 0xd7,
+	0x92, 0xc7, 0x33, 0x19, 0xb9, 0x79, 0x61, 0x63, 0x9e, 0xca, 0xc7, 0x2d, 0x58, 0x3b, 0x09, 0xa3,
+	0x53, 0xdb, 0xfd, 0xda, 0xef, 0x7b, 0x18, 0x47, 0xc0, 0x58, 0xd5, 0x38, 0xaa, 0x73, 0x90, 0x07,
+	0xb3, 0x01, 0xab, 0x53, 0x2c, 0xdf, 0x93, 0x99, 0xa8, 0x8e, 0x49, 0x6d, 0x8f, 0x47, 0x44, 0x70,
+	0xfa, 0x61, 0xc0, 0xec, 0x93, 0xbe, 0xd3, 0x8b, 0xb1, 0xdb, 0x97, 0x28, 0xce, 0xa0, 0x73, 0x78,
+	0x8f, 0xa3, 0x63, 0x66, 0x9c, 0x38, 0x2e, 0xfe, 0x8d, 0x12, 0x6c, 0xef, 0x92, 0xd9, 0xe5, 0x70,
+	0x97, 0xa3, 0x64, 0x0b, 0x56, 0xd9, 0xb7, 0xcc, 0xb5, 0xf9, 0x81, 0x80, 0x15, 0x70, 0x05, 0xe7,
+	0xad, 0x71, 0x70, 0x4f, 0x62, 0x64, 0x1b, 0x2e, 0x23, 0xc9, 0x0d, 0x07, 0x03, 0x27, 0xf0, 0xf0,
+	0xe4, 0xd5, 0xae, 0xd6, 0x8b, 0xcd, 0x0a, 0xbd, 0xc4, 0x05, 0xba, 0xc0, 0xf9, 0x01, 0xfb, 0xd3,
+	0xa9, 0x8a, 0xeb, 0x00, 0xa3, 0xa1, 0xe7, 0x24, 0xcc, 0x76, 0x5f, 0x7b, 0x5a, 0x53, 0x14, 0xb6,
+	0x40, 0xf4, 0xd7, 0x5e, 0xe3, 0xef, 0x0a, 0xd4, 0xa6, 0x4f, 0xe1, 0x85, 0xe9, 0x9d, 0x26, 0x4f,
+	0xa5, 0x57, 0x5c, 0xc5, 0x44, 0xd3, 0xe0, 0x57, 0x31, 0x02, 0x25, 0x27, 0xea, 0xdd, 0xc7, 0x24,
+	0x97, 0x28, 0x7e, 0x4b, 0xec, 0x01, 0xe6, 0x54, 0x60, 0x0f, 0x24, 0xb6, 0x23, 0x13, 0x88, 0xdf,
+	0x12, 0x7b, 0x28, 0x53, 0x85, 0xdf, 0x12, 0x7b, 0x84, 0x87, 0xaa, 0xc0, 0x1e, 0x49, 0xec, 0x31,
+	0x9e, 0x94, 0x02, 0x7b, 0x4c, 0x54, 0x28, 0x46, 0x2c, 0xc1, 0xf4, 0x15, 0x29, 0xff, 0x6c, 0xfc,
+	0xa1, 0x00, 0x95, 0xf1, 0xa1, 0x4f, 0x76, 0x66, 0x96, 0x77, 0x23, 0xff, 0x7a, 0x30, 0xb5, 0xb6,
+	0x75, 0x28, 0x8f, 0xeb, 0x42, 0xb4, 0x8d, 0xf1, 0x98, 0x87, 0x37, 0x1c, 0xb2, 0x40, 0x96, 0x61,
+	0x15, 0x13, 0x5d, 0xe1, 0x88, 0xa8, 0xc0, 0x0d, 0xc0, 0x81, 0x3d, 0xe0, 0x65, 0x50, 0x13, 0x65,
+	0xc0, 0x81, 0x43, 0x59, 0x06, 0x71, 0x38, 0x8a, 0x5c, 0x86, 0x65, 0x87, 0xcb, 0xad, 0x50, 0x10,
+	0x10, 0xf7, 0x83, 0x13, 0x12, 0x7e, 0x00, 0x24, 0x82, 0xb0, 0x26, 0x08, 0x02, 0x42, 0x02, 0xef,
+	0xe6, 0x67, 0x83, 0xbe, 0x1f, 0x9c, 0x62, 0x10, 0xca, 0x34, 0x1d, 0x72, 0x49, 0xd8, 0xf7, 0xd0,
+	0x65, 0x55, 0x74, 0x3a, 0x39, 0xe4, 0x92, 0x80, 0xbd, 0x46, 0xc9, 0x65, 0x21, 0x91, 0xc3, 0xc6,
+	0x63, 0x58, 0x91, 0x9b, 0x97, 0x87, 0x71, 0x28, 0xaf, 0xd6, 0x97, 0x29, 0xff, 0xe4, 0x6a, 0xb2,
+	0xee, 0x65, 0x4b, 0x4d, 0x87, 0x8d, 0x7f, 0x97, 0xe0, 0xdd, 0x9c, 0xcb, 0x11, 0x39, 0x86, 0x8a,
+	0x13, 0xf5, 0x46, 0x03, 0x16, 0x24, 0xfc, 0xc0, 0xe1, 0x37, 0xd4, 0x8f, 0xdf, 0xf4, 0x66, 0x75,
+	0xaf, 0x95, 0x6a, 0x1a, 0x41, 0x12, 0x9d, 0xd1, 0x89, 0xa5, 0xf5, 0xff, 0x2a, 0x00, 0x7b, 0x3e,
+	0xeb, 0x7b, 0x5f, 0x38, 0xfd, 0x11, 0x23, 0xbf, 0x00, 0x38, 0xe1, 0x23, 0x7b, 0x2a, 0xb5, 0x3b,
+	0x6f, 0x3c, 0x0d, 0x1a, 0xc2, 0x74, 0x57, 0x4e, 0xd2, 0x4f, 0x72, 0x13, 0xaa, 0x2f, 0xcf, 0x12,
+	0x16, 0xdb, 0xaf, 0xf8, 0x0c, 0xb8, 0xe4, 0x1a, 0xbf, 0xea, 0x21, 0x28, 0x66, 0xdd, 0x82, 0x5a,
+	0x9c, 0x44, 0x7e, 0xd0, 0x93, 0x1c, 0xfe, 0x9e, 0xa8, 0xf0, 0xdb, 0x98, 0x40, 0x27, 0x24, 0xbf,
+	0x17, 0x30, 0x4f, 0x92, 0xf8, 0x93, 0x82, 0x20, 0x09, 0x51, 0x41, 0xba, 0x0b, 0x6b, 0xa3, 0x60,
+	0x86, 0xc6, 0x5f, 0x16, 0xa5, 0xe7, 0x6f, 0xd1, 0xd5, 0x14, 0x47, 0x22, 0xbf, 0x30, 0xa0, 0x7c,
+	0xfd, 0x1b, 0x58, 0x9b, 0x8d, 0x0e, 0xcf, 0xd8, 0x29, 0x3b, 0x93, 0x8f, 0x21, 0xfe, 0x49, 0xda,
+	0x92, 0x8c, 0xce, 0x57, 0x77, 0x1e, 0xfe, 0xb8, 0x80, 0xe0, 0x84, 0x54, 0x58, 0xf8, 0x59, 0xe1,
+	0xa9, 0xd2, 0xf8, 0x8d, 0xc2, 0xf7, 0x51, 0x1a, 0x9f, 0x2a, 0xac, 0x1c, 0x9b, 0xfb, 0x66, 0xe7,
+	0x4b, 0x53, 0x7d, 0x8b, 0x54, 0x60, 0xe9, 0xd9, 0x0b, 0xcb, 0xe8, 0xaa, 0x0a, 0x01, 0x58, 0xee,
+	0x5a, 0xb4, 0x6d, 0x7e, 0xa6, 0x16, 0x38, 0xdc, 0x6d, 0x9b, 0xd6, 0x53, 0xb5, 0x88, 0x70, 0xdb,
+	0xb4, 0x1e, 0x3c, 0x51, 0x4b, 0xe9, 0xf7, 0xc3, 0x1d, 0x75, 0x29, 0xfd, 0x7e, 0xf2, 0x48, 0x5d,
+	0xe6, 0xf4, 0x63, 0xa4, 0xaf, 0x70, 0xf8, 0x58, 0xd0, 0xcb, 0xe9, 0xf7, 0xc3, 0x1d, 0xb5, 0x92,
+	0x7e, 0x3f, 0x79, 0xa4, 0x42, 0xe3, 0x9f, 0x25, 0xb8, 0x9a, 0x79, 0x8d, 0x25, 0xdd, 0xf9, 0xa2,
+	0x7b, 0xfc, 0x66, 0x37, 0xe0, 0x0b, 0x4a, 0xee, 0x3f, 0xb3, 0x25, 0xd7, 0xc9, 0x28, 0xb9, 0xfb,
+	0x6f, 0x38, 0xc9, 0xff, 0x63, 0xc1, 0x85, 0x6f, 0x50, 0x70, 0x9f, 0xcd, 0x16, 0xdc, 0x83, 0x1f,
+	0x13, 0x8e, 0x9f, 0x7c, 0xb9, 0xfd, 0xa0, 0x40, 0x6d, 0xfa, 0xe5, 0xb6, 0xf0, 0xa0, 0x9c, 0x26,
+	0x4f, 0x1d, 0x26, 0xef, 0xc0, 0x72, 0x1c, 0xba, 0xa7, 0x27, 0x9e, 0x3c, 0x1a, 0xe5, 0x88, 0x3f,
+	0x97, 0x1c, 0xcf, 0x8b, 0x26, 0x4f, 0xde, 0xcd, 0x3c, 0x8b, 0x2d, 0x41, 0xa3, 0x29, 0x9f, 0x9b,
+	0x8c, 0x58, 0x3c, 0xea, 0x27, 0x78, 0xc2, 0x10, 0x2a, 0x47, 0xbc, 0x65, 0xbf, 0x74, 0xdc, 0xd3,
+	0x7e, 0xd8, 0x93, 0x47, 0x69, 0x3a, 0x6c, 0xfc, 0x4a, 0x81, 0xab, 0xe7, 0xdf, 0x91, 0xa2, 0x32,
+	0x3e, 0x99, 0x59, 0xd5, 0xed, 0x85, 0xaf, 0xcf, 0xd9, 0x95, 0x89, 0xdb, 0x24, 0xe6, 0xbf, 0x44,
+	0xe5, 0x88, 0xbf, 0x5b, 0x26, 0xf5, 0x5a, 0x92, 0x39, 0x6e, 0xfc, 0x51, 0x01, 0xf5, 0xbc, 0x31,
+	0x7e, 0x85, 0x4d, 0xc2, 0xc4, 0xe9, 0xdb, 0xf8, 0x5f, 0x10, 0x16, 0x38, 0x2f, 0xfb, 0xcc, 0x93,
+	0x8f, 0x0b, 0x15, 0x25, 0x96, 0x3f, 0x60, 0x86, 0xc0, 0xcf, 0xb1, 0xa3, 0x51, 0x10, 0xf8, 0x41,
+	0x3a, 0xf9, 0x84, 0x4d, 0x05, 0x4e, 0x7e, 0x0e, 0xcb, 0x38, 0x73, 0xac, 0x15, 0xb1, 0x25, 0xdc,
+	0x59, 0xb8, 0x36, 0x51, 0x93, 0x52, 0x6b, 0xfb, 0xbb, 0x12, 0xbc, 0x9d, 0xf1, 0x74, 0x21, 0x0d,
+	0xb8, 0x71, 0xd0, 0xe9, 0x5a, 0x36, 0x35, 0xf4, 0x0e, 0xdd, 0xb5, 0x8d, 0x2f, 0x0c, 0xd3, 0xb2,
+	0xad, 0x17, 0x47, 0x86, 0x3d, 0xa9, 0xd8, 0xbb, 0xb0, 0x95, 0xc3, 0xe9, 0x1e, 0x3f, 0xeb, 0xea,
+	0xb4, 0x7d, 0x64, 0xb5, 0x3b, 0xa6, 0xaa, 0x5c, 0x60, 0xec, 0x88, 0x76, 0x74, 0xa3, 0xdb, 0x55,
+	0x0b, 0xe4, 0x16, 0xd4, 0x73, 0x38, 0x7a, 0xc7, 0xb4, 0x5a, 0x6d, 0xd3, 0xa0, 0x6a, 0x91, 0xdc,
+	0x81, 0x46, 0x0e, 0x6b, 0xaf, 0x7d, 0x60, 0xd8, 0x3a, 0x35, 0x5a, 0x96, 0xa1, 0x96, 0x16, 0xf1,
+	0x76, 0x8d, 0x03, 0xc3, 0x32, 0xd4, 0xa5, 0x0b, 0x66, 0x45, 0xde, 0x41, 0xdb, 0xdc, 0x57, 0x97,
+	0x2f, 0x58, 0x28, 0xb2, 0xba, 0x2f, 0x0e, 0x91, 0xb8, 0x42, 0x3e, 0x80, 0xbb, 0x17, 0x11, 0x3b,
+	0x47, 0x86, 0x69, 0x1f, 0x76, 0x76, 0xdb, 0x7b, 0x2f, 0xd4, 0x32, 0xf9, 0x10, 0x9a, 0x17, 0xae,
+	0xe5, 0xa0, 0xd3, 0x35, 0x52, 0x76, 0x65, 0xd1, 0x8a, 0x24, 0x0f, 0x16, 0xf1, 0xa8, 0x61, 0xb6,
+	0x0e, 0x0d, 0xb5, 0x4a, 0xee, 0xc3, 0x87, 0x17, 0xf1, 0x5a, 0x96, 0x45, 0xdb, 0xcf, 0x8e, 0x2d,
+	0xc3, 0xd6, 0x9f, 0xb7, 0xcc, 0xcf, 0x0c, 0xb5, 0xb6, 0xfd, 0x0f, 0x05, 0xc8, 0xfc, 0xc3, 0x94,
+	0xd4, 0xe1, 0xbd, 0x71, 0x86, 0xb2, 0xeb, 0x24, 0x8f, 0x21, 0xb2, 0xb5, 0xab, 0x2a, 0xb9, 0x0c,
+	0x7a, 0x6c, 0x9a, 0xa2, 0x0d, 0x6e, 0xc2, 0x46, 0x26, 0xc3, 0xf8, 0xaa, 0xcd, 0x4d, 0x14, 0x79,
+	0x8d, 0x65, 0x12, 0x76, 0x8d, 0xae, 0x45, 0x3b, 0x2f, 0x8c, 0x5d, 0xb5, 0x94, 0xef, 0xea, 0xd1,
+	0x2e, 0x3a, 0xb2, 0xb4, 0xfd, 0x1d, 0xdf, 0xbf, 0xe7, 0x9e, 0x7a, 0xe4, 0x06, 0xac, 0xcb, 0x3a,
+	0xcd, 0x5e, 0xdf, 0x06, 0xbc, 0x9b, 0x21, 0xdf, 0xeb, 0xd0, 0x7d, 0x55, 0xc9, 0x11, 0x1a, 0x5f,
+	0x19, 0xba, 0x5a, 0xc8, 0x15, 0xb6, 0x2d, 0xb5, 0x48, 0xae, 0xc3, 0xb5, 0xac, 0x69, 0xd1, 0x57,
+	0xb5, 0xb4, 0x3d, 0x00, 0xf5, 0xfc, 0xab, 0x85, 0x7b, 0xda, 0x7d, 0xd1, 0xd5, 0x5b, 0x07, 0x07,
+	0xd9, 0x9e, 0xbe, 0x07, 0x5a, 0x86, 0xdc, 0x30, 0x2d, 0x83, 0x0a, 0x57, 0xb3, 0xa4, 0xdc, 0x9b,
+	0xc2, 0xf6, 0x9f, 0x0b, 0xb0, 0x3a, 0xf3, 0x8c, 0xe0, 0x74, 0x2c, 0x95, 0xcc, 0x99, 0x34, 0xb8,
+	0x72, 0x5e, 0xc8, 0xab, 0x5f, 0x55, 0xc8, 0x3a, 0xbc, 0x73, 0x5e, 0x22, 0xb7, 0x6d, 0x21, 0x4b,
+	0x26, 0xb7, 0x6a, 0x31, 0xcb, 0x22, 0xee, 0xba, 0x12, 0xd9, 0x82, 0xcd, 0xac, 0xb9, 0x78, 0x06,
+	0xd2, 0x7d, 0xb1, 0x94, 0x65, 0x5a, 0xee, 0x85, 0xe5, 0x2c, 0x99, 0xd4, 0x5b, 0xe1, 0x1d, 0x62,
+	0xce, 0x5d, 0xdc, 0x99, 0x53, 0xd6, 0xcb, 0x59, 0xac, 0xb9, 0x1d, 0x54, 0xd9, 0xfe, 0xbd, 0x02,
+	0x1b, 0x39, 0xd7, 0x53, 0x8c, 0xe8, 0x07, 0x70, 0x77, 0xdf, 0xa0, 0xa6, 0x71, 0x60, 0xef, 0x1d,
+	0x9b, 0x3a, 0x6f, 0x9e, 0x76, 0x7e, 0x2e, 0xdf, 0x87, 0xdb, 0x8b, 0xc8, 0x69, 0x62, 0x9b, 0x70,
+	0x6b, 0x21, 0x55, 0x64, 0xf9, 0x77, 0x0a, 0x5c, 0xcb, 0xbc, 0xcf, 0xa0, 0x7f, 0xef, 0xc3, 0xed,
+	0xe3, 0xae, 0x41, 0xdf, 0xc4, 0xbb, 0xbb, 0xb0, 0x75, 0x31, 0x35, 0xf5, 0xed, 0x0e, 0x34, 0x16,
+	0x10, 0x85, 0x67, 0xbf, 0x2e, 0x81, 0x7a, 0xfe, 0xf2, 0xc1, 0xeb, 0xdd, 0x34, 0xac, 0x2f, 0x3b,
+	0x74, 0x3f, 0xdb, 0x8b, 0x3b, 0xd0, 0xc8, 0x90, 0xeb, 0x1d, 0xd3, 0x34, 0x74, 0x8b, 0x67, 0xc8,
+	0x38, 0x3c, 0xb2, 0x54, 0x85, 0xdc, 0x86, 0x9b, 0x17, 0xf0, 0xa8, 0xd1, 0x3d, 0x3e, 0xb0, 0xd4,
+	0x02, 0x2f, 0xb4, 0x0c, 0xda, 0xb3, 0xb6, 0xb9, 0x3b, 0xb6, 0x85, 0x8d, 0x28, 0x8f, 0x24, 0x0d,
+	0x95, 0x72, 0xe6, 0x3b, 0x68, 0x77, 0x2d, 0xc3, 0x1c, 0x9b, 0xc2, 0xd3, 0x29, 0x9f, 0x26, 0x8d,
+	0x2d, 0xe7, 0x18, 0x6b, 0xe9, 0xba, 0x71, 0x34, 0x59, 0xe3, 0x4a, 0x8e, 0x31, 0x49, 0x93, 0xc6,
+	0xca, 0x39, 0xc6, 0xba, 0x86, 0xb9, 0x6b, 0x75, 0xc6, 0xc6, 0x2a, 0x39, 0xc6, 0x24, 0x4d, 0x1a,
+	0x03, 0x5e, 0x04, 0x19, 0x2c, 0x6a, 0xe8, 0x5f, 0xec, 0xd1, 0xce, 0xe1, 0xd8, 0x5c, 0x35, 0x27,
+	0x4f, 0x63, 0xa2, 0x34, 0x58, 0xdb, 0xfe, 0x93, 0x02, 0x57, 0xb2, 0xee, 0x6a, 0x3c, 0xe8, 0x47,
+	0x06, 0xdd, 0xeb, 0xd0, 0xc3, 0x96, 0xa9, 0xe7, 0xb4, 0xa4, 0x2d, 0xd8, 0xcc, 0xe1, 0x3c, 0x6f,
+	0xd1, 0xdd, 0x2f, 0x5b, 0xd4, 0x50, 0x15, 0x5e, 0xe2, 0x0b, 0x48, 0xb6, 0xde, 0xd2, 0x9f, 0x1b,
+	0xa2, 0x1a, 0x72, 0xa8, 0xdd, 0xce, 0x9e, 0x85, 0xf6, 0x8a, 0x2f, 0x97, 0xf1, 0x67, 0xbe, 0x87,
+	0xff, 0x0b, 0x00, 0x00, 0xff, 0xff, 0x82, 0x29, 0x95, 0x4b, 0x3d, 0x1c, 0x00, 0x00,
 }

@@ -7,7 +7,7 @@ import proto "github.com/golang/protobuf/proto"
 import fmt "fmt"
 import math "math"
 import _ "google.golang.org/genproto/googleapis/api/annotations"
-import google_rpc "google.golang.org/genproto/googleapis/rpc/status"
+import status "google.golang.org/genproto/googleapis/rpc/status"
 
 import (
 	context "golang.org/x/net/context"
@@ -19,17 +19,45 @@ var _ = proto.Marshal
 var _ = fmt.Errorf
 var _ = math.Inf
 
+// This is a compile-time assertion to ensure that this generated file
+// is compatible with the proto package it is being compiled against.
+// A compilation error at this line likely means your copy of the
+// proto package needs to be updated.
+const _ = proto.ProtoPackageIsVersion2 // please upgrade the proto package
+
 // A request message to initiate the streaming of telemetry events
 type GetEventsRequest struct {
 	// The Subscription message defines which events should be
 	// returned in the stream.
-	Subscription *Subscription `protobuf:"bytes,1,opt,name=subscription" json:"subscription,omitempty"`
+	Subscription         *Subscription `protobuf:"bytes,1,opt,name=subscription,proto3" json:"subscription,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}      `json:"-"`
+	XXX_unrecognized     []byte        `json:"-"`
+	XXX_sizecache        int32         `json:"-"`
 }
 
-func (m *GetEventsRequest) Reset()                    { *m = GetEventsRequest{} }
-func (m *GetEventsRequest) String() string            { return proto.CompactTextString(m) }
-func (*GetEventsRequest) ProtoMessage()               {}
-func (*GetEventsRequest) Descriptor() ([]byte, []int) { return fileDescriptor2, []int{0} }
+func (m *GetEventsRequest) Reset()         { *m = GetEventsRequest{} }
+func (m *GetEventsRequest) String() string { return proto.CompactTextString(m) }
+func (*GetEventsRequest) ProtoMessage()    {}
+func (*GetEventsRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_service_95158cc37a1d45fd, []int{0}
+}
+func (m *GetEventsRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetEventsRequest.Unmarshal(m, b)
+}
+func (m *GetEventsRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetEventsRequest.Marshal(b, m, deterministic)
+}
+func (dst *GetEventsRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetEventsRequest.Merge(dst, src)
+}
+func (m *GetEventsRequest) XXX_Size() int {
+	return xxx_messageInfo_GetEventsRequest.Size(m)
+}
+func (m *GetEventsRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetEventsRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_GetEventsRequest proto.InternalMessageInfo
 
 func (m *GetEventsRequest) GetSubscription() *Subscription {
 	if m != nil {
@@ -41,15 +69,37 @@ func (m *GetEventsRequest) GetSubscription() *Subscription {
 // A response message containing telemetry events
 type GetEventsResponse struct {
 	// Can publish one or more message(s) at a time
-	Events []*ReceivedTelemetryEvent `protobuf:"bytes,1,rep,name=events" json:"events,omitempty"`
+	Events []*ReceivedTelemetryEvent `protobuf:"bytes,1,rep,name=events,proto3" json:"events,omitempty"`
 	// Can publish one or more status(es) at a time
-	Statuses []*google_rpc.Status `protobuf:"bytes,2,rep,name=statuses" json:"statuses,omitempty"`
+	Statuses             []*status.Status `protobuf:"bytes,2,rep,name=statuses,proto3" json:"statuses,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
+	XXX_unrecognized     []byte           `json:"-"`
+	XXX_sizecache        int32            `json:"-"`
 }
 
-func (m *GetEventsResponse) Reset()                    { *m = GetEventsResponse{} }
-func (m *GetEventsResponse) String() string            { return proto.CompactTextString(m) }
-func (*GetEventsResponse) ProtoMessage()               {}
-func (*GetEventsResponse) Descriptor() ([]byte, []int) { return fileDescriptor2, []int{1} }
+func (m *GetEventsResponse) Reset()         { *m = GetEventsResponse{} }
+func (m *GetEventsResponse) String() string { return proto.CompactTextString(m) }
+func (*GetEventsResponse) ProtoMessage()    {}
+func (*GetEventsResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_service_95158cc37a1d45fd, []int{1}
+}
+func (m *GetEventsResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetEventsResponse.Unmarshal(m, b)
+}
+func (m *GetEventsResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetEventsResponse.Marshal(b, m, deterministic)
+}
+func (dst *GetEventsResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetEventsResponse.Merge(dst, src)
+}
+func (m *GetEventsResponse) XXX_Size() int {
+	return xxx_messageInfo_GetEventsResponse.Size(m)
+}
+func (m *GetEventsResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetEventsResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_GetEventsResponse proto.InternalMessageInfo
 
 func (m *GetEventsResponse) GetEvents() []*ReceivedTelemetryEvent {
 	if m != nil {
@@ -58,7 +108,7 @@ func (m *GetEventsResponse) GetEvents() []*ReceivedTelemetryEvent {
 	return nil
 }
 
-func (m *GetEventsResponse) GetStatuses() []*google_rpc.Status {
+func (m *GetEventsResponse) GetStatuses() []*status.Status {
 	if m != nil {
 		return m.Statuses
 	}
@@ -69,21 +119,43 @@ func (m *GetEventsResponse) GetStatuses() []*google_rpc.Status {
 type ReceivedTelemetryEvent struct {
 	// The time that the event was received by the backplane (in micros
 	// since Unix epoch)
-	PublishTimeMicros int64 `protobuf:"varint,1,opt,name=publish_time_micros,json=publishTimeMicros" json:"publish_time_micros,omitempty"`
+	PublishTimeMicros int64 `protobuf:"varint,1,opt,name=publish_time_micros,json=publishTimeMicros,proto3" json:"publish_time_micros,omitempty"`
 	// The actual event observed by the Sensor. For historical
 	// event subscriptions, this event may be sent from the
 	// Recorder.
-	Event *TelemetryEvent `protobuf:"bytes,2,opt,name=event" json:"event,omitempty"`
+	Event *TelemetryEvent `protobuf:"bytes,2,opt,name=event,proto3" json:"event,omitempty"`
 	// An opaque ack for the event. If present, this ack must be sent to
 	// the PubsubService's Acknowledge method or else the TelemetryService
 	// will re-transmit the event.
-	Ack []byte `protobuf:"bytes,3,opt,name=ack,proto3" json:"ack,omitempty"`
+	Ack                  []byte   `protobuf:"bytes,3,opt,name=ack,proto3" json:"ack,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
-func (m *ReceivedTelemetryEvent) Reset()                    { *m = ReceivedTelemetryEvent{} }
-func (m *ReceivedTelemetryEvent) String() string            { return proto.CompactTextString(m) }
-func (*ReceivedTelemetryEvent) ProtoMessage()               {}
-func (*ReceivedTelemetryEvent) Descriptor() ([]byte, []int) { return fileDescriptor2, []int{2} }
+func (m *ReceivedTelemetryEvent) Reset()         { *m = ReceivedTelemetryEvent{} }
+func (m *ReceivedTelemetryEvent) String() string { return proto.CompactTextString(m) }
+func (*ReceivedTelemetryEvent) ProtoMessage()    {}
+func (*ReceivedTelemetryEvent) Descriptor() ([]byte, []int) {
+	return fileDescriptor_telemetry_service_95158cc37a1d45fd, []int{2}
+}
+func (m *ReceivedTelemetryEvent) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_ReceivedTelemetryEvent.Unmarshal(m, b)
+}
+func (m *ReceivedTelemetryEvent) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_ReceivedTelemetryEvent.Marshal(b, m, deterministic)
+}
+func (dst *ReceivedTelemetryEvent) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ReceivedTelemetryEvent.Merge(dst, src)
+}
+func (m *ReceivedTelemetryEvent) XXX_Size() int {
+	return xxx_messageInfo_ReceivedTelemetryEvent.Size(m)
+}
+func (m *ReceivedTelemetryEvent) XXX_DiscardUnknown() {
+	xxx_messageInfo_ReceivedTelemetryEvent.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_ReceivedTelemetryEvent proto.InternalMessageInfo
 
 func (m *ReceivedTelemetryEvent) GetPublishTimeMicros() int64 {
 	if m != nil {
@@ -120,8 +192,9 @@ var _ grpc.ClientConn
 // is compatible with the grpc package it is being compiled against.
 const _ = grpc.SupportPackageIsVersion4
 
-// Client API for TelemetryService service
-
+// TelemetryServiceClient is the client API for TelemetryService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://godoc.org/google.golang.org/grpc#ClientConn.NewStream.
 type TelemetryServiceClient interface {
 	// Opens a new stream of telemetry events
 	GetEvents(ctx context.Context, in *GetEventsRequest, opts ...grpc.CallOption) (TelemetryService_GetEventsClient, error)
@@ -136,7 +209,7 @@ func NewTelemetryServiceClient(cc *grpc.ClientConn) TelemetryServiceClient {
 }
 
 func (c *telemetryServiceClient) GetEvents(ctx context.Context, in *GetEventsRequest, opts ...grpc.CallOption) (TelemetryService_GetEventsClient, error) {
-	stream, err := grpc.NewClientStream(ctx, &_TelemetryService_serviceDesc.Streams[0], c.cc, "/capsule8.api.v0.TelemetryService/GetEvents", opts...)
+	stream, err := c.cc.NewStream(ctx, &_TelemetryService_serviceDesc.Streams[0], "/capsule8.api.v0.TelemetryService/GetEvents", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -167,8 +240,7 @@ func (x *telemetryServiceGetEventsClient) Recv() (*GetEventsResponse, error) {
 	return m, nil
 }
 
-// Server API for TelemetryService service
-
+// TelemetryServiceServer is the server API for TelemetryService service.
 type TelemetryServiceServer interface {
 	// Opens a new stream of telemetry events
 	GetEvents(*GetEventsRequest, TelemetryService_GetEventsServer) error
@@ -213,9 +285,11 @@ var _TelemetryService_serviceDesc = grpc.ServiceDesc{
 	Metadata: "capsule8/api/v0/telemetry_service.proto",
 }
 
-func init() { proto.RegisterFile("capsule8/api/v0/telemetry_service.proto", fileDescriptor2) }
+func init() {
+	proto.RegisterFile("capsule8/api/v0/telemetry_service.proto", fileDescriptor_telemetry_service_95158cc37a1d45fd)
+}
 
-var fileDescriptor2 = []byte{
+var fileDescriptor_telemetry_service_95158cc37a1d45fd = []byte{
 	// 372 bytes of a gzipped FileDescriptorProto
 	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x7c, 0x92, 0xc1, 0x4a, 0xf3, 0x40,
 	0x14, 0x85, 0x99, 0x86, 0xbf, 0xfc, 0x4e, 0x0b, 0x6d, 0x47, 0xd4, 0x50, 0x14, 0x6b, 0x40, 0x5a,

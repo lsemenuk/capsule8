@@ -3,7 +3,7 @@
 
 ## Table of Contents
 
-- [types.proto](#types.proto)
+- [capsule8/api/v0/types.proto](#capsule8/api/v0/types.proto)
     - [Credentials](#capsule8.api.v0.Credentials)
     - [IPv4Address](#capsule8.api.v0.IPv4Address)
     - [IPv4AddressAndPort](#capsule8.api.v0.IPv4AddressAndPort)
@@ -16,13 +16,14 @@
   
   
 
-- [telemetry_event.proto](#telemetry_event.proto)
+- [capsule8/api/v0/telemetry_event.proto](#capsule8/api/v0/telemetry_event.proto)
     - [ChargenEvent](#capsule8.api.v0.ChargenEvent)
     - [ContainerEvent](#capsule8.api.v0.ContainerEvent)
     - [FileEvent](#capsule8.api.v0.FileEvent)
     - [KernelFunctionCallEvent](#capsule8.api.v0.KernelFunctionCallEvent)
     - [KernelFunctionCallEvent.ArgumentsEntry](#capsule8.api.v0.KernelFunctionCallEvent.ArgumentsEntry)
     - [KernelFunctionCallEvent.FieldValue](#capsule8.api.v0.KernelFunctionCallEvent.FieldValue)
+    - [LostRecordEvent](#capsule8.api.v0.LostRecordEvent)
     - [NetworkEvent](#capsule8.api.v0.NetworkEvent)
     - [PerformanceEvent](#capsule8.api.v0.PerformanceEvent)
     - [PerformanceEventValue](#capsule8.api.v0.PerformanceEventValue)
@@ -31,31 +32,36 @@
     - [SyscallEvent](#capsule8.api.v0.SyscallEvent)
     - [TelemetryEvent](#capsule8.api.v0.TelemetryEvent)
     - [TickerEvent](#capsule8.api.v0.TickerEvent)
+    - [UserFunctionCallEvent](#capsule8.api.v0.UserFunctionCallEvent)
+    - [UserFunctionCallEvent.ArgumentsEntry](#capsule8.api.v0.UserFunctionCallEvent.ArgumentsEntry)
+    - [UserFunctionCallEvent.FieldValue](#capsule8.api.v0.UserFunctionCallEvent.FieldValue)
   
     - [ContainerEventType](#capsule8.api.v0.ContainerEventType)
     - [FileEventType](#capsule8.api.v0.FileEventType)
     - [KernelFunctionCallEvent.FieldType](#capsule8.api.v0.KernelFunctionCallEvent.FieldType)
     - [KernelFunctionCallEventType](#capsule8.api.v0.KernelFunctionCallEventType)
+    - [LostRecordEventType](#capsule8.api.v0.LostRecordEventType)
     - [NetworkEventType](#capsule8.api.v0.NetworkEventType)
     - [PerformanceEventType](#capsule8.api.v0.PerformanceEventType)
     - [ProcessEventType](#capsule8.api.v0.ProcessEventType)
     - [SyscallEventType](#capsule8.api.v0.SyscallEventType)
+    - [UserFunctionCallEvent.FieldType](#capsule8.api.v0.UserFunctionCallEvent.FieldType)
+    - [UserFunctionCallEventType](#capsule8.api.v0.UserFunctionCallEventType)
   
   
   
 
-- [expression.proto](#expression.proto)
-    - [BinaryOp](#capsule8.api.v0.BinaryOp)
-    - [Expression](#capsule8.api.v0.Expression)
-    - [Value](#capsule8.api.v0.Value)
-  
-    - [Expression.ExpressionType](#capsule8.api.v0.Expression.ExpressionType)
-    - [ValueType](#capsule8.api.v0.ValueType)
+- [capsule8/api/v0/telemetry_service.proto](#capsule8/api/v0/telemetry_service.proto)
+    - [GetEventsRequest](#capsule8.api.v0.GetEventsRequest)
+    - [GetEventsResponse](#capsule8.api.v0.GetEventsResponse)
+    - [ReceivedTelemetryEvent](#capsule8.api.v0.ReceivedTelemetryEvent)
   
   
+  
+    - [TelemetryService](#capsule8.api.v0.TelemetryService)
   
 
-- [subscription.proto](#subscription.proto)
+- [capsule8/api/v0/subscription.proto](#capsule8/api/v0/subscription.proto)
     - [ChargenEventFilter](#capsule8.api.v0.ChargenEventFilter)
     - [ContainerEventFilter](#capsule8.api.v0.ContainerEventFilter)
     - [ContainerFilter](#capsule8.api.v0.ContainerFilter)
@@ -73,6 +79,8 @@
     - [SyscallEventFilter](#capsule8.api.v0.SyscallEventFilter)
     - [ThrottleModifier](#capsule8.api.v0.ThrottleModifier)
     - [TickerEventFilter](#capsule8.api.v0.TickerEventFilter)
+    - [UserFunctionCallFilter](#capsule8.api.v0.UserFunctionCallFilter)
+    - [UserFunctionCallFilter.ArgumentsEntry](#capsule8.api.v0.UserFunctionCallFilter.ArgumentsEntry)
   
     - [ContainerEventView](#capsule8.api.v0.ContainerEventView)
     - [SampleRateType](#capsule8.api.v0.SampleRateType)
@@ -81,24 +89,25 @@
   
   
 
-- [telemetry_service.proto](#telemetry_service.proto)
-    - [GetEventsRequest](#capsule8.api.v0.GetEventsRequest)
-    - [GetEventsResponse](#capsule8.api.v0.GetEventsResponse)
-    - [ReceivedTelemetryEvent](#capsule8.api.v0.ReceivedTelemetryEvent)
+- [capsule8/api/v0/expression.proto](#capsule8/api/v0/expression.proto)
+    - [BinaryOp](#capsule8.api.v0.BinaryOp)
+    - [Expression](#capsule8.api.v0.Expression)
+    - [Value](#capsule8.api.v0.Value)
+  
+    - [Expression.ExpressionType](#capsule8.api.v0.Expression.ExpressionType)
+    - [ValueType](#capsule8.api.v0.ValueType)
   
   
-  
-    - [TelemetryService](#capsule8.api.v0.TelemetryService)
   
 
 - [Scalar Value Types](#scalar-value-types)
 
 
 
-<a name="types.proto"/>
+<a name="capsule8/api/v0/types.proto"/>
 <p align="right"><a href="#top">Top</a></p>
 
-## types.proto
+## capsule8/api/v0/types.proto
 
 
 
@@ -228,10 +237,10 @@ Supported network address families
 
 
 
-<a name="telemetry_event.proto"/>
+<a name="capsule8/api/v0/telemetry_event.proto"/>
 <p align="right"><a href="#top">Top</a></p>
 
-## telemetry_event.proto
+## capsule8/api/v0/telemetry_event.proto
 
 
 
@@ -286,9 +295,14 @@ occurring as detected by the Sensor.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | type | [FileEventType](#capsule8.api.v0.FileEventType) |  | The type of event described by this FileEvent message |
-| filename | [string](#string) |  | Present when the event is a file open event. This is the filename of the file being opened. |
+| filename | [string](#string) |  | Present when the event is a file create, delete, link, modify, or open event. This is the filename of the file being affected. |
 | open_flags | [sint32](#sint32) |  | Present when the event is a file open event. This is the set of flags with which the file was opened (e.g., O_RDONLY, O_NONBLOCK, etc.). |
-| open_mode | [sint32](#sint32) |  | Present when the event is a file open event. This is the set of file permissions used in a creat(2) system call. |
+| open_mode | [sint32](#sint32) |  | Present when the event is a file create or open event. This is the set of file permissions used in a creat(2) system call. |
+| source_file | [string](#string) |  | Present when the event is a file link event. This is the name of the file being linked to. |
+| target_file | [string](#string) |  | Present when the event is a file link event. This is the name of the file linking to source the source file. |
+| symlink | [bool](#bool) |  | Present when the event is a file link event. This is true if the link is a symlink; otherwise, it is a hard link. |
+| oldname | [string](#string) |  | Present when the event is a file rename event. This is the original name of the file being renamed. |
+| newname | [string](#string) |  | Present when the event is a file rename event. This is the new name of the file being renamed. |
 
 
 
@@ -304,7 +318,7 @@ functions being entered or exited.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| arguments | [KernelFunctionCallEvent.ArgumentsEntry](#capsule8.api.v0.KernelFunctionCallEvent.ArgumentsEntry) | repeated | Label repeated w/ a `mapEntry` option set to `true`. This is a map of argument names and values. The keys are strings that are the names of the arguments, and the values are the actual values for each field. |
+| arguments | [KernelFunctionCallEvent.ArgumentsEntry](#capsule8.api.v0.KernelFunctionCallEvent.ArgumentsEntry) | repeated | This is a map of argument names and values. The keys are strings that are the names of the arguments, and the values are the actual values for each field. |
 
 
 
@@ -341,6 +355,22 @@ information and the value itself.
 | string_value | [string](#string) |  | A string |
 | signed_value | [sint64](#sint64) |  | A signed value (8-bit, 16-bit, 32-bit, or 64-bit) |
 | unsigned_value | [uint64](#uint64) |  | An unsigned value (8-bit, 16--bit, 32-bit, or 64-bit) |
+
+
+
+
+
+
+<a name="capsule8.api.v0.LostRecordEvent"/>
+
+### LostRecordEvent
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| lost | [uint64](#uint64) |  | Number of lost records observed |
+| type | [LostRecordEventType](#capsule8.api.v0.LostRecordEventType) |  | Type of events lost |
 
 
 
@@ -431,6 +461,8 @@ and exiting as detected by the Sensor.
 | type | [ProcessEventType](#capsule8.api.v0.ProcessEventType) |  | The type of event described by this ProcessEvent message |
 | fork_child_pid | [sint32](#sint32) |  | Present when the event is a fork event. This is the PID of the new child process. |
 | fork_child_id | [string](#string) |  | Present when the event is a fork event. This is the Sensor&#39;s process ID of the new child process. |
+| fork_clone_flags | [uint64](#uint64) |  | Present when the event is a fork event. This is the flags parameter passed to sys_clone. |
+| fork_stack_start | [uint64](#uint64) |  | Present when the event is a fork event. This is the stack_start parameter passed to sys_clone. |
 | exec_filename | [string](#string) |  | Present when the event is an exec event. This is the filename of the executable that was executed. |
 | exec_command_line | [string](#string) | repeated | Present when the event is an exec event. Repeated for each argument passed to the executable on the command-line. |
 | exit_code | [sint32](#sint32) |  | Present when the event is an exit event. This is the exit code that the process exited with. |
@@ -493,9 +525,11 @@ An event observed by the Sensor.
 | kernel_call | [KernelFunctionCallEvent](#capsule8.api.v0.KernelFunctionCallEvent) |  |  |
 | network | [NetworkEvent](#capsule8.api.v0.NetworkEvent) |  |  |
 | performance | [PerformanceEvent](#capsule8.api.v0.PerformanceEvent) |  |  |
+| user_call | [UserFunctionCallEvent](#capsule8.api.v0.UserFunctionCallEvent) |  |  |
 | container | [ContainerEvent](#capsule8.api.v0.ContainerEvent) |  |  |
 | chargen | [ChargenEvent](#capsule8.api.v0.ChargenEvent) |  | Debugging events (&gt;= 100) |
 | ticker | [TickerEvent](#capsule8.api.v0.TickerEvent) |  |  |
+| lost | [LostRecordEvent](#capsule8.api.v0.LostRecordEvent) |  |  |
 | cpu | [int32](#int32) |  | CPU on which the event occurred |
 | credentials | [Credentials](#capsule8.api.v0.Credentials) |  | Credentials for the process associated with the event |
 | process_tgid | [int32](#int32) |  | Kernel&#39;s TGID of the task associated with the event. This corresponds the userland&#39;s PID. |
@@ -519,6 +553,58 @@ https://golang.org/pkg/time/#Time.Unix |
 | nanoseconds | [int64](#int64) |  | The number of nanoseconds elapsed since January 1, 1970 UTC
 
 https://golang.org/pkg/time/#Time.UnixNano |
+
+
+
+
+
+
+<a name="capsule8.api.v0.UserFunctionCallEvent"/>
+
+### UserFunctionCallEvent
+UserFunctionCallEvent describes an event that occurred related to user
+functions being entered or exited.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| arguments | [UserFunctionCallEvent.ArgumentsEntry](#capsule8.api.v0.UserFunctionCallEvent.ArgumentsEntry) | repeated | This is a map of argument names and values. The keys are strings that are the names of the arguments, and the values are the actual values for each field. |
+
+
+
+
+
+
+<a name="capsule8.api.v0.UserFunctionCallEvent.ArgumentsEntry"/>
+
+### UserFunctionCallEvent.ArgumentsEntry
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| key | [string](#string) |  |  |
+| value | [UserFunctionCallEvent.FieldValue](#capsule8.api.v0.UserFunctionCallEvent.FieldValue) |  |  |
+
+
+
+
+
+
+<a name="capsule8.api.v0.UserFunctionCallEvent.FieldValue"/>
+
+### UserFunctionCallEvent.FieldValue
+The representation of a field value, which is composed of type
+information and the value itself.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| field_type | [UserFunctionCallEvent.FieldType](#capsule8.api.v0.UserFunctionCallEvent.FieldType) |  | The type represented by this field value. |
+| bytes_value | [bytes](#bytes) |  | An array of bytes |
+| string_value | [string](#string) |  | A string |
+| signed_value | [sint64](#sint64) |  | A signed value (8-bit, 16-bit, 32-bit, or 64-bit) |
+| unsigned_value | [uint64](#uint64) |  | An unsigned value (8-bit, 16--bit, 32-bit, or 64-bit) |
 
 
 
@@ -552,6 +638,14 @@ Possible FileEvent types
 | ---- | ------ | ----------- |
 | FILE_EVENT_TYPE_UNKNOWN | 0 | The type of event is unknown |
 | FILE_EVENT_TYPE_OPEN | 1 | The event is a file open event |
+| FILE_EVENT_TYPE_CREATE | 2 | The event is a file create event |
+| FILE_EVENT_TYPE_DELETE | 3 | The event is a file delete event |
+| FILE_EVENT_TYPE_LINK | 4 | The event is a file link event |
+| FILE_EVENT_TYPE_OPEN_FOR_MODIFY | 5 | The event is a file open for modify event |
+| FILE_EVENT_TYPE_RENAME | 6 | The event is a file rename event |
+| FILE_EVENT_TYPE_MODIFY | 7 | The event is a file modify event |
+| FILE_EVENT_TYPE_CLOSE_FOR_MODIFY | 8 | The event is a file close for modify event |
+| FILE_EVENT_TYPE_ATTRIBUTE_CHANGE | 9 | The event is a attribute change event |
 
 
 
@@ -586,6 +680,29 @@ Possible KernelFunctionCallEvent types
 | KERNEL_FUNCTION_CALL_EVENT_TYPE_UNKNOWN | 0 | The type of event is unknown |
 | KERNEL_FUNCTION_CALL_EVENT_TYPE_ENTER | 1 | The event is a kernel function being entered. |
 | KERNEL_FUNCTION_CALL_EVENT_TYPE_EXIT | 2 | The event is a kernel function being exited. |
+
+
+
+<a name="capsule8.api.v0.LostRecordEventType"/>
+
+### LostRecordEventType
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| LOST_RECORD_EVENT_TYPE_UNKNOWN | 0 | LOST_RECORD_EVENT_TYPE_UNKNOWN is a lost record of unknown type. |
+| LOST_RECORD_EVENT_TYPE_SUBSCRIPTION | 1 | LOST_RECORD_EVENT_TYPE_SUBSCRIPTION is a lost record from a subscription. It may include kprobes, uprobes, network events, syscalls, etc. but it does not include meta events like process, container, or file monitoring events. This type is only ever sent to a specific subscription that has lost a kernel generated event. |
+| LOST_RECORD_EVENT_TYPE_PROCESS | 2 | LOST_RECORD_EVENT_TYPE_PROCESS is a lost record relating to process meta events. This type is broadcast to all subscriptions, regardless of whether they&#39;ve explicitly subscribed to process events or not, because it affects everything. |
+| LOST_RECORD_EVENT_TYPE_CONTAINER | 3 | LOST_RECORD_EVENT_TYPE_CONTAINER is a lost record relating to container meta events. This type is broadcast to all subscriptions, regardless of whether they&#39;ve explicitly subscribed to process events or not, because it affects everything. |
+| LOST_RECORD_EVENT_TYPE_FILE_CREATE | 4 | LOST_RECORD_EVENT_TYPE_FILE_CREATE is a lost record relating to file create events. It is only sent to subscriptions that are subscribed to file create events. |
+| LOST_RECORD_EVENT_TYPE_FILE_DELETE | 5 | LOST_RECORD_EVENT_TYPE_FILE_DELETE is a lost record relating to file delete events. It is only sent to subscriptions that are subscribed to file delete events. |
+| LOST_RECORD_EVENT_TYPE_FILE_LINK | 6 | LOST_RECORD_EVENT_TYPE_FILE_LINK is a lost record relating to file link events. It is only sent to subscriptions that are subscribed to file link events. |
+| LOST_RECORD_EVENT_TYPE_FILE_SYMLINK | 7 | LOST_RECORD_EVENT_TYPE_FILE_SYMLINK is a lost record relating to file symlink events. It is only sent to subscriptions that are subscribed to file link events. |
+| LOST_RECORD_EVENT_TYPE_FILE_OPEN_MODIFY | 8 | LOST_RECORD_EVENT_TYPE_FILE_OPEN_MODIFY is a lost record relating to file open modify events. It is only sent to subscriptions that are subscribed to file open modify events. |
+| LOST_RECORD_EVENT_TYPE_FILE_CLOSE_MODIFY | 9 | LOST_RECORD_EVENT_TYPE_FILE_CLOSE_MODIY is a lost record relating to file close modify events. It is only sent to subscriptions that are subscribed to file close modify events. |
+| LOST_RECORD_EVENT_TYPE_FILE_MODIFY | 10 | LOST_RECORD_EVENT_TYPE_FILE_MODIFY is a lost record relating to file modify events. It is only sent to subscriptions that are subscribed to file modify events. |
+| LOST_RECORD_EVENT_TYPE_FILE_RENAME | 11 | LOST_RECORD_EVENT_TYPE_FILE_RENAME is a lost record relating to file rename events. It is only sent to subscriptions that are subscribed to file rename events. |
+| LOST_RECORD_EVENT_TYPE_FILE_ATTRIBUTE_CHANGE | 12 | LOST_RECORD_EVENT_TYPE_FILE_ATTRIBUTE_CHANGE is a lost record relating to file attribute change events. It is only sent to subscriptions that are subscribed to file attribute change events. |
 
 
 
@@ -653,124 +770,38 @@ Possible SyscallEvent types
 | SYSCALL_EVENT_TYPE_EXIT | 2 | The event is a syscall exit event |
 
 
- 
 
- 
+<a name="capsule8.api.v0.UserFunctionCallEvent.FieldType"/>
 
- 
-
-
-
-<a name="expression.proto"/>
-<p align="right"><a href="#top">Top</a></p>
-
-## expression.proto
-
-
-
-<a name="capsule8.api.v0.BinaryOp"/>
-
-### BinaryOp
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| lhs | [Expression](#capsule8.api.v0.Expression) |  |  |
-| rhs | [Expression](#capsule8.api.v0.Expression) |  |  |
-
-
-
-
-
-
-<a name="capsule8.api.v0.Expression"/>
-
-### Expression
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| type | [Expression.ExpressionType](#capsule8.api.v0.Expression.ExpressionType) |  |  |
-| identifier | [string](#string) |  |  |
-| value | [Value](#capsule8.api.v0.Value) |  |  |
-| binary_op | [BinaryOp](#capsule8.api.v0.BinaryOp) |  |  |
-| unary_op | [Expression](#capsule8.api.v0.Expression) |  |  |
-
-
-
-
-
-
-<a name="capsule8.api.v0.Value"/>
-
-### Value
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| type | [ValueType](#capsule8.api.v0.ValueType) |  |  |
-| signed_value | [sint64](#sint64) |  |  |
-| unsigned_value | [uint64](#uint64) |  |  |
-| string_value | [string](#string) |  |  |
-| bool_value | [bool](#bool) |  |  |
-| double_value | [double](#double) |  |  |
-| timestamp_value | [.google.protobuf.Timestamp](#capsule8.api.v0..google.protobuf.Timestamp) |  |  |
-
-
-
-
-
- 
-
-
-<a name="capsule8.api.v0.Expression.ExpressionType"/>
-
-### Expression.ExpressionType
-
+### UserFunctionCallEvent.FieldType
+Possible field types
 
 | Name | Number | Description |
 | ---- | ------ | ----------- |
-| EXPRESSIONTYPE_UNSPECIFIED | 0 |  |
-| IDENTIFIER | 1 |  |
-| VALUE | 2 |  |
-| LOGICAL_AND | 10 |  |
-| LOGICAL_OR | 11 |  |
-| EQ | 20 |  |
-| NE | 21 |  |
-| LT | 22 |  |
-| LE | 23 |  |
-| GT | 24 |  |
-| GE | 25 |  |
-| LIKE | 26 |  |
-| IS_NULL | 27 | unary comparison |
-| IS_NOT_NULL | 28 | unary comparison |
-| BITWISE_AND | 30 |  |
+| UNKNOWN | 0 | The field type is unknown |
+| BYTES | 1 | The field type is an array of bytes |
+| STRING | 2 | The field type is a string |
+| SINT8 | 3 | The field type is a signed 8-bit integer |
+| SINT16 | 4 | The field type is a signed 16-bit integer |
+| SINT32 | 5 | The field type is a signed 32-bit integer |
+| SINT64 | 6 | The field type is a signed 64-bit integer |
+| UINT8 | 7 | The field type is an unsigned 8-bit integer |
+| UINT16 | 8 | The field type is an unsigned 16-bit integer |
+| UINT32 | 9 | The field type is an unsigned 32-bit integer |
+| UINT64 | 10 | The field type is an unsigned 64-bit integer |
 
 
 
-<a name="capsule8.api.v0.ValueType"/>
+<a name="capsule8.api.v0.UserFunctionCallEventType"/>
 
-### ValueType
-
+### UserFunctionCallEventType
+Possible UserFunctionCallEvent types
 
 | Name | Number | Description |
 | ---- | ------ | ----------- |
-| VALUETYPE_UNSPECIFIED | 0 |  |
-| STRING | 1 |  |
-| SINT8 | 2 |  |
-| SINT16 | 3 |  |
-| SINT32 | 4 |  |
-| SINT64 | 5 |  |
-| UINT8 | 6 |  |
-| UINT16 | 7 |  |
-| UINT32 | 8 |  |
-| UINT64 | 9 |  |
-| BOOL | 10 |  |
-| DOUBLE | 11 |  |
-| TIMESTAMP | 12 |  |
+| USER_FUNCTION_CALL_EVENT_TYPE_UNKNOWN | 0 | The type of event is unknown |
+| USER_FUNCTION_CALL_EVENT_TYPE_ENTER | 1 | The event is a user function being entered. |
+| USER_FUNCTION_CALL_EVENT_TYPE_EXIT | 2 | The event is a user function being exited. |
 
 
  
@@ -781,10 +812,84 @@ Possible SyscallEvent types
 
 
 
-<a name="subscription.proto"/>
+<a name="capsule8/api/v0/telemetry_service.proto"/>
 <p align="right"><a href="#top">Top</a></p>
 
-## subscription.proto
+## capsule8/api/v0/telemetry_service.proto
+
+
+
+<a name="capsule8.api.v0.GetEventsRequest"/>
+
+### GetEventsRequest
+A request message to initiate the streaming of telemetry events
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| subscription | [Subscription](#capsule8.api.v0.Subscription) |  | The Subscription message defines which events should be returned in the stream. |
+
+
+
+
+
+
+<a name="capsule8.api.v0.GetEventsResponse"/>
+
+### GetEventsResponse
+A response message containing telemetry events
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| events | [ReceivedTelemetryEvent](#capsule8.api.v0.ReceivedTelemetryEvent) | repeated | Can publish one or more message(s) at a time |
+| statuses | [google.rpc.Status](#google.rpc.Status) | repeated | Can publish one or more status(es) at a time |
+
+
+
+
+
+
+<a name="capsule8.api.v0.ReceivedTelemetryEvent"/>
+
+### ReceivedTelemetryEvent
+A telemetry event received from a Sensor or Recorder.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| publish_time_micros | [int64](#int64) |  | The time that the event was received by the backplane (in micros since Unix epoch) |
+| event | [TelemetryEvent](#capsule8.api.v0.TelemetryEvent) |  | The actual event observed by the Sensor. For historical event subscriptions, this event may be sent from the Recorder. |
+| ack | [bytes](#bytes) |  | An opaque ack for the event. If present, this ack must be sent to the PubsubService&#39;s Acknowledge method or else the TelemetryService will re-transmit the event. |
+
+
+
+
+
+ 
+
+ 
+
+ 
+
+
+<a name="capsule8.api.v0.TelemetryService"/>
+
+### TelemetryService
+
+
+| Method Name | Request Type | Response Type | Description |
+| ----------- | ------------ | ------------- | ------------|
+| GetEvents | [GetEventsRequest](#capsule8.api.v0.GetEventsRequest) | [GetEventsResponse](#capsule8.api.v0.GetEventsRequest) | Opens a new stream of telemetry events |
+
+ 
+
+
+
+<a name="capsule8/api/v0/subscription.proto"/>
+<p align="right"><a href="#top">Top</a></p>
+
+## capsule8/api/v0/subscription.proto
 
 
 
@@ -851,8 +956,6 @@ The EventFilter specifies events to include. All of the specified
 fields are effectively &#34;ORed&#34; together to create the list of events
 included in the Subscription.
 
-
-
 Kernel-level events
 
 
@@ -861,9 +964,10 @@ Kernel-level events
 | syscall_events | [SyscallEventFilter](#capsule8.api.v0.SyscallEventFilter) | repeated | Zero or more filters specifying which system calls to include |
 | process_events | [ProcessEventFilter](#capsule8.api.v0.ProcessEventFilter) | repeated | Zero or more filters specifying which process events to include |
 | file_events | [FileEventFilter](#capsule8.api.v0.FileEventFilter) | repeated | Zero or more filters specifying which file events to include |
-| kernel_events | [KernelFunctionCallFilter](#capsule8.api.v0.KernelFunctionCallFilter) | repeated | Zero or more kernel functional calls to include |
+| kernel_events | [KernelFunctionCallFilter](#capsule8.api.v0.KernelFunctionCallFilter) | repeated | Zero or more kernel function calls to include |
 | network_events | [NetworkEventFilter](#capsule8.api.v0.NetworkEventFilter) | repeated | Zero or more network events to include |
 | performance_events | [PerformanceEventFilter](#capsule8.api.v0.PerformanceEventFilter) | repeated | Zero or more performance events to include |
+| user_events | [UserFunctionCallFilter](#capsule8.api.v0.UserFunctionCallFilter) | repeated | Zero or more user function calls to include |
 | container_events | [ContainerEventFilter](#capsule8.api.v0.ContainerEventFilter) | repeated | Zero or more container events to include |
 | chargen_events | [ChargenEventFilter](#capsule8.api.v0.ChargenEventFilter) | repeated | Zero or more character generators to configure and return events from (for debugging) |
 | ticker_events | [TickerEventFilter](#capsule8.api.v0.TickerEventFilter) | repeated | Zero or more ticker generators to configure and return events from (for debugging) |
@@ -885,10 +989,10 @@ specify a matching event.
 | ----- | ---- | ----- | ----------- |
 | type | [FileEventType](#capsule8.api.v0.FileEventType) |  | Required; the file event type to match |
 | filter_expression | [Expression](#capsule8.api.v0.Expression) |  |  |
-| filename | [.google.protobuf.StringValue](#capsule8.api.v0..google.protobuf.StringValue) |  | Optional; require exact match on the filename being acted upon |
-| filename_pattern | [.google.protobuf.StringValue](#capsule8.api.v0..google.protobuf.StringValue) |  | Optional; require pattern match on the filename being acted upon |
-| open_flags_mask | [.google.protobuf.Int32Value](#capsule8.api.v0..google.protobuf.Int32Value) |  | Optional; for file open events, require a match of the bits set for the open(2) flags argument |
-| create_mode_mask | [.google.protobuf.Int32Value](#capsule8.api.v0..google.protobuf.Int32Value) |  | Optional; for file open events, require a match of the bits set for the open(2) or creat(2) mode argument |
+| filename | [google.protobuf.StringValue](#google.protobuf.StringValue) |  | Optional; require exact match on the filename being acted upon |
+| filename_pattern | [google.protobuf.StringValue](#google.protobuf.StringValue) |  | Optional; require pattern match on the filename being acted upon |
+| open_flags_mask | [google.protobuf.Int32Value](#google.protobuf.Int32Value) |  | Optional; for file open events, require a match of the bits set for the open(2) flags argument |
+| create_mode_mask | [google.protobuf.Int32Value](#google.protobuf.Int32Value) |  | Optional; for file open events, require a match of the bits set for the open(2) or creat(2) mode argument |
 
 
 
@@ -1036,9 +1140,9 @@ specify a matching event.
 | ----- | ---- | ----- | ----------- |
 | type | [ProcessEventType](#capsule8.api.v0.ProcessEventType) |  | Required; the process event type to match |
 | filter_expression | [Expression](#capsule8.api.v0.Expression) |  |  |
-| exec_filename | [.google.protobuf.StringValue](#capsule8.api.v0..google.protobuf.StringValue) |  | Optional; require exact match on the filename passed to execve(2) |
-| exec_filename_pattern | [.google.protobuf.StringValue](#capsule8.api.v0..google.protobuf.StringValue) |  | Optional; require pattern match on the filename passed to execve(2) |
-| exit_code | [.google.protobuf.Int32Value](#capsule8.api.v0..google.protobuf.Int32Value) |  | Optional; require exact match on exit code |
+| exec_filename | [google.protobuf.StringValue](#google.protobuf.StringValue) |  | Optional; require exact match on the filename passed to execve(2) |
+| exec_filename_pattern | [google.protobuf.StringValue](#google.protobuf.StringValue) |  | Optional; require pattern match on the filename passed to execve(2) |
+| exit_code | [google.protobuf.Int32Value](#google.protobuf.Int32Value) |  | Optional; require exact match on exit code |
 
 
 
@@ -1056,8 +1160,8 @@ telemetry events.
 | ----- | ---- | ----- | ----------- |
 | event_filter | [EventFilter](#capsule8.api.v0.EventFilter) |  | Return events matching one or more of the specified event filters. If no event filters are specified, then no events will be returned. |
 | container_filter | [ContainerFilter](#capsule8.api.v0.ContainerFilter) |  | If not empty, then only return events from containers matched by one or more of the specified container filters. |
-| since_duration | [.google.protobuf.Int64Value](#capsule8.api.v0..google.protobuf.Int64Value) |  | If not empty, then only return events that occurred after the specified relative duration subtracted from the current time (recorder time). If the resulting time is in the past, then the subscription will search for historic events before streaming live ones. Sensors do not honor this field. |
-| for_duration | [.google.protobuf.Int64Value](#capsule8.api.v0..google.protobuf.Int64Value) |  | If not empty, then only return events that occurred before the specified relative duration added to `since_duration`. If `since_duration` is not supplied, return events from now and until the specified relative duration is hit. Sensors do not honor this field. |
+| since_duration | [google.protobuf.Int64Value](#google.protobuf.Int64Value) |  | If not empty, then only return events that occurred after the specified relative duration subtracted from the current time (recorder time). If the resulting time is in the past, then the subscription will search for historic events before streaming live ones. Sensors do not honor this field. |
+| for_duration | [google.protobuf.Int64Value](#google.protobuf.Int64Value) |  | If not empty, then only return events that occurred before the specified relative duration added to `since_duration`. If `since_duration` is not supplied, return events from now and until the specified relative duration is hit. Sensors do not honor this field. |
 | modifier | [Modifier](#capsule8.api.v0.Modifier) |  | If not empty, apply the specified modifier to the subscription. |
 
 
@@ -1077,14 +1181,14 @@ include in the Subscription. The specified fields are effectively
 | ----- | ---- | ----- | ----------- |
 | type | [SyscallEventType](#capsule8.api.v0.SyscallEventType) |  | Required; type of system call event (entry or exit) |
 | filter_expression | [Expression](#capsule8.api.v0.Expression) |  |  |
-| id | [.google.protobuf.Int64Value](#capsule8.api.v0..google.protobuf.Int64Value) |  | Required; system call number from arch/x86/entry/syscalls/syscall_64.tbl |
-| arg0 | [.google.protobuf.UInt64Value](#capsule8.api.v0..google.protobuf.UInt64Value) |  | Optional; precise value of a particular system call argument |
-| arg1 | [.google.protobuf.UInt64Value](#capsule8.api.v0..google.protobuf.UInt64Value) |  |  |
-| arg2 | [.google.protobuf.UInt64Value](#capsule8.api.v0..google.protobuf.UInt64Value) |  |  |
-| arg3 | [.google.protobuf.UInt64Value](#capsule8.api.v0..google.protobuf.UInt64Value) |  |  |
-| arg4 | [.google.protobuf.UInt64Value](#capsule8.api.v0..google.protobuf.UInt64Value) |  |  |
-| arg5 | [.google.protobuf.UInt64Value](#capsule8.api.v0..google.protobuf.UInt64Value) |  |  |
-| ret | [.google.protobuf.Int64Value](#capsule8.api.v0..google.protobuf.Int64Value) |  | Optional; return value of the system call (if type indicates exit). |
+| id | [google.protobuf.Int64Value](#google.protobuf.Int64Value) |  | Required; system call number from arch/x86/entry/syscalls/syscall_64.tbl |
+| arg0 | [google.protobuf.UInt64Value](#google.protobuf.UInt64Value) |  | Optional; precise value of a particular system call argument |
+| arg1 | [google.protobuf.UInt64Value](#google.protobuf.UInt64Value) |  |  |
+| arg2 | [google.protobuf.UInt64Value](#google.protobuf.UInt64Value) |  |  |
+| arg3 | [google.protobuf.UInt64Value](#google.protobuf.UInt64Value) |  |  |
+| arg4 | [google.protobuf.UInt64Value](#google.protobuf.UInt64Value) |  |  |
+| arg5 | [google.protobuf.UInt64Value](#google.protobuf.UInt64Value) |  |  |
+| ret | [google.protobuf.Int64Value](#google.protobuf.Int64Value) |  | Optional; return value of the system call (if type indicates exit). |
 
 
 
@@ -1118,6 +1222,49 @@ includes events from it in the Subscription.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | interval | [int64](#int64) |  | Required; the interval at which ticker events are generated |
+
+
+
+
+
+
+<a name="capsule8.api.v0.UserFunctionCallFilter"/>
+
+### UserFunctionCallFilter
+The UserFunctionCallFilter specifies which user mode function call events to
+include in the Subscription. User mode function call events are functions in
+running user mode binaries that must be specified with both the executable
+name and symbol to monitor. They otherwise work the same as kernel function
+call events. The arguments map defines values that will be fetched at each
+call and returned along with the event. In order to minimize event volume, a
+filter may be included that filters the user function calls based on the
+observed values of the specified arguments at the time of the user function
+call.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| type | [UserFunctionCallEventType](#capsule8.api.v0.UserFunctionCallEventType) |  | Required; the user function call event type to match |
+| executable | [string](#string) |  | Required; the executable binary in which calls are to be hooked. |
+| symbol | [string](#string) |  | Required; the executable symbol to match on |
+| arguments | [UserFunctionCallFilter.ArgumentsEntry](#capsule8.api.v0.UserFunctionCallFilter.ArgumentsEntry) | repeated | Option; the field names and data to be returned by the kernel when the event triggers. Note that this is a map. The keys are the names to assign to the returned fields, and the values are a string describing the data to return, usually an expression involving the register containing the desired data and a suffix indicating the type of the data (e.g., &#34;s32&#34;, &#34;string&#34;, &#34;u64&#34;, etc.). This map is used to construct the &#34;fetchargs&#34; passed to the kernel when creating the user probe. |
+| filter_expression | [Expression](#capsule8.api.v0.Expression) |  | Optional; a filter to apply to the user probe. |
+
+
+
+
+
+
+<a name="capsule8.api.v0.UserFunctionCallFilter.ArgumentsEntry"/>
+
+### UserFunctionCallFilter.ArgumentsEntry
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| key | [string](#string) |  |  |
+| value | [string](#string) |  |  |
 
 
 
@@ -1176,55 +1323,63 @@ Possible interval types
 
 
 
-<a name="telemetry_service.proto"/>
+<a name="capsule8/api/v0/expression.proto"/>
 <p align="right"><a href="#top">Top</a></p>
 
-## telemetry_service.proto
+## capsule8/api/v0/expression.proto
 
 
 
-<a name="capsule8.api.v0.GetEventsRequest"/>
+<a name="capsule8.api.v0.BinaryOp"/>
 
-### GetEventsRequest
-A request message to initiate the streaming of telemetry events
+### BinaryOp
+
 
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| subscription | [Subscription](#capsule8.api.v0.Subscription) |  | The Subscription message defines which events should be returned in the stream. |
+| lhs | [Expression](#capsule8.api.v0.Expression) |  |  |
+| rhs | [Expression](#capsule8.api.v0.Expression) |  |  |
 
 
 
 
 
 
-<a name="capsule8.api.v0.GetEventsResponse"/>
+<a name="capsule8.api.v0.Expression"/>
 
-### GetEventsResponse
-A response message containing telemetry events
+### Expression
+
 
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| events | [ReceivedTelemetryEvent](#capsule8.api.v0.ReceivedTelemetryEvent) | repeated | Can publish one or more message(s) at a time |
-| statuses | [.google.rpc.Status](#capsule8.api.v0..google.rpc.Status) | repeated | Can publish one or more status(es) at a time |
+| type | [Expression.ExpressionType](#capsule8.api.v0.Expression.ExpressionType) |  |  |
+| identifier | [string](#string) |  |  |
+| value | [Value](#capsule8.api.v0.Value) |  |  |
+| binary_op | [BinaryOp](#capsule8.api.v0.BinaryOp) |  |  |
+| unary_op | [Expression](#capsule8.api.v0.Expression) |  |  |
 
 
 
 
 
 
-<a name="capsule8.api.v0.ReceivedTelemetryEvent"/>
+<a name="capsule8.api.v0.Value"/>
 
-### ReceivedTelemetryEvent
-A telemetry event received from a Sensor or Recorder.
+### Value
+
 
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| publish_time_micros | [int64](#int64) |  | The time that the event was received by the backplane (in micros since Unix epoch) |
-| event | [TelemetryEvent](#capsule8.api.v0.TelemetryEvent) |  | The actual event observed by the Sensor. For historical event subscriptions, this event may be sent from the Recorder. |
-| ack | [bytes](#bytes) |  | An opaque ack for the event. If present, this ack must be sent to the PubsubService&#39;s Acknowledge method or else the TelemetryService will re-transmit the event. |
+| type | [ValueType](#capsule8.api.v0.ValueType) |  |  |
+| signed_value | [sint64](#sint64) |  |  |
+| unsigned_value | [uint64](#uint64) |  |  |
+| string_value | [string](#string) |  |  |
+| bool_value | [bool](#bool) |  |  |
+| double_value | [double](#double) |  |  |
+| timestamp_value | [google.protobuf.Timestamp](#google.protobuf.Timestamp) |  |  |
 
 
 
@@ -1232,19 +1387,57 @@ A telemetry event received from a Sensor or Recorder.
 
  
 
- 
+
+<a name="capsule8.api.v0.Expression.ExpressionType"/>
+
+### Expression.ExpressionType
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| EXPRESSIONTYPE_UNSPECIFIED | 0 |  |
+| IDENTIFIER | 1 |  |
+| VALUE | 2 |  |
+| LOGICAL_AND | 10 |  |
+| LOGICAL_OR | 11 |  |
+| EQ | 20 |  |
+| NE | 21 |  |
+| LT | 22 |  |
+| LE | 23 |  |
+| GT | 24 |  |
+| GE | 25 |  |
+| LIKE | 26 |  |
+| IS_NULL | 27 | unary comparison |
+| IS_NOT_NULL | 28 | unary comparison |
+| BITWISE_AND | 30 |  |
+
+
+
+<a name="capsule8.api.v0.ValueType"/>
+
+### ValueType
+
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| VALUETYPE_UNSPECIFIED | 0 |  |
+| STRING | 1 |  |
+| SINT8 | 2 |  |
+| SINT16 | 3 |  |
+| SINT32 | 4 |  |
+| SINT64 | 5 |  |
+| UINT8 | 6 |  |
+| UINT16 | 7 |  |
+| UINT32 | 8 |  |
+| UINT64 | 9 |  |
+| BOOL | 10 |  |
+| DOUBLE | 11 |  |
+| TIMESTAMP | 12 |  |
+
 
  
 
-
-<a name="capsule8.api.v0.TelemetryService"/>
-
-### TelemetryService
-
-
-| Method Name | Request Type | Response Type | Description |
-| ----------- | ------------ | ------------- | ------------|
-| GetEvents | [GetEventsRequest](#capsule8.api.v0.GetEventsRequest) | [GetEventsResponse](#capsule8.api.v0.GetEventsRequest) | Opens a new stream of telemetry events |
+ 
 
  
 

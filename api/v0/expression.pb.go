@@ -6,12 +6,18 @@ package capsule8_api_v0
 import proto "github.com/golang/protobuf/proto"
 import fmt "fmt"
 import math "math"
-import google_protobuf "github.com/golang/protobuf/ptypes/timestamp"
+import timestamp "github.com/golang/protobuf/ptypes/timestamp"
 
 // Reference imports to suppress errors if they are not otherwise used.
 var _ = proto.Marshal
 var _ = fmt.Errorf
 var _ = math.Inf
+
+// This is a compile-time assertion to ensure that this generated file
+// is compatible with the proto package it is being compiled against.
+// A compilation error at this line likely means your copy of the
+// proto package needs to be updated.
+const _ = proto.ProtoPackageIsVersion2 // please upgrade the proto package
 
 type ValueType int32
 
@@ -65,7 +71,9 @@ var ValueType_value = map[string]int32{
 func (x ValueType) String() string {
 	return proto.EnumName(ValueType_name, int32(x))
 }
-func (ValueType) EnumDescriptor() ([]byte, []int) { return fileDescriptor4, []int{0} }
+func (ValueType) EnumDescriptor() ([]byte, []int) {
+	return fileDescriptor_expression_633ee7819f2559b3, []int{0}
+}
 
 type Expression_ExpressionType int32
 
@@ -125,10 +133,12 @@ var Expression_ExpressionType_value = map[string]int32{
 func (x Expression_ExpressionType) String() string {
 	return proto.EnumName(Expression_ExpressionType_name, int32(x))
 }
-func (Expression_ExpressionType) EnumDescriptor() ([]byte, []int) { return fileDescriptor4, []int{2, 0} }
+func (Expression_ExpressionType) EnumDescriptor() ([]byte, []int) {
+	return fileDescriptor_expression_633ee7819f2559b3, []int{2, 0}
+}
 
 type Value struct {
-	Type ValueType `protobuf:"varint,1,opt,name=type,enum=capsule8.api.v0.ValueType" json:"type,omitempty"`
+	Type ValueType `protobuf:"varint,1,opt,name=type,proto3,enum=capsule8.api.v0.ValueType" json:"type,omitempty"`
 	// Types that are valid to be assigned to Value:
 	//	*Value_SignedValue
 	//	*Value_UnsignedValue
@@ -136,42 +146,81 @@ type Value struct {
 	//	*Value_BoolValue
 	//	*Value_DoubleValue
 	//	*Value_TimestampValue
-	Value isValue_Value `protobuf_oneof:"value"`
+	Value                isValue_Value `protobuf_oneof:"value"`
+	XXX_NoUnkeyedLiteral struct{}      `json:"-"`
+	XXX_unrecognized     []byte        `json:"-"`
+	XXX_sizecache        int32         `json:"-"`
 }
 
-func (m *Value) Reset()                    { *m = Value{} }
-func (m *Value) String() string            { return proto.CompactTextString(m) }
-func (*Value) ProtoMessage()               {}
-func (*Value) Descriptor() ([]byte, []int) { return fileDescriptor4, []int{0} }
+func (m *Value) Reset()         { *m = Value{} }
+func (m *Value) String() string { return proto.CompactTextString(m) }
+func (*Value) ProtoMessage()    {}
+func (*Value) Descriptor() ([]byte, []int) {
+	return fileDescriptor_expression_633ee7819f2559b3, []int{0}
+}
+func (m *Value) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_Value.Unmarshal(m, b)
+}
+func (m *Value) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_Value.Marshal(b, m, deterministic)
+}
+func (dst *Value) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_Value.Merge(dst, src)
+}
+func (m *Value) XXX_Size() int {
+	return xxx_messageInfo_Value.Size(m)
+}
+func (m *Value) XXX_DiscardUnknown() {
+	xxx_messageInfo_Value.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_Value proto.InternalMessageInfo
+
+func (m *Value) GetType() ValueType {
+	if m != nil {
+		return m.Type
+	}
+	return ValueType_VALUETYPE_UNSPECIFIED
+}
 
 type isValue_Value interface {
 	isValue_Value()
 }
 
 type Value_SignedValue struct {
-	SignedValue int64 `protobuf:"zigzag64,10,opt,name=signed_value,json=signedValue,oneof"`
-}
-type Value_UnsignedValue struct {
-	UnsignedValue uint64 `protobuf:"varint,11,opt,name=unsigned_value,json=unsignedValue,oneof"`
-}
-type Value_StringValue struct {
-	StringValue string `protobuf:"bytes,12,opt,name=string_value,json=stringValue,oneof"`
-}
-type Value_BoolValue struct {
-	BoolValue bool `protobuf:"varint,13,opt,name=bool_value,json=boolValue,oneof"`
-}
-type Value_DoubleValue struct {
-	DoubleValue float64 `protobuf:"fixed64,14,opt,name=double_value,json=doubleValue,oneof"`
-}
-type Value_TimestampValue struct {
-	TimestampValue *google_protobuf.Timestamp `protobuf:"bytes,15,opt,name=timestamp_value,json=timestampValue,oneof"`
+	SignedValue int64 `protobuf:"zigzag64,10,opt,name=signed_value,json=signedValue,proto3,oneof"`
 }
 
-func (*Value_SignedValue) isValue_Value()    {}
-func (*Value_UnsignedValue) isValue_Value()  {}
-func (*Value_StringValue) isValue_Value()    {}
-func (*Value_BoolValue) isValue_Value()      {}
-func (*Value_DoubleValue) isValue_Value()    {}
+type Value_UnsignedValue struct {
+	UnsignedValue uint64 `protobuf:"varint,11,opt,name=unsigned_value,json=unsignedValue,proto3,oneof"`
+}
+
+type Value_StringValue struct {
+	StringValue string `protobuf:"bytes,12,opt,name=string_value,json=stringValue,proto3,oneof"`
+}
+
+type Value_BoolValue struct {
+	BoolValue bool `protobuf:"varint,13,opt,name=bool_value,json=boolValue,proto3,oneof"`
+}
+
+type Value_DoubleValue struct {
+	DoubleValue float64 `protobuf:"fixed64,14,opt,name=double_value,json=doubleValue,proto3,oneof"`
+}
+
+type Value_TimestampValue struct {
+	TimestampValue *timestamp.Timestamp `protobuf:"bytes,15,opt,name=timestamp_value,json=timestampValue,proto3,oneof"`
+}
+
+func (*Value_SignedValue) isValue_Value() {}
+
+func (*Value_UnsignedValue) isValue_Value() {}
+
+func (*Value_StringValue) isValue_Value() {}
+
+func (*Value_BoolValue) isValue_Value() {}
+
+func (*Value_DoubleValue) isValue_Value() {}
+
 func (*Value_TimestampValue) isValue_Value() {}
 
 func (m *Value) GetValue() isValue_Value {
@@ -179,13 +228,6 @@ func (m *Value) GetValue() isValue_Value {
 		return m.Value
 	}
 	return nil
-}
-
-func (m *Value) GetType() ValueType {
-	if m != nil {
-		return m.Type
-	}
-	return ValueType_VALUETYPE_UNSPECIFIED
 }
 
 func (m *Value) GetSignedValue() int64 {
@@ -223,7 +265,7 @@ func (m *Value) GetDoubleValue() float64 {
 	return 0
 }
 
-func (m *Value) GetTimestampValue() *google_protobuf.Timestamp {
+func (m *Value) GetTimestampValue() *timestamp.Timestamp {
 	if x, ok := m.GetValue().(*Value_TimestampValue); ok {
 		return x.TimestampValue
 	}
@@ -319,7 +361,7 @@ func _Value_OneofUnmarshaler(msg proto.Message, tag, wire int, b *proto.Buffer) 
 		if wire != proto.WireBytes {
 			return true, proto.ErrInternalBadWireType
 		}
-		msg := new(google_protobuf.Timestamp)
+		msg := new(timestamp.Timestamp)
 		err := b.DecodeMessage(msg)
 		m.Value = &Value_TimestampValue{msg}
 		return true, err
@@ -333,24 +375,24 @@ func _Value_OneofSizer(msg proto.Message) (n int) {
 	// value
 	switch x := m.Value.(type) {
 	case *Value_SignedValue:
-		n += proto.SizeVarint(10<<3 | proto.WireVarint)
+		n += 1 // tag and wire
 		n += proto.SizeVarint(uint64(uint64(x.SignedValue<<1) ^ uint64((int64(x.SignedValue) >> 63))))
 	case *Value_UnsignedValue:
-		n += proto.SizeVarint(11<<3 | proto.WireVarint)
+		n += 1 // tag and wire
 		n += proto.SizeVarint(uint64(x.UnsignedValue))
 	case *Value_StringValue:
-		n += proto.SizeVarint(12<<3 | proto.WireBytes)
+		n += 1 // tag and wire
 		n += proto.SizeVarint(uint64(len(x.StringValue)))
 		n += len(x.StringValue)
 	case *Value_BoolValue:
-		n += proto.SizeVarint(13<<3 | proto.WireVarint)
+		n += 1 // tag and wire
 		n += 1
 	case *Value_DoubleValue:
-		n += proto.SizeVarint(14<<3 | proto.WireFixed64)
+		n += 1 // tag and wire
 		n += 8
 	case *Value_TimestampValue:
 		s := proto.Size(x.TimestampValue)
-		n += proto.SizeVarint(15<<3 | proto.WireBytes)
+		n += 1 // tag and wire
 		n += proto.SizeVarint(uint64(s))
 		n += s
 	case nil:
@@ -361,14 +403,36 @@ func _Value_OneofSizer(msg proto.Message) (n int) {
 }
 
 type BinaryOp struct {
-	Lhs *Expression `protobuf:"bytes,1,opt,name=lhs" json:"lhs,omitempty"`
-	Rhs *Expression `protobuf:"bytes,2,opt,name=rhs" json:"rhs,omitempty"`
+	Lhs                  *Expression `protobuf:"bytes,1,opt,name=lhs,proto3" json:"lhs,omitempty"`
+	Rhs                  *Expression `protobuf:"bytes,2,opt,name=rhs,proto3" json:"rhs,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}    `json:"-"`
+	XXX_unrecognized     []byte      `json:"-"`
+	XXX_sizecache        int32       `json:"-"`
 }
 
-func (m *BinaryOp) Reset()                    { *m = BinaryOp{} }
-func (m *BinaryOp) String() string            { return proto.CompactTextString(m) }
-func (*BinaryOp) ProtoMessage()               {}
-func (*BinaryOp) Descriptor() ([]byte, []int) { return fileDescriptor4, []int{1} }
+func (m *BinaryOp) Reset()         { *m = BinaryOp{} }
+func (m *BinaryOp) String() string { return proto.CompactTextString(m) }
+func (*BinaryOp) ProtoMessage()    {}
+func (*BinaryOp) Descriptor() ([]byte, []int) {
+	return fileDescriptor_expression_633ee7819f2559b3, []int{1}
+}
+func (m *BinaryOp) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_BinaryOp.Unmarshal(m, b)
+}
+func (m *BinaryOp) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_BinaryOp.Marshal(b, m, deterministic)
+}
+func (dst *BinaryOp) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_BinaryOp.Merge(dst, src)
+}
+func (m *BinaryOp) XXX_Size() int {
+	return xxx_messageInfo_BinaryOp.Size(m)
+}
+func (m *BinaryOp) XXX_DiscardUnknown() {
+	xxx_messageInfo_BinaryOp.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_BinaryOp proto.InternalMessageInfo
 
 func (m *BinaryOp) GetLhs() *Expression {
 	if m != nil {
@@ -385,54 +449,82 @@ func (m *BinaryOp) GetRhs() *Expression {
 }
 
 type Expression struct {
-	Type Expression_ExpressionType `protobuf:"varint,1,opt,name=type,enum=capsule8.api.v0.Expression_ExpressionType" json:"type,omitempty"`
+	Type Expression_ExpressionType `protobuf:"varint,1,opt,name=type,proto3,enum=capsule8.api.v0.Expression_ExpressionType" json:"type,omitempty"`
 	// Types that are valid to be assigned to Expr:
 	//	*Expression_Identifier
 	//	*Expression_Value
 	//	*Expression_BinaryOp
 	//	*Expression_UnaryOp
-	Expr isExpression_Expr `protobuf_oneof:"expr"`
+	Expr                 isExpression_Expr `protobuf_oneof:"expr"`
+	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
+	XXX_unrecognized     []byte            `json:"-"`
+	XXX_sizecache        int32             `json:"-"`
 }
 
-func (m *Expression) Reset()                    { *m = Expression{} }
-func (m *Expression) String() string            { return proto.CompactTextString(m) }
-func (*Expression) ProtoMessage()               {}
-func (*Expression) Descriptor() ([]byte, []int) { return fileDescriptor4, []int{2} }
-
-type isExpression_Expr interface {
-	isExpression_Expr()
+func (m *Expression) Reset()         { *m = Expression{} }
+func (m *Expression) String() string { return proto.CompactTextString(m) }
+func (*Expression) ProtoMessage()    {}
+func (*Expression) Descriptor() ([]byte, []int) {
+	return fileDescriptor_expression_633ee7819f2559b3, []int{2}
+}
+func (m *Expression) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_Expression.Unmarshal(m, b)
+}
+func (m *Expression) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_Expression.Marshal(b, m, deterministic)
+}
+func (dst *Expression) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_Expression.Merge(dst, src)
+}
+func (m *Expression) XXX_Size() int {
+	return xxx_messageInfo_Expression.Size(m)
+}
+func (m *Expression) XXX_DiscardUnknown() {
+	xxx_messageInfo_Expression.DiscardUnknown(m)
 }
 
-type Expression_Identifier struct {
-	Identifier string `protobuf:"bytes,10,opt,name=identifier,oneof"`
-}
-type Expression_Value struct {
-	Value *Value `protobuf:"bytes,11,opt,name=value,oneof"`
-}
-type Expression_BinaryOp struct {
-	BinaryOp *BinaryOp `protobuf:"bytes,12,opt,name=binary_op,json=binaryOp,oneof"`
-}
-type Expression_UnaryOp struct {
-	UnaryOp *Expression `protobuf:"bytes,13,opt,name=unary_op,json=unaryOp,oneof"`
-}
-
-func (*Expression_Identifier) isExpression_Expr() {}
-func (*Expression_Value) isExpression_Expr()      {}
-func (*Expression_BinaryOp) isExpression_Expr()   {}
-func (*Expression_UnaryOp) isExpression_Expr()    {}
-
-func (m *Expression) GetExpr() isExpression_Expr {
-	if m != nil {
-		return m.Expr
-	}
-	return nil
-}
+var xxx_messageInfo_Expression proto.InternalMessageInfo
 
 func (m *Expression) GetType() Expression_ExpressionType {
 	if m != nil {
 		return m.Type
 	}
 	return Expression_EXPRESSIONTYPE_UNSPECIFIED
+}
+
+type isExpression_Expr interface {
+	isExpression_Expr()
+}
+
+type Expression_Identifier struct {
+	Identifier string `protobuf:"bytes,10,opt,name=identifier,proto3,oneof"`
+}
+
+type Expression_Value struct {
+	Value *Value `protobuf:"bytes,11,opt,name=value,proto3,oneof"`
+}
+
+type Expression_BinaryOp struct {
+	BinaryOp *BinaryOp `protobuf:"bytes,12,opt,name=binary_op,json=binaryOp,proto3,oneof"`
+}
+
+type Expression_UnaryOp struct {
+	UnaryOp *Expression `protobuf:"bytes,13,opt,name=unary_op,json=unaryOp,proto3,oneof"`
+}
+
+func (*Expression_Identifier) isExpression_Expr() {}
+
+func (*Expression_Value) isExpression_Expr() {}
+
+func (*Expression_BinaryOp) isExpression_Expr() {}
+
+func (*Expression_UnaryOp) isExpression_Expr() {}
+
+func (m *Expression) GetExpr() isExpression_Expr {
+	if m != nil {
+		return m.Expr
+	}
+	return nil
 }
 
 func (m *Expression) GetIdentifier() string {
@@ -546,22 +638,22 @@ func _Expression_OneofSizer(msg proto.Message) (n int) {
 	// expr
 	switch x := m.Expr.(type) {
 	case *Expression_Identifier:
-		n += proto.SizeVarint(10<<3 | proto.WireBytes)
+		n += 1 // tag and wire
 		n += proto.SizeVarint(uint64(len(x.Identifier)))
 		n += len(x.Identifier)
 	case *Expression_Value:
 		s := proto.Size(x.Value)
-		n += proto.SizeVarint(11<<3 | proto.WireBytes)
+		n += 1 // tag and wire
 		n += proto.SizeVarint(uint64(s))
 		n += s
 	case *Expression_BinaryOp:
 		s := proto.Size(x.BinaryOp)
-		n += proto.SizeVarint(12<<3 | proto.WireBytes)
+		n += 1 // tag and wire
 		n += proto.SizeVarint(uint64(s))
 		n += s
 	case *Expression_UnaryOp:
 		s := proto.Size(x.UnaryOp)
-		n += proto.SizeVarint(13<<3 | proto.WireBytes)
+		n += 1 // tag and wire
 		n += proto.SizeVarint(uint64(s))
 		n += s
 	case nil:
@@ -579,9 +671,11 @@ func init() {
 	proto.RegisterEnum("capsule8.api.v0.Expression_ExpressionType", Expression_ExpressionType_name, Expression_ExpressionType_value)
 }
 
-func init() { proto.RegisterFile("capsule8/api/v0/expression.proto", fileDescriptor4) }
+func init() {
+	proto.RegisterFile("capsule8/api/v0/expression.proto", fileDescriptor_expression_633ee7819f2559b3)
+}
 
-var fileDescriptor4 = []byte{
+var fileDescriptor_expression_633ee7819f2559b3 = []byte{
 	// 659 bytes of a gzipped FileDescriptorProto
 	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x8c, 0x93, 0xdf, 0x6e, 0xda, 0x4a,
 	0x10, 0xc6, 0x6d, 0xc2, 0x3f, 0x8f, 0x03, 0xac, 0x56, 0x27, 0x39, 0x84, 0x1c, 0x25, 0x16, 0xe7,
