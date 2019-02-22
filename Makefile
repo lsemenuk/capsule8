@@ -113,16 +113,6 @@ DOCKER_RUN_FUNCTIONAL_TEST=$(DOCKER) run                                    \
 #
 all: $(BINS)
 
-# CI target
-ci:
-	docker run -it --rm \
-		-e DOCKER_API_VERSION=${DOCKER_API_VERSION:-1.23} \
-		-v /var/run/docker.sock:/var/run/docker.sock \
-		-v $(shell pwd):$(shell pwd) \
-		--workdir $(shell pwd) \
-		circleci/picard \
-		circleci build
-
 
 #
 # Build all executables as static executables

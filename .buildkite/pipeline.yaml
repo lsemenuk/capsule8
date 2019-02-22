@@ -1,0 +1,5 @@
+steps:
+  - label: ':hammer: Run sensor tests'
+    agents:
+      queue: ec2
+    command: '.buildkite/test.sh'

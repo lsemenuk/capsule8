@@ -10,7 +10,7 @@ It also contains example Sensor API client code.
 [![GoDoc](https://godoc.org/github.com/capsule8/capsule8?status.svg)](https://godoc.org/github.com/capsule8/capsule8)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/capsule8/capsule8/blob/master/LICENSE)
 
-[![CircleCI](https://circleci.com/gh/capsule8/capsule8/tree/master.svg?style=svg)](https://circleci.com/gh/capsule8/capsule8/tree/master)
+[![Build status](https://badge.buildkite.com/3699f0aa9a68fde246250dc3615b2bfa5f1792c81e7291f864.svg?master)](https://buildkite.com/capsule8/capsule8)
 
 ## Status
 
