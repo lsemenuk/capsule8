@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <stdlib.h>
-#include <sys/types.h>
 #include <signal.h>
 #include <stdlib.h>
+#include <sys/types.h>
 #include <unistd.h>
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[])
+{
 	raise(SIGUSR1);
 
 	// This should not be returned

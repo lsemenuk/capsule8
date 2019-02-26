@@ -2,121 +2,382 @@
 
 
 [[projects]]
+  digest = "1:ea53dbd890eb057f85945dc047afb5c291ee807c78a841cc2891eec901ce4fc8"
   name = "github.com/aws/aws-sdk-go"
-  packages = ["aws","aws/awserr","aws/awsutil","aws/client","aws/client/metadata","aws/corehandlers","aws/credentials","aws/credentials/ec2rolecreds","aws/credentials/endpointcreds","aws/credentials/stscreds","aws/defaults","aws/ec2metadata","aws/endpoints","aws/request","aws/session","aws/signer/v4","internal/shareddefaults","private/protocol","private/protocol/json/jsonutil","private/protocol/jsonrpc","private/protocol/query","private/protocol/query/queryutil","private/protocol/rest","private/protocol/xml/xmlutil","service/firehose","service/firehose/firehoseiface","service/sts"]
+  packages = [
+    "aws",
+    "aws/awserr",
+    "aws/awsutil",
+    "aws/client",
+    "aws/client/metadata",
+    "aws/corehandlers",
+    "aws/credentials",
+    "aws/credentials/ec2rolecreds",
+    "aws/credentials/endpointcreds",
+    "aws/credentials/stscreds",
+    "aws/defaults",
+    "aws/ec2metadata",
+    "aws/endpoints",
+    "aws/request",
+    "aws/session",
+    "aws/signer/v4",
+    "internal/shareddefaults",
+    "private/protocol",
+    "private/protocol/json/jsonutil",
+    "private/protocol/jsonrpc",
+    "private/protocol/query",
+    "private/protocol/query/queryutil",
+    "private/protocol/rest",
+    "private/protocol/xml/xmlutil",
+    "service/firehose",
+    "service/firehose/firehoseiface",
+    "service/sts",
+  ]
+  pruneopts = ""
   revision = "25ef42b41b82230caae56ab23d872c81fb5c0eae"
   version = "v1.12.46"
 
 [[projects]]
+  digest = "1:d8408f094b480d5cd4dac96ca2b445b6efc1d5b484a1da3f937a990e6956b645"
+  name = "github.com/capsule8/protoc-gen-micro"
+  packages = ["."]
+  pruneopts = ""
+  revision = "5b1dcd09938fc1f18e8c9e23dc01947c696a7a2d"
+  version = "v0.5.0"
+
+[[projects]]
+  digest = "1:56c130d885a4aacae1dd9c7b71cfe39912c7ebc1ff7d2b46083c8812996dc43b"
   name = "github.com/davecgh/go-spew"
   packages = ["spew"]
+  pruneopts = ""
   revision = "346938d642f2ec3594ed81d874461961cd0faa76"
   version = "v1.1.0"
 
 [[projects]]
+  digest = "1:b13707423743d41665fd23f0c36b2f37bb49c30e94adb813319c44188a51ba22"
+  name = "github.com/ghodss/yaml"
+  packages = ["."]
+  pruneopts = ""
+  revision = "0ca9ea5df5451ffdf184b4428c902747c2c11cd7"
+
+[[projects]]
+  digest = "1:a00483fe4106b86fb1187a92b5cf6915c85f294ed4c129ccbe7cb1f1a06abd46"
   name = "github.com/go-ini/ini"
   packages = ["."]
+  pruneopts = ""
   revision = "32e4c1e6bc4e7d0d8451aa6b75200d19e37a536a"
   version = "v1.32.0"
 
 [[projects]]
+  digest = "1:2354bb28d349f64debeda3832fca79b758e211e9560bf8b57c2df619c07138e3"
   name = "github.com/gobwas/glob"
-  packages = [".","compiler","match","syntax","syntax/ast","syntax/lexer","util/runes","util/strings"]
+  packages = [
+    ".",
+    "compiler",
+    "match",
+    "syntax",
+    "syntax/ast",
+    "syntax/lexer",
+    "util/runes",
+    "util/strings",
+  ]
+  pruneopts = ""
   revision = "bea32b9cd2d6f55753d94a28e959b13f0244797a"
   version = "v0.2.2"
 
 [[projects]]
-  branch = "master"
+  digest = "1:107b233e45174dbab5b1324201d092ea9448e58243ab9f039e4c0f332e121e3a"
   name = "github.com/golang/glog"
   packages = ["."]
+  pruneopts = ""
   revision = "23def4e6c14b4da8ac2ed8007337bc5eb5007998"
 
 [[projects]]
-  branch = "master"
+  branch = "travis-1.9"
+  digest = "1:d45f5fe0f8bf6cd0bc592502e7e8ec647d769e55387fe326eb624d67282a7d15"
+  name = "github.com/golang/lint"
+  packages = [
+    ".",
+    "golint",
+  ]
+  pruneopts = ""
+  revision = "883fe33ffc4344bad1ecd881f61afd5ec5d80e0a"
+
+[[projects]]
+  digest = "1:3dd078fda7500c341bc26cfbc6c6a34614f295a2457149fc1045cab767cbcf18"
   name = "github.com/golang/protobuf"
-  packages = ["jsonpb","proto","protoc-gen-go/descriptor","ptypes","ptypes/any","ptypes/duration","ptypes/struct","ptypes/timestamp","ptypes/wrappers"]
-  revision = "130e6b02ab059e7b717a096f397c5b60111cae74"
+  packages = [
+    "jsonpb",
+    "proto",
+    "protoc-gen-go",
+    "protoc-gen-go/descriptor",
+    "protoc-gen-go/generator",
+    "protoc-gen-go/generator/internal/remap",
+    "protoc-gen-go/grpc",
+    "protoc-gen-go/plugin",
+    "ptypes",
+    "ptypes/any",
+    "ptypes/duration",
+    "ptypes/struct",
+    "ptypes/timestamp",
+    "ptypes/wrappers",
+  ]
+  pruneopts = ""
+  revision = "aa810b61a9c79d51363740d207bb46cf8e620ed5"
+  version = "v1.2.0"
 
 [[projects]]
+  digest = "1:dc70bd0ecd18729cf0ecf8828045e185ce0b15084f1bbe250422ab65e6fcd79c"
   name = "github.com/grpc-ecosystem/grpc-gateway"
-  packages = ["runtime","runtime/internal","utilities"]
-  revision = "07f5e79768022f9a3265235f0db4ac8c3f675fec"
-  version = "v1.3.1"
+  packages = [
+    "codegenerator",
+    "protoc-gen-grpc-gateway",
+    "protoc-gen-grpc-gateway/descriptor",
+    "protoc-gen-grpc-gateway/generator",
+    "protoc-gen-grpc-gateway/gengateway",
+    "protoc-gen-grpc-gateway/httprule",
+    "runtime",
+    "runtime/internal",
+    "utilities",
+  ]
+  pruneopts = ""
+  revision = "aeab1d96e0f1368d243e2e5f526aa29d495517bb"
+  version = "v1.5.1"
 
 [[projects]]
+  digest = "1:870d441fe217b8e689d7949fef6e43efbc787e50f200cb1e70dbca9204a1d6be"
   name = "github.com/inconshreveable/mousetrap"
   packages = ["."]
+  pruneopts = ""
   revision = "76626ae9c91c4f2a10f34cad8ce83ea42c93bb75"
   version = "v1.0"
 
 [[projects]]
+  digest = "1:6f49eae0c1e5dab1dafafee34b207aeb7a42303105960944828c2079b92fc88e"
   name = "github.com/jmespath/go-jmespath"
   packages = ["."]
+  pruneopts = ""
   revision = "0b12d6b5"
 
 [[projects]]
+  digest = "1:b60a24f942c7031ece6c48bcab0b683c7d3d6aa9fd17e21459d9ae604da258fa"
   name = "github.com/kelseyhightower/envconfig"
   packages = ["."]
+  pruneopts = ""
   revision = "f611eb38b3875cc3bd991ca91c51d06446afa14c"
   version = "v1.3.0"
 
 [[projects]]
+  digest = "1:ec0a43b4262ae8d49f1690e6eb1c28f25cc35414c0d0fa806c260c9a09339a8c"
+  name = "github.com/micro/protoc-gen-micro"
+  packages = [
+    "generator",
+    "plugin/micro",
+  ]
+  pruneopts = ""
+  revision = "2cc9bf0eec6ddd3b35ec68a7cc9e940352f64fab"
+  version = "v0.6.0"
+
+[[projects]]
+  digest = "1:256484dbbcd271f9ecebc6795b2df8cad4c458dd0f5fd82a8c2fa0c29f233411"
   name = "github.com/pmezard/go-difflib"
   packages = ["difflib"]
+  pruneopts = ""
   revision = "792786c7400a136282c1664665ae0a8db921c6c2"
   version = "v1.0.0"
 
 [[projects]]
+  digest = "1:2fff4788ede956c4b0c5541312271514d89ae4904e60bbe54c114c3e1d07bf58"
+  name = "github.com/pseudomuto/protoc-gen-doc"
+  packages = [
+    ".",
+    "cmd/protoc-gen-doc",
+  ]
+  pruneopts = ""
+  revision = "0c4d666cfe1175663cf067963396a0b9b34f543f"
+  version = "v1.1.0"
+
+[[projects]]
+  digest = "1:d8a4f9f2e4c1d0d943f0b202605c4b6fa49aa0283798766d4cd2d1854dd0ab2d"
+  name = "github.com/pseudomuto/protokit"
+  packages = ["."]
+  pruneopts = ""
+  revision = "7037620bf27b13fcdc10b1b17ddef82540db670b"
+  version = "v0.1.0"
+
+[[projects]]
+  digest = "1:2208a80fc3259291e43b30f42f844d18f4218036dff510f42c653ec9890d460a"
   name = "github.com/spf13/cobra"
   packages = ["."]
+  pruneopts = ""
   revision = "7b2c5ac9fc04fc5efafb60700713d4fa609b777b"
   version = "v0.0.1"
 
 [[projects]]
+  digest = "1:261bc565833ef4f02121450d74eb88d5ae4bd74bfe5d0e862cddb8550ec35000"
   name = "github.com/spf13/pflag"
   packages = ["."]
+  pruneopts = ""
   revision = "e57e3eeb33f795204c1ca35f56c44f83227c6e66"
   version = "v1.0.0"
 
 [[projects]]
+  digest = "1:a30066593578732a356dc7e5d7f78d69184ca65aeeff5939241a3ab10559bb06"
   name = "github.com/stretchr/testify"
-  packages = ["assert"]
+  packages = [
+    "assert",
+    "require",
+  ]
+  pruneopts = ""
   revision = "12b6f73e6084dad08a7c6e575284b177ecafbc71"
   version = "v1.2.1"
 
 [[projects]]
-  branch = "master"
+  digest = "1:b03aa98aca70c77c167d79a5223443d4faba32fd933efe94d3d58c9a30738159"
   name = "golang.org/x/net"
-  packages = ["context","http2","http2/hpack","idna","internal/timeseries","lex/httplex","trace"]
-  revision = "a04bdaca5b32abe1c069418fb7088ae607de5bd0"
+  packages = [
+    "context",
+    "http/httpguts",
+    "http2",
+    "http2/hpack",
+    "idna",
+    "internal/timeseries",
+    "lex/httplex",
+    "trace",
+  ]
+  pruneopts = ""
+  revision = "640f4622ab692b87c2f3a94265e6f579fe38263d"
 
 [[projects]]
   branch = "master"
+  digest = "1:b2db832baab812d1cbe1f3f0dc293fdded0cfdfd5fafbcf9ebc2b3c6fc9fa287"
   name = "golang.org/x/sys"
   packages = ["unix"]
+  pruneopts = ""
   revision = "2f57af4873d00d535c5c9028850aa2152e6a5566"
 
 [[projects]]
   branch = "master"
+  digest = "1:706747bb1e3f870cf0dc52459cb94324cd347142fff3b61db56c0157a5f598d0"
   name = "golang.org/x/text"
-  packages = ["collate","collate/build","internal/colltab","internal/gen","internal/tag","internal/triegen","internal/ucd","language","secure/bidirule","transform","unicode/bidi","unicode/cldr","unicode/norm","unicode/rangetable"]
+  packages = [
+    "collate",
+    "collate/build",
+    "internal/colltab",
+    "internal/gen",
+    "internal/tag",
+    "internal/triegen",
+    "internal/ucd",
+    "language",
+    "secure/bidirule",
+    "transform",
+    "unicode/bidi",
+    "unicode/cldr",
+    "unicode/norm",
+    "unicode/rangetable",
+  ]
+  pruneopts = ""
   revision = "c01e4764d870b77f8abe5096ee19ad20d80e8075"
 
 [[projects]]
   branch = "master"
-  name = "google.golang.org/genproto"
-  packages = ["googleapis/api/annotations","googleapis/rpc/code","googleapis/rpc/status"]
-  revision = "f676e0f3ac6395ff1a529ae59a6670878a8371a6"
+  digest = "1:6c11ba8cbd9436ba543e78dfbb8982d586c28af45af8b17b8c714465f3eff376"
+  name = "golang.org/x/tools"
+  packages = [
+    "go/ast/astutil",
+    "go/gcexportdata",
+    "go/internal/gcimporter",
+    "go/types/typeutil",
+  ]
+  pruneopts = ""
+  revision = "83362c3779f5f48611068d488a03ea7bbaddc81e"
 
 [[projects]]
+  digest = "1:3970150423e3f47a6d354b2868f7db632b665463755194aac1a30c4fb341be57"
+  name = "google.golang.org/genproto"
+  packages = [
+    "googleapis/api/annotations",
+    "googleapis/rpc/code",
+    "googleapis/rpc/status",
+  ]
+  pruneopts = ""
+  revision = "383e8b2c3b9e36c4076b235b32537292176bae20"
+
+[[projects]]
+  digest = "1:482376db17ced079c2f4e3a5e2808cbbccdbb7e8b8a1929749c1a60c9e577400"
   name = "google.golang.org/grpc"
-  packages = [".","balancer","balancer/base","balancer/roundrobin","codes","connectivity","credentials","encoding","encoding/proto","grpclb/grpc_lb_v1/messages","grpclog","internal","keepalive","metadata","naming","peer","resolver","resolver/dns","resolver/passthrough","stats","status","tap","transport"]
+  packages = [
+    ".",
+    "balancer",
+    "balancer/base",
+    "balancer/roundrobin",
+    "codes",
+    "connectivity",
+    "credentials",
+    "encoding",
+    "encoding/proto",
+    "grpclb/grpc_lb_v1/messages",
+    "grpclog",
+    "internal",
+    "keepalive",
+    "metadata",
+    "naming",
+    "peer",
+    "resolver",
+    "resolver/dns",
+    "resolver/passthrough",
+    "stats",
+    "status",
+    "tap",
+    "transport",
+  ]
+  pruneopts = ""
   revision = "d89cded64628466c4ab532d1f0ba5c220459ebe8"
   version = "v1.11.2"
+
+[[projects]]
+  digest = "1:cedccf16b71e86db87a24f8d4c70b0a855872eb967cb906a66b95de56aefbd0d"
+  name = "gopkg.in/yaml.v2"
+  packages = ["."]
+  pruneopts = ""
+  revision = "51d6538a90f86fe93ac480b35f37b2be17fef232"
+  version = "v2.2.2"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "e1b8cf8f22520dca56c5580015fb633a1e77a111a4d16a87b75b6e494289903b"
+  input-imports = [
+    "github.com/aws/aws-sdk-go/aws",
+    "github.com/aws/aws-sdk-go/aws/session",
+    "github.com/aws/aws-sdk-go/service/firehose",
+    "github.com/aws/aws-sdk-go/service/firehose/firehoseiface",
+    "github.com/capsule8/protoc-gen-micro",
+    "github.com/gobwas/glob",
+    "github.com/golang/glog",
+    "github.com/golang/lint/golint",
+    "github.com/golang/protobuf/jsonpb",
+    "github.com/golang/protobuf/proto",
+    "github.com/golang/protobuf/protoc-gen-go",
+    "github.com/golang/protobuf/ptypes/timestamp",
+    "github.com/golang/protobuf/ptypes/wrappers",
+    "github.com/grpc-ecosystem/grpc-gateway/protoc-gen-grpc-gateway",
+    "github.com/grpc-ecosystem/grpc-gateway/runtime",
+    "github.com/grpc-ecosystem/grpc-gateway/utilities",
+    "github.com/kelseyhightower/envconfig",
+    "github.com/pseudomuto/protoc-gen-doc/cmd/protoc-gen-doc",
+    "github.com/spf13/cobra",
+    "github.com/stretchr/testify/assert",
+    "github.com/stretchr/testify/require",
+    "golang.org/x/net/context",
+    "golang.org/x/sys/unix",
+    "google.golang.org/genproto/googleapis/api/annotations",
+    "google.golang.org/genproto/googleapis/rpc/code",
+    "google.golang.org/genproto/googleapis/rpc/status",
+    "google.golang.org/grpc",
+    "google.golang.org/grpc/codes",
+    "google.golang.org/grpc/credentials",
+    "google.golang.org/grpc/grpclog",
+    "google.golang.org/grpc/status",
+  ]
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -16,13 +16,11 @@ package perf
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 	"unsafe"
 
@@ -33,19 +31,68 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-var (
-	clockOnce   sync.Once
-	haveClockID bool
-	timeBase    int64
-	timeOffsets []int64
-)
+var clockOnce sync.Once
 
-// Go does not provide fcntl(). We need to provide it for ourselves
-func fcntl(fd, cmd int, flag uintptr) (uintptr, error) {
-	r1, _, errno := syscall.Syscall(
-		syscall.SYS_FCNTL, uintptr(fd), uintptr(cmd), flag)
-	return r1, errno
+type defaultTimedEvent struct {
+	eventfd int
+	pollfds [1]unix.PollFd
 }
+
+func newDefaultTimedEvent() (*defaultTimedEvent, error) {
+	eventfd, err := unix.Eventfd(0, unix.EFD_CLOEXEC|unix.EFD_NONBLOCK)
+	if err != nil {
+		return nil, err
+	}
+
+	e := &defaultTimedEvent{
+		eventfd: eventfd,
+	}
+
+	return e, nil
+}
+
+func (e *defaultTimedEvent) Close() {
+	if e.eventfd != -1 {
+		unix.Close(e.eventfd)
+		e.eventfd = -1
+	}
+}
+
+func (e *defaultTimedEvent) Signal() {
+	// Increment the eventfd counter by 1
+	b := []byte{1, 0, 0, 0, 0, 0, 0, 0}
+	unix.Write(e.eventfd, b)
+}
+
+func (e *defaultTimedEvent) Wait(timeout time.Duration) bool {
+	if timeout >= 0 {
+		timeout /= time.Millisecond
+	}
+	for {
+		e.pollfds[0] = unix.PollFd{
+			Fd:     int32(e.eventfd),
+			Events: unix.POLLIN,
+		}
+		n, err := unix.Poll(e.pollfds[:], int(timeout))
+		if err == unix.EAGAIN || err == unix.EINTR {
+			continue
+		}
+		if err != nil {
+			glog.Fatalf("unix.Poll: %v", err)
+		}
+		if n == 1 {
+			// Reset the eventfd counter to 0 by reading it. We
+			// don't care about its actual value, so just discard
+			// it after reading.
+			var b [8]byte
+			unix.Read(e.eventfd, b[:])
+			return true
+		}
+		return false
+	}
+}
+
+var splitCloexec bool
 
 // perfEventOpen is a raw interface to the perf_event_open syscall. Do not do
 // any unnecessary mangling of EventAttr here (such as UseClockID) because this
@@ -56,10 +103,32 @@ func perfEventOpen(attr EventAttr, pid, cpu, groupFD int, flags uintptr) (int, e
 	attr.write(buf)
 	b := buf.Bytes()
 
-	r1, _, errno := unix.Syscall6(unix.SYS_PERF_EVENT_OPEN, uintptr(unsafe.Pointer(&b[0])),
-		uintptr(pid), uintptr(cpu), uintptr(groupFD), uintptr(flags), uintptr(0))
+	var doCloexec bool
+	if splitCloexec && flags&PERF_FLAG_FD_CLOEXEC != 0 {
+		doCloexec = true
+		flags &= ^PERF_FLAG_FD_CLOEXEC
+	}
+
+retry:
+	r1, _, errno := unix.Syscall6(unix.SYS_PERF_EVENT_OPEN,
+		uintptr(unsafe.Pointer(&b[0])), uintptr(pid), uintptr(cpu),
+		uintptr(groupFD), uintptr(flags), uintptr(0))
 	if errno != 0 {
+		if errno == unix.EINVAL && flags&PERF_FLAG_FD_CLOEXEC != 0 {
+			flags &= ^PERF_FLAG_FD_CLOEXEC
+			splitCloexec = true
+			doCloexec = true
+			goto retry
+		}
 		return int(-1), errno
+	}
+	if doCloexec {
+		_, _, errno = unix.Syscall(unix.SYS_FCNTL, uintptr(r1),
+			uintptr(unix.F_SETFL), uintptr(unix.FD_CLOEXEC))
+		if errno != 0 {
+			unix.Close(int(r1))
+			return int(-1), errno
+		}
 	}
 	return int(r1), nil
 }
@@ -111,22 +180,37 @@ type defaultEventSourceLeader struct {
 	pid        int
 	cpu        int
 	flags      uintptr
-	rb         *ringBuffer
+	rb         ringBuffer
 	controller *defaultEventSourceController
 }
 
 func (s *defaultEventSourceLeader) Close() error {
-	if s.rb != nil {
-		if err := s.rb.unmap(); err != nil {
-			return err
-		}
-		s.rb = nil
+	if err := s.rb.unmap(); err != nil {
+		return err
 	}
 	if err := s.defaultEventSource.Close(); err != nil {
 		return err
 	}
 	atomic.AddInt64(&s.controller.leaderCount, -1)
 	return nil
+}
+
+func (s *defaultEventSourceLeader) Disable() error {
+	event := unix.EpollEvent{
+		Events: unix.EPOLLIN,
+		Fd:     int32(s.streamID & 0xffffffff),
+		Pad:    int32((s.streamID >> 32) & 0xffffffff),
+	}
+	return unix.EpollCtl(s.controller.epollFD, unix.EPOLL_CTL_DEL, s.fd, &event)
+}
+
+func (s *defaultEventSourceLeader) Enable() error {
+	event := unix.EpollEvent{
+		Events: unix.EPOLLIN,
+		Fd:     int32(s.streamID & 0xffffffff),
+		Pad:    int32((s.streamID >> 32) & 0xffffffff),
+	}
+	return unix.EpollCtl(s.controller.epollFD, unix.EPOLL_CTL_ADD, s.fd, &event)
 }
 
 func (s *defaultEventSourceLeader) NewEventSource(
@@ -137,7 +221,7 @@ func (s *defaultEventSourceLeader) NewEventSource(
 		parent: s,
 	}
 
-	if haveClockID {
+	if HaveClockID {
 		attr.UseClockID = true
 		attr.ClockID = unix.CLOCK_MONOTONIC_RAW
 	} else {
@@ -155,46 +239,23 @@ func (s *defaultEventSourceLeader) NewEventSource(
 		return nil, err
 	}
 
-	event := unix.EpollEvent{
-		Events: unix.EPOLLIN,
-		Fd:     int32(childSource.fd),
-	}
-	if err = unix.EpollCtl(s.controller.epollFD, unix.EPOLL_CTL_ADD, childSource.fd, &event); err != nil {
-		childSource.Close()
-		return nil, err
-	}
-
 	return childSource, nil
 }
 
 func (s *defaultEventSourceLeader) Read(
-	attrMap map[uint64]EventAttr,
-	f func(Sample, error),
+	acquireBuffer func(size int) ([]byte, int),
 ) {
-	s.rb.read(func(data []byte) {
-		r := bytes.NewReader(data)
-		for r.Len() > 0 {
-			sample := Sample{}
-			err := sample.read(r, nil, attrMap)
-			sample.Time = uint64(int64(sample.Time) -
-				timeOffsets[s.cpu] + timeBase)
-			switch record := sample.Record.(type) {
-			case *SampleRecord:
-				// Adjust the sample time so that it
-				// matches the normalized timestamp.
-				record.Time = sample.Time
-			}
-			f(sample, err)
-		}
-	})
+	s.rb.read(acquireBuffer)
 }
 
 type defaultEventSourceController struct {
 	epollFD            int
-	pipe               [2]int
+	eventFD            int
 	ncpu               int
 	ringBufferNumPages int
 	leaderCount        int64
+	events             []unix.EpollEvent
+	pending            []uint64
 }
 
 func newDefaultEventSourceController(
@@ -213,7 +274,7 @@ func newDefaultEventSourceController(
 		if fd, err = perfEventOpen(attr, 0, -1, -1, 0); err == nil {
 			glog.V(1).Infof("EventMonitor is using ClockID CLOCK_MONOTONIC_RAW")
 			unix.Close(fd)
-			haveClockID = true
+			HaveClockID = true
 		}
 		err = calculateTimeOffsets(opts.procfs)
 	})
@@ -223,7 +284,7 @@ func newDefaultEventSourceController(
 
 	c = &defaultEventSourceController{
 		epollFD:            -1,
-		pipe:               [2]int{-1, -1},
+		eventFD:            -1,
 		ncpu:               opts.procfs.NumCPU(),
 		ringBufferNumPages: opts.ringBufferNumPages,
 	}
@@ -234,21 +295,23 @@ func newDefaultEventSourceController(
 		}
 	}()
 
-	if c.epollFD, err = unix.EpollCreate1(0); err != nil {
+	if c.epollFD, err = unix.EpollCreate1(unix.EPOLL_CLOEXEC); err != nil {
 		return
 	}
 
-	if err = unix.Pipe(c.pipe[:]); err != nil {
+	if c.eventFD, err = unix.Eventfd(0, unix.EFD_CLOEXEC|unix.EFD_NONBLOCK); err != nil {
 		return
 	}
-	f, _ := fcntl(c.pipe[0], syscall.F_GETFL, 0)
-	fcntl(c.pipe[0], syscall.F_SETFL, f|syscall.O_NONBLOCK)
 
 	event := unix.EpollEvent{
 		Events: unix.EPOLLIN,
-		Fd:     -1,
 	}
-	err = unix.EpollCtl(c.epollFD, unix.EPOLL_CTL_ADD, c.pipe[0], &event)
+	if err = unix.EpollCtl(c.epollFD, unix.EPOLL_CTL_ADD, c.eventFD, &event); err != nil {
+		return
+	}
+
+	c.events = make([]unix.EpollEvent, 0, opts.defaultCacheSize+1)
+	c.pending = make([]uint64, 0, opts.defaultCacheSize)
 
 	return
 }
@@ -263,11 +326,13 @@ func collectReferenceSamples(ncpu int) (int64, int64, []int64, error) {
 		Freq:         true,
 		WakeupEvents: 1,
 	}
+	referenceEventAttr.computeSizes()
 
-	rbs := make([]*ringBuffer, ncpu)
+	rbs := make([]ringBuffer, ncpu)
 	pollfds := make([]unix.PollFd, ncpu)
 	for cpu := 0; cpu < ncpu; cpu++ {
-		fd, err := perfEventOpen(referenceEventAttr, -1, cpu, -1, 0)
+		fd, err := perfEventOpen(referenceEventAttr, -1, cpu, -1,
+			PERF_FLAG_FD_CLOEXEC)
 		if err != nil {
 			err = fmt.Errorf("Couldn't open reference event: %s", err)
 			return 0, 0, nil, err
@@ -278,7 +343,7 @@ func collectReferenceSamples(ncpu int) (int64, int64, []int64, error) {
 			Events: unix.POLLIN,
 		}
 
-		if rbs[cpu], err = newRingBuffer(fd, 1); err != nil {
+		if err = rbs[cpu].init(fd, 1); err != nil {
 			err = fmt.Errorf("Couldn't allocate ringbuffer: %s", err)
 			return 0, 0, nil, err
 		}
@@ -323,15 +388,19 @@ func collectReferenceSamples(ncpu int) (int64, int64, []int64, error) {
 				continue
 			}
 
-			rbs[cpu].read(func(data []byte) {
-				r := bytes.NewReader(data)
+			var data []byte
+			rbs[cpu].read(func(size int) ([]byte, int) {
+				data = make([]byte, size)
+				return data, 0
+			})
+			if data != nil {
 				s := Sample{}
-				err := s.read(r, &referenceEventAttr, nil)
+				_, err = s.read(data, &referenceEventAttr, nil)
 				if err == nil {
 					samples[cpu] = int64(s.Time)
 					nsamples++
 				}
-			})
+			}
 
 			if samples[cpu] != 0 {
 				pollfds[cpu].Events &= ^unix.POLLIN
@@ -344,8 +413,8 @@ func collectReferenceSamples(ncpu int) (int64, int64, []int64, error) {
 
 func calculateTimeOffsets(procfs proc.FileSystem) error {
 	ncpu := procfs.HostFileSystem().NumCPU()
-	timeOffsets = make([]int64, ncpu)
-	if haveClockID {
+	TimeOffsets = make([]int64, ncpu)
+	if HaveClockID {
 		return nil
 	}
 
@@ -355,11 +424,11 @@ func calculateTimeOffsets(procfs proc.FileSystem) error {
 		return err
 	}
 
-	timeBase = startTime
+	TimeBase = startTime
 	for cpu, sample := range samples {
-		timeOffsets[cpu] = sample - (firstTime - startTime)
+		TimeOffsets[cpu] = sample - (firstTime - startTime)
 		glog.V(2).Infof("EventMonitor CPU %d time offset is %d\n",
-			cpu, timeOffsets[cpu])
+			cpu, TimeOffsets[cpu])
 	}
 
 	return nil
@@ -378,7 +447,7 @@ func (c *defaultEventSourceController) NewEventSourceLeader(
 		controller: c,
 	}
 
-	if haveClockID {
+	if HaveClockID {
 		attr.UseClockID = true
 		attr.ClockID = unix.CLOCK_MONOTONIC_RAW
 	} else {
@@ -394,14 +463,15 @@ func (c *defaultEventSourceController) NewEventSourceLeader(
 		return nil, err
 	}
 
-	if s.rb, err = newRingBuffer(s.fd, c.ringBufferNumPages); err != nil {
+	if err = s.rb.init(s.fd, c.ringBufferNumPages); err != nil {
 		s.Close()
 		return nil, err
 	}
 
 	event := unix.EpollEvent{
 		Events: unix.EPOLLIN,
-		Fd:     int32(s.fd),
+		Fd:     int32(s.streamID & 0xffffffff),
+		Pad:    int32((s.streamID >> 32) & 0xffffffff),
 	}
 	if err = unix.EpollCtl(c.epollFD, unix.EPOLL_CTL_ADD, s.fd, &event); err != nil {
 		s.Close()
@@ -413,13 +483,9 @@ func (c *defaultEventSourceController) NewEventSourceLeader(
 }
 
 func (c *defaultEventSourceController) Close() {
-	if c.pipe[1] != -1 {
-		unix.Close(c.pipe[1])
-		c.pipe[1] = -1
-	}
-	if c.pipe[0] != -1 {
-		unix.Close(c.pipe[0])
-		c.pipe[0] = -1
+	if c.eventFD != -1 {
+		unix.Close(c.eventFD)
+		c.eventFD = -1
 	}
 	if c.epollFD != -1 {
 		unix.Close(c.epollFD)
@@ -427,89 +493,63 @@ func (c *defaultEventSourceController) Close() {
 	}
 }
 
-func (c *defaultEventSourceController) Wait(timeoutAt int64) error {
-	defer func() {
-		// Drain anything waiting pending in the pipe
-		for {
-			buffer := make([]byte, 64)
-			if _, err := unix.Read(c.pipe[0], buffer); err == unix.EAGAIN {
-				break
-			}
-		}
-	}()
+func (c *defaultEventSourceController) Wait() ([]uint64, error) {
+	leaderCount := int(atomic.LoadInt64(&c.leaderCount))
 
-	events := make([]unix.EpollEvent, c.leaderCount)
+	if cap(c.events) < leaderCount+1 {
+		size := roundPow2(leaderCount + 1)
+		c.events = make([]unix.EpollEvent, 0, size*2)
+	}
+	c.events = c.events[:leaderCount+1]
+
+	if cap(c.pending) < leaderCount {
+		size := roundPow2(leaderCount)
+		c.pending = make([]uint64, 0, size*2)
+	}
+	c.pending = c.pending[:0]
+
 	for {
-		var timeout int
-		if timeoutAt < 0 {
-			timeout = -1
-		} else if timeoutAt > 0 {
-			if now := sys.CurrentMonotonicRaw(); timeoutAt > now {
-				timeout = int((timeoutAt - now) / 1e6)
-			} else {
-				timeout = 0
-			}
-		}
-
-		n, err := unix.EpollWait(c.epollFD, events, timeout)
+		n, err := unix.EpollWait(c.epollFD, c.events, -1)
 		if err != nil {
-			if err != unix.EINTR {
-				return err
+			// Yes, this can actually happen. From what I've read
+			// about the handling of EINTR in Go it seems like it
+			// shouldn't be necessary, but when I tried taking it
+			// out, I got a crash due to EINTR here, so in it stays
+			if err == unix.EINTR {
+				continue
 			}
-			continue
-		}
-		if n == 0 {
-			return unix.ETIMEDOUT
+			return nil, err
 		}
 
-		ringBuffersReady := false
 		for i := 0; i < n; i++ {
-			e := events[i]
-			if e.Fd == -1 {
+			e := c.events[i]
+			if e.Fd == 0 && e.Pad == 0 {
 				if e.Events & ^uint32(unix.EPOLLIN) != 0 {
-					return unix.ECANCELED
+					return nil, unix.ECANCELED
 				}
 				if e.Events&unix.EPOLLIN != unix.EPOLLIN {
 					continue
 				}
-				fd := c.pipe[0]
-				for {
-					buffer := make([]byte, 8)
-					_, err := unix.Read(fd, buffer)
-					if err != nil {
-						if err == unix.EAGAIN {
-							break
-						}
-						if err != unix.EINTR {
-							return err
-						}
-						continue
-					}
-					v := int64(binary.LittleEndian.Uint64(buffer))
-					if timeoutAt < 0 || v < timeoutAt {
-						timeoutAt = v
-					}
-				}
+				// Read the value of the eventfd and reset to 0
+				var b [8]byte
+				unix.Read(c.eventFD, b[:])
+				return nil, nil
 			} else if e.Events&unix.EPOLLIN != 0 {
-				ringBuffersReady = true
+				cookie := (uint64(e.Pad) << 32) | uint64(e.Fd)
+				c.pending = append(c.pending, cookie)
 			}
 		}
-		if ringBuffersReady {
-			return nil
+
+		if len(c.pending) > 0 {
+			return c.pending, nil
 		}
 	}
 }
 
-func (c *defaultEventSourceController) SetTimeoutAt(timeoutAt int64) error {
-	buffer := make([]byte, 8)
-	binary.LittleEndian.PutUint64(buffer, uint64(timeoutAt))
-	for {
-		_, err := unix.Write(c.pipe[1], buffer)
-		if err == unix.EINTR || err == unix.EAGAIN {
-			continue
-		}
-		return err
-	}
+func (c *defaultEventSourceController) Wakeup() {
+	// Increment the eventfd counter by 1
+	b := []byte{1, 0, 0, 0, 0, 0, 0, 0}
+	unix.Write(c.eventFD, b)
 }
 
 type ringBuffer struct {
@@ -519,24 +559,25 @@ type ringBuffer struct {
 	data     []byte
 }
 
-func newRingBuffer(fd int, pageCount int) (*ringBuffer, error) {
+func (rb *ringBuffer) init(fd int, pageCount int) error {
 	if pageCount <= 0 {
-		pageCount = 8
+		glog.Fatalf("ringBuffer.init(pageCount=%d)!", pageCount)
 	}
-	pageSize := os.Getpagesize()
+	if rb.memory != nil {
+		return unix.EALREADY
+	}
 
+	pageSize := os.Getpagesize()
 	memory, err := unix.Mmap(fd, 0, (pageCount+1)*pageSize,
 		unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	rb := &ringBuffer{
-		fd:       fd,
-		memory:   memory,
-		metadata: (*metadata)(unsafe.Pointer(&memory[0])),
-		data:     memory[pageSize:],
-	}
+	rb.fd = fd
+	rb.memory = memory
+	rb.metadata = (*metadata)(unsafe.Pointer(&memory[0]))
+	rb.data = memory[pageSize:]
 
 	for {
 		seq := atomic.LoadUint32(&rb.metadata.Lock)
@@ -554,48 +595,57 @@ func newRingBuffer(fd int, pageCount int) (*ringBuffer, error) {
 		}
 
 		if version != 0 || compatVersion != 0 {
-			return nil, errors.New("Incompatible ring buffer memory layout version")
+			rb.unmap()
+			return errors.New("Incompatible ring buffer memory layout version")
 		}
 
 		break
 	}
 
-	return rb, nil
+	return nil
 }
 
 func (rb *ringBuffer) unmap() error {
-	return unix.Munmap(rb.memory)
+	if rb.memory != nil {
+		if err := unix.Munmap(rb.memory); err != nil {
+			return err
+		}
+		rb.memory = nil
+		rb.metadata = nil
+		rb.data = nil
+	}
+	return nil
 }
 
-// Read calls the given function on each available record in the ringbuffer
-func (rb *ringBuffer) read(f func([]byte)) {
-	var dataHead, dataTail uint64
-
-	dataTail = rb.metadata.DataTail
-	dataHead = atomic.LoadUint64(&rb.metadata.DataHead)
-
-	for dataTail < dataHead {
-		dataBegin := dataTail % uint64(len(rb.data))
-		dataEnd := dataHead % uint64(len(rb.data))
-
-		var data []byte
-		if dataEnd >= dataBegin {
-			data = rb.data[dataBegin:dataEnd]
-		} else {
-			data = rb.data[dataBegin:]
-			data = append(data, rb.data[:dataEnd]...)
-		}
-
-		f(data)
-
-		//
-		// Write dataHead to dataTail to let kernel know that we've
-		// consumed the data up to it.
-		//
-		dataTail = dataHead
-		atomic.StoreUint64(&rb.metadata.DataTail, dataTail)
-
-		// Update dataHead in case it has been advanced in the interim
-		dataHead = atomic.LoadUint64(&rb.metadata.DataHead)
+func (rb *ringBuffer) read(acquireBuffer func(size int) ([]byte, int)) {
+	dataTail := rb.metadata.DataTail
+	dataHead := atomic.LoadUint64(&rb.metadata.DataHead)
+	if dataHead <= dataTail {
+		// It is not unusual for dataHead == dataTail, even though we
+		// should only be getting here if the kernel has signaled that
+		// the mapped fd is ready for reading. The reason is due to
+		// timing ... the kernel could flag the fd after we've already
+		// read the ring buffer on the previous pass, so we get a
+		// spurious wakeup. On the other hand, if dataHead < dataTail,
+		// something has gone seriously wrong somewhere. Either way,
+		// ignore the problem and hope that the kernel corrects it.
+		return
 	}
+
+	dataBegin := int(dataTail % uint64(len(rb.data)))
+	dataEnd := int(dataHead % uint64(len(rb.data)))
+	if dataEnd >= dataBegin {
+		data, offset := acquireBuffer(dataEnd - dataBegin)
+		copy(data[offset:], rb.data[dataBegin:dataEnd])
+	} else {
+		x := len(rb.data) - dataBegin
+		data, offset := acquireBuffer(dataEnd + x)
+		copy(data[offset:], rb.data[dataBegin:])
+		copy(data[offset+x:], rb.data[:dataEnd])
+	}
+
+	// Write dataHead to dataTail to let kernel know that we've
+	// consumed the data up to it.
+	dataTail = dataHead
+	atomic.StoreUint64(&rb.metadata.DataTail, dataTail)
 }

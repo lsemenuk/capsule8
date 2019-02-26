@@ -17,7 +17,7 @@ package functional
 import (
 	"testing"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 	"github.com/capsule8/capsule8/pkg/expression"
 	"github.com/golang/glog"
 )
@@ -51,13 +51,13 @@ func (kt *kernelCallTest) RunContainer(t *testing.T) {
 	glog.V(2).Infof("Running container %s\n", kt.testContainer.ImageID[0:12])
 }
 
-func (kt *kernelCallTest) CreateSubscription(t *testing.T) *api.Subscription {
+func (kt *kernelCallTest) CreateSubscription(t *testing.T) *telemetryAPI.Subscription {
 	filenameFilter := expression.Like(
 		expression.Identifier("filename"),
 		expression.Value(kernelCallDataFilename))
-	kernelEvents := []*api.KernelFunctionCallFilter{
-		&api.KernelFunctionCallFilter{
-			Type:   api.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_ENTER,
+	kernelEvents := []*telemetryAPI.KernelFunctionCallFilter{
+		&telemetryAPI.KernelFunctionCallFilter{
+			Type:   telemetryAPI.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_ENTER,
 			Symbol: "do_sys_open",
 			Arguments: map[string]string{
 				"filename": "+0(%si):string",
@@ -65,8 +65,8 @@ func (kt *kernelCallTest) CreateSubscription(t *testing.T) *api.Subscription {
 			},
 			FilterExpression: filenameFilter,
 		},
-		&api.KernelFunctionCallFilter{
-			Type:   api.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_EXIT,
+		&telemetryAPI.KernelFunctionCallFilter{
+			Type:   telemetryAPI.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_EXIT,
 			Symbol: "do_sys_open",
 			Arguments: map[string]string{
 				"ret": "$retval",
@@ -76,35 +76,35 @@ func (kt *kernelCallTest) CreateSubscription(t *testing.T) *api.Subscription {
 
 	// Subscribing to container created events are currently necessary
 	// to get imageIDs in other events.
-	containerEvents := []*api.ContainerEventFilter{
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
+	containerEvents := []*telemetryAPI.ContainerEventFilter{
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
 		},
 	}
 
-	eventFilter := &api.EventFilter{
+	eventFilter := &telemetryAPI.EventFilter{
 		KernelEvents:    kernelEvents,
 		ContainerEvents: containerEvents,
 	}
 
-	return &api.Subscription{
+	return &telemetryAPI.Subscription{
 		EventFilter: eventFilter,
 	}
 }
 
-func (kt *kernelCallTest) HandleTelemetryEvent(t *testing.T, te *api.ReceivedTelemetryEvent) bool {
+func (kt *kernelCallTest) HandleTelemetryEvent(t *testing.T, te *telemetryAPI.ReceivedTelemetryEvent) bool {
 	switch event := te.Event.Event.(type) {
-	case *api.TelemetryEvent_Container:
+	case *telemetryAPI.TelemetryEvent_Container:
 		return true
 
-	case *api.TelemetryEvent_KernelCall:
+	case *telemetryAPI.TelemetryEvent_KernelCall:
 		glog.V(2).Infof("Got Event %+v\n", te.Event)
 		if te.Event.ImageId == kt.testContainer.ImageID {
 
 			if filename, ok := event.KernelCall.Arguments["filename"]; ok {
-				if filename.FieldType != api.KernelFunctionCallEvent_STRING {
+				if filename.FieldType != telemetryAPI.KernelFunctionCallEvent_STRING {
 					t.Errorf("Expected argument type %s, got %s\n",
-						api.KernelFunctionCallEvent_STRING, filename.FieldType)
+						telemetryAPI.KernelFunctionCallEvent_STRING, filename.FieldType)
 				} else if filename.GetStringValue() != kernelCallDataFilename {
 					t.Errorf("Expected argument value %q, got %q\n",
 						kernelCallDataFilename, filename.GetStringValue())
@@ -112,10 +112,10 @@ func (kt *kernelCallTest) HandleTelemetryEvent(t *testing.T, te *api.ReceivedTel
 
 				kt.seenEnter = true
 
-			} else if ret, ok := event.KernelCall.Arguments["ret"]; ok {
-				if ret.FieldType != api.KernelFunctionCallEvent_UINT64 {
+			} else if ret, ok2 := event.KernelCall.Arguments["ret"]; ok2 {
+				if ret.FieldType != telemetryAPI.KernelFunctionCallEvent_UINT64 {
 					t.Errorf("Expected return type %s, got %s\n",
-						api.KernelFunctionCallEvent_UINT64, ret.FieldType)
+						telemetryAPI.KernelFunctionCallEvent_UINT64, ret.FieldType)
 				}
 
 				kt.seenExit = true

@@ -17,7 +17,7 @@ package functional
 import (
 	"testing"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 )
 
 const chargenLength = 40
@@ -36,25 +36,25 @@ func (ct *chargenTest) RunContainer(t *testing.T) {
 	// No container is needed for testing, nothing to do.
 }
 
-func (ct *chargenTest) CreateSubscription(t *testing.T) *api.Subscription {
-	chargenEvents := []*api.ChargenEventFilter{
-		&api.ChargenEventFilter{
+func (ct *chargenTest) CreateSubscription(t *testing.T) *telemetryAPI.Subscription {
+	chargenEvents := []*telemetryAPI.ChargenEventFilter{
+		&telemetryAPI.ChargenEventFilter{
 			Length: chargenLength,
 		},
 	}
 
-	eventFilter := &api.EventFilter{
+	eventFilter := &telemetryAPI.EventFilter{
 		ChargenEvents: chargenEvents,
 	}
 
-	return &api.Subscription{
+	return &telemetryAPI.Subscription{
 		EventFilter: eventFilter,
 	}
 }
 
-func (ct *chargenTest) HandleTelemetryEvent(t *testing.T, te *api.ReceivedTelemetryEvent) bool {
+func (ct *chargenTest) HandleTelemetryEvent(t *testing.T, te *telemetryAPI.ReceivedTelemetryEvent) bool {
 	switch event := te.Event.Event.(type) {
-	case *api.TelemetryEvent_Chargen:
+	case *telemetryAPI.TelemetryEvent_Chargen:
 		if len(event.Chargen.Characters) != chargenLength {
 			t.Errorf("Event %#v has the wrong number of characters.\n", *event.Chargen)
 			return false

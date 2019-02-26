@@ -17,7 +17,7 @@ package functional
 import (
 	"testing"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 
 	"github.com/golang/glog"
 )
@@ -54,49 +54,49 @@ func (ct *signalTest) RunContainer(t *testing.T) {
 	ct.testContainer.Wait()
 }
 
-func (ct *signalTest) CreateSubscription(t *testing.T) *api.Subscription {
-	containerEvents := []*api.ContainerEventFilter{
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
+func (ct *signalTest) CreateSubscription(t *testing.T) *telemetryAPI.Subscription {
+	containerEvents := []*telemetryAPI.ContainerEventFilter{
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
 		},
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
 		},
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
-		},
-	}
-
-	processEvents := []*api.ProcessEventFilter{
-		&api.ProcessEventFilter{
-			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_FORK,
-		},
-
-		&api.ProcessEventFilter{
-			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
-		},
-
-		&api.ProcessEventFilter{
-			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_EXIT,
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
 		},
 	}
 
-	eventFilter := &api.EventFilter{
+	processEvents := []*telemetryAPI.ProcessEventFilter{
+		&telemetryAPI.ProcessEventFilter{
+			Type: telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_FORK,
+		},
+
+		&telemetryAPI.ProcessEventFilter{
+			Type: telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
+		},
+
+		&telemetryAPI.ProcessEventFilter{
+			Type: telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXIT,
+		},
+	}
+
+	eventFilter := &telemetryAPI.EventFilter{
 		ContainerEvents: containerEvents,
 		ProcessEvents:   processEvents,
 	}
 
-	sub := &api.Subscription{
+	sub := &telemetryAPI.Subscription{
 		EventFilter: eventFilter,
 	}
 
 	return sub
 }
 
-func (ct *signalTest) HandleTelemetryEvent(t *testing.T, telemetryEvent *api.ReceivedTelemetryEvent) bool {
+func (ct *signalTest) HandleTelemetryEvent(t *testing.T, telemetryEvent *telemetryAPI.ReceivedTelemetryEvent) bool {
 	switch event := telemetryEvent.Event.Event.(type) {
-	case *api.TelemetryEvent_Container:
-		if event.Container.Type == api.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED {
+	case *telemetryAPI.TelemetryEvent_Container:
+		if event.Container.Type == telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED {
 			if event.Container.ImageId == ct.testContainer.ImageID {
 				if len(ct.containerID) > 0 {
 					t.Error("Already saw container created")
@@ -106,7 +106,7 @@ func (ct *signalTest) HandleTelemetryEvent(t *testing.T, telemetryEvent *api.Rec
 				ct.containerID = telemetryEvent.Event.ContainerId
 				glog.V(1).Infof("containerID = %s", ct.containerID)
 			}
-		} else if event.Container.Type == api.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED &&
+		} else if event.Container.Type == telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED &&
 			len(ct.containerID) > 0 &&
 			telemetryEvent.Event.ContainerId == ct.containerID {
 
@@ -120,8 +120,8 @@ func (ct *signalTest) HandleTelemetryEvent(t *testing.T, telemetryEvent *api.Rec
 			glog.V(1).Infof("containerExited = true")
 		}
 
-	case *api.TelemetryEvent_Process:
-		if event.Process.Type == api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC {
+	case *telemetryAPI.TelemetryEvent_Process:
+		if event.Process.Type == telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXEC {
 			if event.Process.ExecFilename == "/main" &&
 				telemetryEvent.Event.ContainerId == ct.containerID {
 				if len(ct.processID) > 0 {
@@ -134,7 +134,7 @@ func (ct *signalTest) HandleTelemetryEvent(t *testing.T, telemetryEvent *api.Rec
 			}
 		} else if len(ct.processID) > 0 &&
 			telemetryEvent.Event.ProcessId == ct.processID &&
-			event.Process.Type == api.ProcessEventType_PROCESS_EVENT_TYPE_EXIT {
+			event.Process.Type == telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXIT {
 
 			if event.Process.ExitSignal != 10 {
 				t.Errorf("Expected ExitSignal == %d, got %d",

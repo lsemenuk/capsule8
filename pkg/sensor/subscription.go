@@ -28,17 +28,23 @@ import (
 )
 
 // EventSinkDispatchFn is a function that is called to deliver a telemetry
-// event for a subscription.
+// event for a subscription. This function may be called with a nil event,
+// which indicates that new status information is available.
 type EventSinkDispatchFn func(event TelemetryEvent)
+
+// eventSinkEnableFn is a function that is called to enable an event sink.
+// Note: This functionality currently exists _specifically_ to implement the
+// chargen and ticker DEBUG events safely.
+type eventSinkEnableFn func()
 
 type eventSinkUnregisterFn func(es *eventSink)
 
 type eventSink struct {
 	subscription *Subscription
 	eventID      uint64
+	enable       eventSinkEnableFn
 	unregister   eventSinkUnregisterFn
 	filter       *expression.Expression
-	filterTypes  expression.FieldTypeMap
 }
 
 // Subscription contains all of the information about a client subscription
@@ -50,8 +56,10 @@ type Subscription struct {
 	counterGroupIDs []int32
 	containerFilter *ContainerFilter
 	eventSinks      map[uint64]*eventSink
-	status          []string
 	dispatchFn      EventSinkDispatchFn
+
+	status     []string
+	statusLock sync.Mutex
 }
 
 // Run enables and runs a telemetry event subscription. Canceling the specified
@@ -61,8 +69,7 @@ func (s *Subscription) Run(
 	ctx context.Context,
 	dispatchFn EventSinkDispatchFn,
 ) ([]string, error) {
-	status := s.status
-	s.status = nil
+	status := s.GetStatuses()
 	if status != nil {
 		for _, st := range status {
 			glog.V(1).Infof("Subscription %d: %s",
@@ -78,6 +85,7 @@ func (s *Subscription) Run(
 	}
 
 	s.sensor.eventMap.subscribe(s)
+	s.sensor.subscriptionMap.insert(s)
 	glog.V(2).Infof("Subscription %d registered", s.subscriptionID)
 
 	// Do not return an error after this point!
@@ -97,6 +105,11 @@ func (s *Subscription) Run(
 	for _, id := range s.counterGroupIDs {
 		monitor.EnableGroup(id)
 	}
+	for _, es := range s.eventSinks {
+		if es.enable != nil {
+			es.enable()
+		}
+	}
 
 	return status, nil
 }
@@ -110,6 +123,7 @@ func (s *Subscription) Close() {
 	if s.eventGroupID != 0 {
 		monitor.UnregisterEventGroup(s.eventGroupID)
 	}
+	s.sensor.subscriptionMap.remove(s)
 	s.sensor.eventMap.unsubscribe(s, nil)
 }
 
@@ -121,24 +135,13 @@ func (s *Subscription) SetContainerFilter(f *ContainerFilter) {
 func (s *Subscription) addEventSink(
 	eventID uint64,
 	filterExpression *expression.Expression,
-	filterTypes expression.FieldTypeMap,
 ) (*eventSink, error) {
-	// FIXME
-	// A second registration of an external event for the same subscription
-	// will overwrite the first one. Fixing this correctly is extremely low
-	// priority and requires extensive changes.
-
 	es := &eventSink{
 		subscription: s,
 		eventID:      eventID,
-		filterTypes:  filterTypes,
 	}
 
 	if filterExpression != nil {
-		if err := filterExpression.Validate(filterTypes); err != nil {
-			return nil, err
-		}
-
 		// If this is a valid kernel filter, attempt to set it as a
 		// kernel filter. If it is either not a valid kernel filter or
 		// it fails to set as a kernel filter, set the filter in the
@@ -167,13 +170,46 @@ func (s *Subscription) removeEventSink(es *eventSink) {
 }
 
 func (s *Subscription) logStatus(st string) {
+	s.statusLock.Lock()
 	s.status = append(s.status, st)
+	s.statusLock.Unlock()
+}
+
+// GetStatuses returns any status information that has been logged since the
+// last call to GetStatuses. This function clears the status log.
+func (s *Subscription) GetStatuses() []string {
+	s.statusLock.Lock()
+	statuses := s.status
+	s.status = nil
+	s.statusLock.Unlock()
+
+	return statuses
+}
+
+func (s *Subscription) lostRecordHandler(
+	eventid uint64,
+	groupid int32,
+	sampleID perf.SampleID,
+	count uint64,
+) {
+	glog.V(1).Infof("Lost %d events for eventid %d (group %d)\n",
+		count, eventid, groupid)
+
+	var e LostRecordTelemetryEvent
+	e.InitWithSampleID(s.sensor, sampleID, count)
+	e.Type = LostRecordTypeSubscription
+	for _, es := range s.eventSinks {
+		es.subscription.dispatchFn(e)
+	}
+
+	atomic.AddUint64(&s.sensor.Metrics.KernelSamplesLost, count)
 }
 
 func (s *Subscription) createEventGroup() error {
 	if s.eventGroupID == 0 {
 		monitor := s.sensor.Monitor()
-		if groupID, err := monitor.RegisterEventGroup(""); err == nil {
+		groupID, err := monitor.RegisterEventGroup("", s.lostRecordHandler)
+		if err == nil {
 			s.eventGroupID = groupID
 		} else {
 			s.logStatus(
@@ -185,36 +221,21 @@ func (s *Subscription) createEventGroup() error {
 	return nil
 }
 
-var perfTypeMapping = map[int32]expression.ValueType{
-	perf.TraceEventFieldTypeString: expression.ValueTypeString,
-
-	perf.TraceEventFieldTypeSignedInt8:  expression.ValueTypeSignedInt8,
-	perf.TraceEventFieldTypeSignedInt16: expression.ValueTypeSignedInt16,
-	perf.TraceEventFieldTypeSignedInt32: expression.ValueTypeSignedInt32,
-	perf.TraceEventFieldTypeSignedInt64: expression.ValueTypeSignedInt64,
-
-	perf.TraceEventFieldTypeUnsignedInt8:  expression.ValueTypeUnsignedInt8,
-	perf.TraceEventFieldTypeUnsignedInt16: expression.ValueTypeUnsignedInt16,
-	perf.TraceEventFieldTypeUnsignedInt32: expression.ValueTypeUnsignedInt32,
-	perf.TraceEventFieldTypeUnsignedInt64: expression.ValueTypeUnsignedInt64,
-}
-
 func (s *Subscription) registerKprobe(
 	address string,
 	onReturn bool,
 	output string,
-	fn perf.TraceEventDecoderFn,
+	handlerFn perf.TraceEventHandlerFn,
 	filterExpr *expression.Expression,
-	filterTypes expression.FieldTypeMap,
+	bindTypes bool,
 	options ...perf.RegisterEventOption,
 ) (*eventSink, error) {
 	if err := s.createEventGroup(); err != nil {
 		return nil, err
 	}
-	options = append(options, perf.WithEventGroup(s.eventGroupID))
 
-	eventID, err := s.sensor.RegisterKprobe(address, onReturn, output, fn,
-		options...)
+	eventID, err := s.sensor.RegisterKprobe(address, onReturn, output,
+		handlerFn, s.eventGroupID, options...)
 	if err != nil {
 		s.logStatus(
 			fmt.Sprintf("Could not register kprobe %s: %v",
@@ -222,22 +243,76 @@ func (s *Subscription) registerKprobe(
 		return nil, err
 	}
 
-	// This is a dynamic kprobe -- determine filterTypes dynamically from
-	// the kernel.
 	monitor := s.sensor.Monitor()
-	if filterExpr != nil && filterTypes == nil {
-		kprobeFields := monitor.RegisteredEventFields(eventID)
-		filterTypes = make(expression.FieldTypeMap, len(kprobeFields))
-		for k, v := range kprobeFields {
-			filterTypes[k] = perfTypeMapping[v]
+	if filterExpr != nil && bindTypes {
+		// This is a dynamic kprobe -- determine filterTypes dynamically from
+		// the kernel.
+		filterTypes := monitor.RegisteredEventFields(eventID)
+		err = filterExpr.BindTypes(filterTypes)
+		if err != nil {
+			s.logStatus(
+				fmt.Sprintf("Could not bind kprobe types for %s: %v",
+					address, err))
+			monitor.UnregisterEvent(eventID)
+			return nil, err
 		}
 	}
 
-	es, err := s.addEventSink(eventID, filterExpr, filterTypes)
+	es, err := s.addEventSink(eventID, filterExpr)
 	if err != nil {
 		s.logStatus(
 			fmt.Sprintf("Could not register kprobe %s: %v",
 				address, err))
+		monitor.UnregisterEvent(eventID)
+		return nil, err
+	}
+
+	return es, nil
+}
+
+func (s *Subscription) registerUprobe(
+	executable string,
+	address string,
+	onReturn bool,
+	output string,
+	handlerFn perf.TraceEventHandlerFn,
+	filterExpr *expression.Expression,
+	bindTypes bool,
+	options ...perf.RegisterEventOption,
+) (*eventSink, error) {
+	if err := s.createEventGroup(); err != nil {
+		return nil, err
+	}
+
+	eventID, err := s.sensor.Monitor().RegisterUprobe(executable, address,
+		onReturn, output, handlerFn, s.eventGroupID, options...)
+	if err != nil {
+		s.logStatus(
+			fmt.Sprintf("Could not register uprobe for %s in %s: %v",
+				address, executable, err))
+		return nil, err
+	}
+
+	monitor := s.sensor.Monitor()
+	if filterExpr != nil && bindTypes {
+		// This is a dynamic kprobe -- determine filterTypes dynamically from
+		// the kernel.
+		filterTypes := monitor.RegisteredEventFields(eventID)
+		err = filterExpr.BindTypes(filterTypes)
+		if err != nil {
+			s.logStatus(
+				fmt.Sprintf("Could not bind uprobe types for %s: %v",
+					address, err))
+			monitor.UnregisterEvent(eventID)
+			return nil, err
+		}
+	}
+
+	es, err := s.addEventSink(eventID, filterExpr)
+	if err != nil {
+		s.logStatus(
+			fmt.Sprintf("Could not register uprobe for %s in %s: %v",
+				address, executable, err))
 		monitor.UnregisterEvent(eventID)
 		return nil, err
 	}
@@ -247,19 +322,17 @@ func (s *Subscription) registerKprobe(
 
 func (s *Subscription) registerTracepoint(
 	name string,
-	fn perf.TraceEventDecoderFn,
+	handlerFn perf.TraceEventHandlerFn,
 	filterExpr *expression.Expression,
-	filterTypes expression.FieldTypeMap,
 	options ...perf.RegisterEventOption,
 ) (*eventSink, error) {
 	if err := s.createEventGroup(); err != nil {
 		return nil, err
 	}
-	options = append(options, perf.WithEventGroup(s.eventGroupID))
 
 	monitor := s.sensor.Monitor()
-	eventID, err := monitor.RegisterTracepoint(name, fn,
-		options...)
+	eventID, err := monitor.RegisterTracepoint(name, handlerFn,
+		s.eventGroupID, options...)
 	if err != nil {
 		s.logStatus(
 			fmt.Sprintf("Could not register tracepoint %s: %v",
@@ -267,7 +340,7 @@ func (s *Subscription) registerTracepoint(
 		return nil, err
 	}
 
-	es, err := s.addEventSink(eventID, filterExpr, filterTypes)
+	es, err := s.addEventSink(eventID, filterExpr)
 	if err != nil {
 		s.logStatus(
 			fmt.Sprintf("Could not register tracepoint %s: %v",
@@ -279,39 +352,69 @@ func (s *Subscription) registerTracepoint(
 	return es, nil
 }
 
+// DispatchEvent dispatches a telemetry event to the subscription.
+func (s *Subscription) DispatchEvent(
+	eventID uint64,
+	event TelemetryEvent,
+	valueGetter expression.FieldValueGetter,
+) {
+	// Note that filtering here exists solely to implement telemetry events
+	// like chargen and ticker. Globally fabricated events like container,
+	// file, or task events should be using Sensor.DispatchEvent. Events
+	// resulting from the perf subsystem have already been filtered by the
+	// EventMonitor code, so should have es.filter == nil and so should
+	// also be passing nil for valueGetter.
+
+	if es := s.eventSinks[eventID]; es != nil && es.filter != nil {
+		v, err := es.filter.Evaluate(valueGetter)
+		if err != nil {
+			glog.V(1).Infof("Expression evaluation error: %s", err)
+			return
+		}
+		if !expression.IsValueTrue(v) {
+			return
+		}
+	}
+
+	containerInfo := event.CommonTelemetryEventData().Container
+	if !s.containerFilter.Match(containerInfo) {
+		return
+	}
+	s.dispatchFn(event)
+}
+
 //
-// safeSubscriptionMap
+// safeEventSinkMap
 // map[uint64]map[int32]*eventSink
 //
 
-type subscriptionMap map[uint64]map[int32]*eventSink
+type eventSinkMap map[uint64]map[int32]*eventSink
 
-func newSubscriptionMap() subscriptionMap {
-	return make(subscriptionMap)
+func newEventSinkMap(c int) eventSinkMap {
+	return make(eventSinkMap, c)
 }
 
-type safeSubscriptionMap struct {
+type safeEventSinkMap struct {
 	sync.Mutex              // used only by writers
 	active     atomic.Value // map[uint64]map[int32]*eventSink
 }
 
-func newSafeSubscriptionMap() *safeSubscriptionMap {
-	return &safeSubscriptionMap{}
+func newSafeEventSinkMap() *safeEventSinkMap {
+	return &safeEventSinkMap{}
 }
 
-func (ssm *safeSubscriptionMap) getMap() subscriptionMap {
-	if value := ssm.active.Load(); value != nil {
-		return value.(subscriptionMap)
+func (sesm *safeEventSinkMap) getMap() eventSinkMap {
+	if value := sesm.active.Load(); value != nil {
+		return value.(eventSinkMap)
 	}
 	return nil
 }
 
-func (ssm *safeSubscriptionMap) subscribe(subscr *Subscription) {
-	ssm.Lock()
-	defer ssm.Unlock()
+func (sesm *safeEventSinkMap) subscribe(subscr *Subscription) {
+	sesm.Lock()
 
-	om := ssm.getMap()
-	nm := make(subscriptionMap, len(om)+len(subscr.eventSinks))
+	om := sesm.getMap()
+	nm := newEventSinkMap(len(om) + len(subscr.eventSinks))
 
 	if om != nil {
 		for k, v := range om {
@@ -324,18 +427,19 @@ func (ssm *safeSubscriptionMap) subscribe(subscr *Subscription) {
 	}
 
 	for eventID, es := range subscr.eventSinks {
-		subscriptionMap, ok := nm[eventID]
+		eventSinkMap, ok := nm[eventID]
 		if !ok {
-			subscriptionMap = make(map[int32]*eventSink)
-			nm[eventID] = subscriptionMap
+			eventSinkMap = make(map[int32]*eventSink)
+			nm[eventID] = eventSinkMap
 		}
-		subscriptionMap[subscr.eventGroupID] = es
+		eventSinkMap[subscr.eventGroupID] = es
 	}
 
-	ssm.active.Store(nm)
+	sesm.active.Store(nm)
+	sesm.Unlock()
 }
 
-func (ssm *safeSubscriptionMap) unsubscribe(
+func (sesm *safeEventSinkMap) unsubscribe(
 	subscr *Subscription,
 	f func(uint64),
 ) {
@@ -344,10 +448,10 @@ func (ssm *safeSubscriptionMap) unsubscribe(
 		deadEventSinks []*eventSink
 	)
 
-	ssm.Lock()
-	if om := ssm.getMap(); om != nil {
+	sesm.Lock()
+	if om := sesm.getMap(); om != nil {
 		subscriptionID := subscr.eventGroupID
-		nm := make(subscriptionMap, len(om))
+		nm := newEventSinkMap(len(om))
 		for eventID, v := range om {
 			var m map[int32]*eventSink
 			for ID, es := range v {
@@ -367,9 +471,9 @@ func (ssm *safeSubscriptionMap) unsubscribe(
 				nm[eventID] = m
 			}
 		}
-		ssm.active.Store(nm)
+		sesm.active.Store(nm)
 	}
-	ssm.Unlock()
+	sesm.Unlock()
 
 	for _, es := range deadEventSinks {
 		es.unregister(es)
@@ -379,4 +483,62 @@ func (ssm *safeSubscriptionMap) unsubscribe(
 			f(eventID)
 		}
 	}
+}
+
+//
+// safeSubscriptionMap
+// map[uint64]*Subscription
+//
+
+type subscriptionMap map[uint64]*Subscription
+
+func newSubscriptionMap(c int) subscriptionMap {
+	return make(subscriptionMap, c)
+}
+
+type safeSubscriptionMap struct {
+	sync.Mutex              // used only by writers
+	active     atomic.Value // subscriptionMap
+}
+
+func newSafeSubscriptionMap() *safeSubscriptionMap {
+	return &safeSubscriptionMap{}
+}
+
+func (ssm *safeSubscriptionMap) getMap() subscriptionMap {
+	if value := ssm.active.Load(); value != nil {
+		return value.(subscriptionMap)
+	}
+	return nil
+}
+
+func (ssm *safeSubscriptionMap) insert(s *Subscription) {
+	ssm.Lock()
+
+	om := ssm.getMap()
+	nm := newSubscriptionMap(len(om) + 1)
+
+	if om != nil {
+		for k, v := range om {
+			nm[k] = v
+		}
+	}
+	nm[s.subscriptionID] = s
+
+	ssm.active.Store(nm)
+	ssm.Unlock()
+}
+
+func (ssm *safeSubscriptionMap) remove(s *Subscription) {
+	ssm.Lock()
+	if om := ssm.getMap(); om != nil {
+		nm := newSubscriptionMap(len(om))
+		for k, v := range om {
+			if v != s {
+				nm[k] = v
+			}
+		}
+		ssm.active.Store(nm)
+	}
+	ssm.Unlock()
 }

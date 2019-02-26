@@ -17,33 +17,38 @@ package procfs
 import (
 	"bufio"
 	"bytes"
-	"crypto/sha256"
-	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/capsule8/capsule8/pkg/sys"
 	"github.com/capsule8/capsule8/pkg/sys/proc"
 
 	"github.com/golang/glog"
 )
 
-//
-// Docker cgroup paths may look like either of:
-// - /docker/[CONTAINER_ID]
-// - /kubepods/[...]/[CONTAINER_ID]
-// - /system.slice/docker-[CONTAINER_ID].scope
-//
-const cgroupContainerPattern = "^(/docker/|/kubepods/.*/|/system.slice/docker-)([[:xdigit:]]{64})(.scope|$)"
-
-// A regular expression to match docker container cgroup names
-var cgroupContainerRE = regexp.MustCompile(cgroupContainerPattern)
+// SelfTGID returns the TGID of the calling task.
+func (fs *FileSystem) SelfTGID() int {
+	fs.selfOnce.Do(func() {
+		filename := fmt.Sprintf("%s/self/stat", fs.MountPoint)
+		dataBytes, err := ioutil.ReadFile(filename)
+		if err != nil {
+			glog.Fatalf("Cannot read %s: %v", filename, err)
+		}
+		f := strings.Fields(string(dataBytes))
+		v, err := strconv.ParseUint(f[0], 10, 32)
+		if err != nil {
+			glog.Fatalf("Cannot parse %q: %v", f[0], err)
+		}
+		fs.selfTGID = int(v)
+	})
+	return fs.selfTGID
+}
 
 // ProcessContainerID returns the container ID running the specified process.
 // If the process is not running inside of a container, the return will be the
@@ -55,13 +60,24 @@ func (fs *FileSystem) ProcessContainerID(pid int) (string, error) {
 	}
 
 	for _, cg := range cgroups {
-		matches := cgroupContainerRE.FindStringSubmatch(cg.Path)
-		if len(matches) > 2 {
-			return matches[2], nil
+		if id := sys.ContainerID(cg.Path); id != "" {
+			return id, nil
 		}
 	}
 
 	return "", nil
+}
+
+// ProcessExecutable returns the name of the executable from exe file
+func (fs *FileSystem) ProcessExecutable(pid int) (string, error) {
+	exeFile := fmt.Sprintf("%s/%d/exe", fs.MountPoint, pid)
+	exePath, err := os.Readlink(exeFile)
+	if err != nil {
+		return "", err
+	}
+
+	path := string(exePath)
+	return path, nil
 }
 
 // ProcessCommandLine returns the full command-line arguments for the process
@@ -76,7 +92,8 @@ func (fs *FileSystem) ProcessCommandLine(pid int) ([]string, error) {
 	var commandLine []string
 	reader := bufio.NewReader(bytes.NewReader(cmdline[:]))
 	for {
-		s, err := reader.ReadString(0)
+		var s string
+		s, err = reader.ReadString(0)
 		if err != nil || len(s) <= 1 {
 			break
 		}
@@ -87,6 +104,64 @@ func (fs *FileSystem) ProcessCommandLine(pid int) ([]string, error) {
 	}
 
 	return commandLine, nil
+}
+
+// ProcessMappings returns the memory mappings a process currently has
+func (fs *FileSystem) ProcessMappings(pid int) ([]proc.MemoryMapping, error) {
+	filename := fmt.Sprintf("%d/maps", pid)
+	mapsFile, err := fs.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	var maps []proc.MemoryMapping
+	reader := bufio.NewReader(bytes.NewReader(mapsFile[:]))
+	for {
+		var s string
+		var start, end uint64
+
+		s, err = reader.ReadString('\n')
+		if err != nil {
+			break
+		}
+
+		// Limit to 6 fields, the last being the path which is optional.
+		// We use SplitN instead of Fields here so that the path doesn't
+		// get broken up if it contains spaces.
+		fields := strings.SplitN(s, " ", 6)
+		if len(fields) < 5 {
+			glog.Warningf("Couldn't parse maps line: %s", s)
+			continue
+		}
+
+		addrs := strings.Split(fields[0], "-")
+		if len(addrs) != 2 {
+			glog.Warningf("Couldn't parse addrs: %s", fields[0])
+			continue
+		}
+
+		start, err = strconv.ParseUint(addrs[0], 16, 64)
+		if err != nil {
+			glog.Warningf("Couldn't parse addr: %s", addrs[0])
+			continue
+		}
+
+		end, err = strconv.ParseUint(addrs[1], 16, 64)
+		if err != nil {
+			glog.Warningf("Couldn't parse addr: %s", addrs[1])
+			continue
+		}
+
+		path := strings.TrimSpace(fields[5])
+
+		maps = append(maps, proc.MemoryMapping{
+			Start: start,
+			End:   end,
+			Path:  path,
+		})
+	}
+
+	return maps, nil
 }
 
 // TaskControlGroups returns the cgroup membership of the specified task.
@@ -103,7 +178,8 @@ func (fs *FileSystem) TaskControlGroups(tgid, pid int) ([]proc.ControlGroup, err
 	for scanner.Scan() {
 		t := scanner.Text()
 		parts := strings.Split(t, ":")
-		ID, err := strconv.Atoi(parts[0])
+		var ID int
+		ID, err = strconv.Atoi(parts[0])
 		if err != nil {
 			glog.Warningf("Couldn't parse cgroup line: %s", t)
 			continue
@@ -170,30 +246,20 @@ func (fs *FileSystem) TaskStartTime(tgid, pid int) (int64, error) {
 }
 
 // TaskUniqueID returns a unique task ID for a PID.
-func (fs *FileSystem) TaskUniqueID(tgid, pid int, startTime int64) (string, error) {
-	// Do not use tgid here, because the TGID for a PID can change. The
+func (fs *FileSystem) TaskUniqueID(tgid, pid int, startTime int64) string {
+	// Do not use TGID here, because the TGID for a PID can change. The
 	// argument is included for consistency in naming conventions.
 
 	// Hash the bootID, PID, and start time to create a unique process
 	// identifier that can also be calculated from perf records and trace
 	// events
-
-	h := sha256.New()
-	if err := binary.Write(h, binary.LittleEndian, []byte(fs.BootID())); err != nil {
-		glog.Fatal(err)
-	}
-	if err := binary.Write(h, binary.LittleEndian, int32(pid)); err != nil {
-		glog.Fatal(err)
-	}
-	if err := binary.Write(h, binary.LittleEndian, startTime); err != nil {
-		glog.Fatal(err)
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return fmt.Sprintf("%s-%d-%d", fs.BootID(), pid, startTime)
 }
 
 // WalkTasks calls the specified function for each task present in the proc
 // FileSystem. If the walk function returns false, the walk will be aborted.
 func (fs *FileSystem) WalkTasks(walkFunc proc.TaskWalkFunc) error {
+	glog.V(1).Infof("Scanning %s for existing tasks", fs.MountPoint)
 	d, err := os.Open(fs.MountPoint)
 	if err != nil {
 		return fmt.Errorf("Cannot open %q: %v", fs.MountPoint, err)
@@ -207,7 +273,8 @@ func (fs *FileSystem) WalkTasks(walkFunc proc.TaskWalkFunc) error {
 	d.Close()
 
 	for _, procName := range procNames {
-		i, err := strconv.ParseInt(procName, 10, 32)
+		var i int64
+		i, err = strconv.ParseInt(procName, 10, 32)
 		if err != nil {
 			continue
 		}
@@ -219,7 +286,8 @@ func (fs *FileSystem) WalkTasks(walkFunc proc.TaskWalkFunc) error {
 			// This is not fatal; the process may have gone away
 			continue
 		}
-		taskNames, err := d.Readdirnames(0)
+		var taskNames []string
+		taskNames, err = d.Readdirnames(0)
 		if err != nil {
 			// This is not fatal; the process may have gone away
 			d.Close()
@@ -271,7 +339,7 @@ func (fs *FileSystem) ReadTaskStatus(tgid, pid int, i interface{}) error {
 			if !field.IsValid() {
 				continue
 			}
-			err := setValueFromString(field, parts[0],
+			err = setValueFromString(field, parts[0],
 				strings.TrimSpace(parts[1]))
 			if err != nil {
 				return err

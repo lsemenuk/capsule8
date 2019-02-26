@@ -19,8 +19,6 @@ import (
 	"time"
 
 	"github.com/capsule8/capsule8/pkg/expression"
-	"github.com/capsule8/capsule8/pkg/sys"
-	"github.com/capsule8/capsule8/pkg/sys/perf"
 )
 
 // TickerEventTypes defines the field types that can be used with filters on
@@ -45,17 +43,16 @@ func (e TickerTelemetryEvent) CommonTelemetryEventData() TelemetryEventData {
 	return e.TelemetryEventData
 }
 
-func (s *Subscription) decodeTickerEvent(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
+func (s *Subscription) dispatchTickerEvent(
+	eventid uint64,
+	data expression.FieldValueMap,
+) {
 	var e TickerTelemetryEvent
 
 	e.Init(s.sensor)
 	e.Seconds = data["seconds"].(int64)
 	e.Nanoseconds = data["nanoseconds"].(int64)
-
-	return e, nil
+	s.DispatchEvent(eventid, e, data)
 }
 
 // RegisterTickerEventFilter registers a ticker event filter with a
@@ -71,44 +68,36 @@ func (s *Subscription) RegisterTickerEventFilter(
 	}
 
 	monitor := s.sensor.Monitor()
-	eventID := monitor.RegisterExternalEvent("ticker",
-		s.decodeTickerEvent)
+	eventID := monitor.ReserveEventID()
 
 	done := make(chan struct{})
 
-	es, err := s.addEventSink(eventID, filter, TickerEventTypes)
+	es, err := s.addEventSink(eventID, filter)
 	if err != nil {
 		s.logStatus(
 			fmt.Sprintf("Invalid filter expression for ticker filter: %v", err))
-		monitor.UnregisterEvent(eventID)
 		return
 	}
 	es.unregister = func(es *eventSink) {
-		monitor.UnregisterEvent(es.eventID)
 		close(done)
 	}
-
-	go func() {
-		ticker := time.NewTicker(time.Duration(interval))
-		for {
-			select {
-			case <-done:
-				ticker.Stop()
-				return
-			case <-ticker.C:
-				monoNow := sys.CurrentMonotonicRaw()
-				sampleID := perf.SampleID{
-					Time: uint64(monoNow),
+	es.enable = func() {
+		go func() {
+			ticker := time.NewTicker(time.Duration(interval))
+			for {
+				select {
+				case <-done:
+					ticker.Stop()
+					return
+				case <-ticker.C:
+					now := time.Now()
+					data := expression.FieldValueMap{
+						"seconds":     int64(now.Unix()),
+						"nanoseconds": int64(now.UnixNano()),
+					}
+					s.dispatchTickerEvent(eventID, data)
 				}
-				now := time.Now()
-				data := perf.TraceEventSampleData{
-					"seconds":     int64(now.Unix()),
-					"nanoseconds": int64(now.UnixNano()),
-				}
-				monitor.EnqueueExternalSample(
-					eventID, sampleID, data)
-
 			}
-		}
-	}()
+		}()
+	}
 }

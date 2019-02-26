@@ -21,4 +21,7 @@ type MetricsCounters struct {
 
 	// Number of subscriptions
 	Subscriptions uint64
+
+	// Number of samples dropped by the kernel
+	KernelSamplesLost uint64
 }

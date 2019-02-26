@@ -108,7 +108,8 @@ func newDockerMonitor(sensor *Sensor, containerDir string) *dockerMonitor {
 	// filesystem for existing containers
 
 	_, err = sensor.RegisterKprobe(dockerRenameKprobeSymbol, false,
-		dockerRenameKprobeFetchargs, dm.decodeRename,
+		dockerRenameKprobeFetchargs, dm.handleRename,
+		sensor.ContainerCache.EventGroupID,
 		perf.WithFilter(dockerRenameKprobeFilter),
 		perf.WithTracingEventName("docker1"),
 		perf.WithEventEnabled())
@@ -118,7 +119,8 @@ func newDockerMonitor(sensor *Sensor, containerDir string) *dockerMonitor {
 	}
 
 	_, err = sensor.RegisterKprobe(dockerUnlinkKprobeSymbol, false,
-		dockerUnlinkKprobeFetchargs, dm.decodeUnlink,
+		dockerUnlinkKprobeFetchargs, dm.handleUnlink,
+		sensor.ContainerCache.EventGroupID,
 		perf.WithFilter(dockerUnlinkKprobeFilter),
 		perf.WithTracingEventName("docker2"),
 		perf.WithEventEnabled())
@@ -250,57 +252,42 @@ func (dm *dockerMonitor) maybeDeferAction(f func()) {
 	f()
 }
 
-func (dm *dockerMonitor) decodeRename(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
-	configFilename := data["newname"].(string)
-	if !strings.HasPrefix(configFilename, dm.containerDir) ||
+func (dm *dockerMonitor) handleRename(eventid uint64, sample *perf.Sample) {
+	configFilename, err := sample.GetString("newname")
+	if err != nil ||
+		!strings.HasPrefix(configFilename, dm.containerDir) ||
 		!strings.HasSuffix(configFilename, "/config.v2.json") {
-		return nil, nil
-	}
-
-	sampleID := perf.SampleID{
-		Time: sample.Time,
-		PID:  sample.Pid,
-		TID:  sample.Tid,
-		CPU:  sample.CPU,
+		return
 	}
 
 	configFile, err := os.Open(configFilename)
 	if err == nil {
+		// references to sample cannot outlive this function, because
+		// the sample may be reused in EventMonitor.
+		sampleID := sample.SampleID
 		dm.maybeDeferAction(func() {
-			dm.processDockerConfig(sampleID, configFilename, configFile)
+			dm.processDockerConfig(sampleID,
+				configFilename, configFile)
 			configFile.Close()
 		})
 	}
-
-	return nil, nil
 }
 
-func (dm *dockerMonitor) decodeUnlink(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
-	configFilename := data["pathname"].(string)
-	if !strings.HasPrefix(configFilename, dm.containerDir) {
-		return nil, nil
+func (dm *dockerMonitor) handleUnlink(eventid uint64, sample *perf.Sample) {
+	configFilename, err := sample.GetString("pathname")
+	if err != nil || !strings.HasPrefix(configFilename, dm.containerDir) {
+		return
 	}
 
-	sampleID := perf.SampleID{
-		Time: sample.Time,
-		PID:  sample.Pid,
-		TID:  sample.Tid,
-		CPU:  sample.CPU,
-	}
-
+	// references to sample cannot outlive this function, because
+	// the sample may be reused in EventMonitor.
+	sampleID := sample.SampleID
 	dm.maybeDeferAction(func() {
 		parts := strings.Split(configFilename, "/")
 		if len(parts) >= 2 {
 			containerID := parts[len(parts)-2]
-			dm.sensor.ContainerCache.DeleteContainer(containerID, ContainerRuntimeDocker, sampleID)
+			dm.sensor.ContainerCache.DeleteContainer(containerID,
+				ContainerRuntimeDocker, sampleID)
 		}
 	})
-
-	return nil, nil
 }

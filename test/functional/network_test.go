@@ -21,7 +21,7 @@ import (
 	"testing"
 	"unsafe"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 	"github.com/capsule8/capsule8/pkg/expression"
 	"github.com/golang/glog"
 )
@@ -48,7 +48,7 @@ type networkTest struct {
 	containerID   string
 	serverSocket  uint64
 	clientSocket  uint64
-	seenEvents    map[api.NetworkEventType]bool
+	seenEvents    map[telemetryAPI.NetworkEventType]bool
 }
 
 func (nt *networkTest) BuildContainer(t *testing.T) string {
@@ -76,7 +76,7 @@ func (nt *networkTest) RunContainer(t *testing.T) {
 	glog.V(2).Infof("Running container %s\n", nt.testContainer.ImageID[0:12])
 }
 
-func (nt *networkTest) CreateSubscription(t *testing.T) *api.Subscription {
+func (nt *networkTest) CreateSubscription(t *testing.T) *telemetryAPI.Subscription {
 	familyFilter := expression.Equal(
 		expression.Identifier("sa_family"),
 		expression.Value(uint16(syscall.AF_INET)))
@@ -99,86 +99,86 @@ func (nt *networkTest) CreateSubscription(t *testing.T) *api.Subscription {
 		expression.Identifier("ret"),
 		expression.Value(int64(testNetworkMsgLen)))
 
-	networkEvents := []*api.NetworkEventFilter{
-		&api.NetworkEventFilter{
-			Type:             api.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_ATTEMPT,
+	networkEvents := []*telemetryAPI.NetworkEventFilter{
+		&telemetryAPI.NetworkEventFilter{
+			Type:             telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_ATTEMPT,
 			FilterExpression: expression.LogicalAnd(familyFilter, portFilter),
 		},
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_RESULT,
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_RESULT,
 			//FilterExpression: resultFilter,
 		},
-		&api.NetworkEventFilter{
-			Type:             api.NetworkEventType_NETWORK_EVENT_TYPE_BIND_ATTEMPT,
+		&telemetryAPI.NetworkEventFilter{
+			Type:             telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_BIND_ATTEMPT,
 			FilterExpression: expression.LogicalAnd(familyFilter, portFilter),
 		},
-		&api.NetworkEventFilter{
-			Type:             api.NetworkEventType_NETWORK_EVENT_TYPE_BIND_RESULT,
+		&telemetryAPI.NetworkEventFilter{
+			Type:             telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_BIND_RESULT,
 			FilterExpression: resultFilter,
 		},
-		&api.NetworkEventFilter{
-			Type:             api.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_ATTEMPT,
+		&telemetryAPI.NetworkEventFilter{
+			Type:             telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_ATTEMPT,
 			FilterExpression: backlogFilter,
 		},
-		&api.NetworkEventFilter{
-			Type:             api.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_RESULT,
+		&telemetryAPI.NetworkEventFilter{
+			Type:             telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_RESULT,
 			FilterExpression: resultFilter,
 		},
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_ATTEMPT,
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_ATTEMPT,
 		},
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_RESULT,
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_RESULT,
 			//FilterExpression: goodFDFilter,
 		},
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_ATTEMPT,
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_ATTEMPT,
 		},
-		&api.NetworkEventFilter{
-			Type:             api.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_RESULT,
+		&telemetryAPI.NetworkEventFilter{
+			Type:             telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_RESULT,
 			FilterExpression: msgLenFilter,
 		},
-		&api.NetworkEventFilter{
-			Type: api.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_ATTEMPT,
+		&telemetryAPI.NetworkEventFilter{
+			Type: telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_ATTEMPT,
 		},
-		&api.NetworkEventFilter{
-			Type:             api.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_RESULT,
+		&telemetryAPI.NetworkEventFilter{
+			Type:             telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_RESULT,
 			FilterExpression: msgLenFilter,
 		},
 	}
 
 	// Subscribing to container created events are currently necessary
 	// to get imageIDs in other events.
-	containerEvents := []*api.ContainerEventFilter{
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
+	containerEvents := []*telemetryAPI.ContainerEventFilter{
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
 		},
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
 		},
 	}
 
-	eventFilter := &api.EventFilter{
+	eventFilter := &telemetryAPI.EventFilter{
 		NetworkEvents:   networkEvents,
 		ContainerEvents: containerEvents,
 	}
 
-	return &api.Subscription{
+	return &telemetryAPI.Subscription{
 		EventFilter: eventFilter,
 	}
 }
 
-func (nt *networkTest) HandleTelemetryEvent(t *testing.T, te *api.ReceivedTelemetryEvent) bool {
+func (nt *networkTest) HandleTelemetryEvent(t *testing.T, te *telemetryAPI.ReceivedTelemetryEvent) bool {
 
 	switch event := te.Event.Event.(type) {
-	case *api.TelemetryEvent_Container:
+	case *telemetryAPI.TelemetryEvent_Container:
 		switch event.Container.Type {
-		case api.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED:
+		case telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED:
 			return true
 
-		case api.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED:
-			unseen := []api.NetworkEventType{}
-			for i := api.NetworkEventType(1); i <= 12; i++ {
+		case telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED:
+			unseen := []telemetryAPI.NetworkEventType{}
+			for i := telemetryAPI.NetworkEventType(1); i <= 12; i++ {
 				if !nt.seenEvents[i] {
 					unseen = append(unseen, i)
 				}
@@ -193,14 +193,14 @@ func (nt *networkTest) HandleTelemetryEvent(t *testing.T, te *api.ReceivedTeleme
 			return false
 		}
 
-	case *api.TelemetryEvent_Network:
+	case *telemetryAPI.TelemetryEvent_Network:
 		glog.V(2).Infof("Got Network Event %+v\n", te.Event)
 		if te.Event.ImageId == nt.testContainer.ImageID {
 			switch event.Network.Type {
-			case api.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_ATTEMPT:
+			case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_ATTEMPT:
 				nt.clientSocket = event.Network.Sockfd
 
-			case api.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_RESULT:
+			case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_RESULT:
 				// The golang runtime uses non-blocking sockets, so a successful connect will
 				// return an EINPROGRESS. The container also attempts connecting to TCP6, so
 				// we also get an EADDRNOTAVAIL (-99).
@@ -209,15 +209,15 @@ func (nt *networkTest) HandleTelemetryEvent(t *testing.T, te *api.ReceivedTeleme
 					return true
 				}
 
-			case api.NetworkEventType_NETWORK_EVENT_TYPE_BIND_ATTEMPT:
-				if event.Network.Address.Family != api.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_INET {
+			case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_BIND_ATTEMPT:
+				if event.Network.Address.Family != telemetryAPI.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_INET {
 					t.Errorf("Expected bind family %s, got %s",
-						api.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_INET,
+						telemetryAPI.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_INET,
 						event.Network.Address.Family)
 					return false
 				}
 
-				addr, haveAddr := event.Network.Address.Address.(*api.NetworkAddress_Ipv4Address)
+				addr, haveAddr := event.Network.Address.Address.(*telemetryAPI.NetworkAddress_Ipv4Address)
 
 				if !haveAddr {
 					t.Errorf("Unexpected bind address %+v", event.Network.Address.Address)
@@ -230,48 +230,48 @@ func (nt *networkTest) HandleTelemetryEvent(t *testing.T, te *api.ReceivedTeleme
 
 				nt.serverSocket = event.Network.Sockfd
 
-			case api.NetworkEventType_NETWORK_EVENT_TYPE_BIND_RESULT:
+			case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_BIND_RESULT:
 				if event.Network.Result != 0 {
 					t.Errorf("Expected bind result 0, got %d",
 						event.Network.Result)
 					return false
 				}
 
-			case api.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_ATTEMPT:
+			case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_ATTEMPT:
 				if event.Network.Backlog != testNetworkBacklog {
 					t.Errorf("Expected listen backlog %d, got %d",
 						testNetworkBacklog, event.Network.Backlog)
 					return false
 				}
 
-			case api.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_RESULT:
+			case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_RESULT:
 				if event.Network.Result != 0 {
 					t.Errorf("Expected listen result 0, got %d",
 						event.Network.Result)
 					return false
 				}
 
-			case api.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_ATTEMPT:
+			case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_ATTEMPT:
 				if nt.serverSocket != 0 && event.Network.Sockfd != nt.serverSocket {
 					// This is not the accept() attempt we are looking for
 					return true
 				}
 
-			case api.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_RESULT:
+			case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_RESULT:
 				if event.Network.Result < 0 && event.Network.Result != -int64(syscall.EAGAIN) {
 					t.Errorf("Expected accept result > -1, got %d",
 						event.Network.Result)
 					return false
 				}
 
-			case api.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_RESULT:
+			case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_RESULT:
 				if event.Network.Result != int64(testNetworkMsgLen) {
 					t.Errorf("Expected sendto result %d, got %d",
 						testNetworkMsgLen, event.Network.Result)
 					return false
 				}
 
-			case api.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_RESULT:
+			case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_RESULT:
 				if event.Network.Result != int64(testNetworkMsgLen) {
 					t.Errorf("Expected recvfrom result %d, got %d",
 						testNetworkMsgLen, event.Network.Result)
@@ -293,7 +293,7 @@ func (nt *networkTest) HandleTelemetryEvent(t *testing.T, te *api.ReceivedTeleme
 
 // TestNetwork exercises the network events.
 func TestNetwork(t *testing.T) {
-	nt := &networkTest{seenEvents: make(map[api.NetworkEventType]bool)}
+	nt := &networkTest{seenEvents: make(map[telemetryAPI.NetworkEventType]bool)}
 
 	tt := NewTelemetryTester(nt)
 	tt.RunTest(t)

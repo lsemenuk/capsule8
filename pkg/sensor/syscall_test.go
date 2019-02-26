@@ -26,86 +26,92 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDecodeDummySysEnter(t *testing.T) {
-	// This does nothing except increase coverage since the function it's
-	// "testing" does nothing except return nil, nil
-	i, err := decodeDummySysEnter(nil, nil)
-	assert.Nil(t, i)
-	assert.NoError(t, err)
-}
-
-func TestDecodeSyscallTraceEnter(t *testing.T) {
+func TestHandleSyscallTraceEnter(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
 	s := newTestSubscription(t, sensor)
 
-	sample := &perf.SampleRecord{
-		Time: uint64(sys.CurrentMonotonicRaw()),
+	sample := &perf.Sample{
+		SampleID: perf.SampleID{
+			TID:  uint32(sensorPID),
+			Time: uint64(sys.CurrentMonotonicRaw()),
+		},
 	}
-	data := perf.TraceEventSampleData{
-		"common_pid": int32(sensorPID),
-		"id":         int64(9237845),
-		"arg0":       uint64(0x11),
-		"arg1":       uint64(0x22),
-		"arg2":       uint64(0x33),
-		"arg3":       uint64(0x44),
-		"arg4":       uint64(0x55),
-		"arg5":       uint64(0x66),
+	data := expression.FieldValueMap{
+		"id":   int64(9237845),
+		"arg0": uint64(0x11),
+		"arg1": uint64(0x22),
+		"arg2": uint64(0x33),
+		"arg3": uint64(0x44),
+		"arg4": uint64(0x55),
+		"arg5": uint64(0x66),
+	}
+	setSampleRawData(sample, data)
+
+	dispatched := false
+	s.dispatchFn = func(event TelemetryEvent) {
+		e, ok := event.(SyscallEnterTelemetryEvent)
+		require.True(t, ok)
+
+		ok = testCommonTelemetryEventData(t, sensor, e)
+		require.True(t, ok)
+		assert.Equal(t, data["id"], e.ID)
+		assert.Equal(t, data["arg0"], e.Arguments[0])
+		assert.Equal(t, data["arg1"], e.Arguments[1])
+		assert.Equal(t, data["arg2"], e.Arguments[2])
+		assert.Equal(t, data["arg3"], e.Arguments[3])
+		assert.Equal(t, data["arg4"], e.Arguments[4])
+		assert.Equal(t, data["arg5"], e.Arguments[5])
+		dispatched = true
 	}
 
-	i, err := s.decodeSyscallTraceEnter(sample, data)
-	assert.Nil(t, i)
-	assert.NoError(t, err)
+	eventid, _ := s.addTestEventSink(t, nil)
+	s.handleSyscallTraceEnter(eventid, sample)
+	require.False(t, dispatched)
 
-	delete(data, "common_pid")
-	i, err = s.decodeSyscallTraceEnter(sample, data)
-	require.NotNil(t, i)
-	require.NoError(t, err)
-	e, ok := i.(SyscallEnterTelemetryEvent)
-	require.True(t, ok)
-
-	ok = testCommonTelemetryEventData(t, sensor, e)
-	require.True(t, ok)
-	assert.Equal(t, data["id"], e.ID)
-	assert.Equal(t, data["arg0"], e.Arguments[0])
-	assert.Equal(t, data["arg1"], e.Arguments[1])
-	assert.Equal(t, data["arg2"], e.Arguments[2])
-	assert.Equal(t, data["arg3"], e.Arguments[3])
-	assert.Equal(t, data["arg4"], e.Arguments[4])
-	assert.Equal(t, data["arg5"], e.Arguments[5])
+	sample.TID = 0
+	s.handleSyscallTraceEnter(eventid, sample)
+	require.True(t, dispatched)
 }
 
-func TestDecodeSysExit(t *testing.T) {
+func TestHandleSysExit(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
 	s := newTestSubscription(t, sensor)
 
-	sample := &perf.SampleRecord{
-		Time: uint64(sys.CurrentMonotonicRaw()),
+	sample := &perf.Sample{
+		SampleID: perf.SampleID{
+			TID:  uint32(sensorPID),
+			Time: uint64(sys.CurrentMonotonicRaw()),
+		},
 	}
-	data := perf.TraceEventSampleData{
-		"common_pid": int32(sensorPID),
-		"id":         int64(9237845),
-		"ret":        int64(3824567),
+	data := expression.FieldValueMap{
+		"id":  int64(9237845),
+		"ret": int64(3824567),
+	}
+	setSampleRawData(sample, data)
+
+	dispatched := false
+	s.dispatchFn = func(event TelemetryEvent) {
+		e, ok := event.(SyscallExitTelemetryEvent)
+		require.True(t, ok)
+
+		ok = testCommonTelemetryEventData(t, sensor, e)
+		require.True(t, ok)
+		assert.Equal(t, data["id"], e.ID)
+		assert.Equal(t, data["ret"], e.Return)
+		dispatched = true
 	}
 
-	i, err := s.decodeSysExit(sample, data)
-	assert.Nil(t, i)
-	assert.NoError(t, err)
+	eventid, _ := s.addTestEventSink(t, nil)
+	s.handleSysExit(eventid, sample)
+	require.False(t, dispatched)
 
-	delete(data, "common_pid")
-	i, err = s.decodeSysExit(sample, data)
-	require.NotNil(t, i)
-	require.NoError(t, err)
-	e, ok := i.(SyscallExitTelemetryEvent)
-	require.True(t, ok)
-
-	ok = testCommonTelemetryEventData(t, sensor, e)
-	require.True(t, ok)
-	assert.Equal(t, data["id"], e.ID)
-	assert.Equal(t, data["ret"], e.Return)
+	sample.TID = 0
+	s.handleSysExit(eventid, sample)
+	require.True(t, dispatched)
 }
 
 func TestInitSyscallNames(t *testing.T) {
@@ -204,17 +210,7 @@ func TestRegisterSyscallEnterEventFilter(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	e := expression.Equal(expression.Identifier("foo"), expression.Value("bar"))
-	expr, err := expression.NewExpression(e)
-	require.NotNil(t, expr)
-	require.NoError(t, err)
-
 	s := newTestSubscription(t, sensor)
-	prepareForRegisterSyscallEnterEventFilter(t, s)
-	s.RegisterSyscallEnterEventFilter(expr)
-	verifyRegisterSyscallEnterEventFilter(t, s, -1)
-
-	s = newTestSubscription(t, sensor)
 	prepareForRegisterSyscallEnterEventFilter(t, s)
 	s.RegisterSyscallEnterEventFilter(nil)
 	verifyRegisterSyscallEnterEventFilter(t, s, 1)
@@ -233,16 +229,7 @@ func TestRegisterSyscallExitEventFilter(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	e := expression.Equal(expression.Identifier("foo"), expression.Value("bar"))
-	expr, err := expression.NewExpression(e)
-	require.NotNil(t, expr)
-	require.NoError(t, err)
-
 	s := newTestSubscription(t, sensor)
-	s.RegisterSyscallExitEventFilter(expr)
-	verifyRegisterSyscallExitEventFilter(t, s, -1)
-
-	s = newTestSubscription(t, sensor)
 	s.RegisterSyscallExitEventFilter(nil)
 	verifyRegisterSyscallExitEventFilter(t, s, 1)
 }

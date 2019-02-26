@@ -16,11 +16,13 @@ package procfs
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestKernelTextSymbolNames(t *testing.T) {
 	fs, err := NewFileSystem("testdata/proc")
-	ok(t, err)
+	assert.NoError(t, err)
 
 	expectedSymbols := map[string]string{
 		"__intel_shared_reg_put_constraints": "__intel_shared_reg_put_constraints.isra.6.part.7",
@@ -30,6 +32,6 @@ func TestKernelTextSymbolNames(t *testing.T) {
 	}
 
 	actualSymbols, err := fs.KernelTextSymbolNames()
-	ok(t, err)
-	equals(t, expectedSymbols, actualSymbols)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedSymbols, actualSymbols)
 }

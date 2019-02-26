@@ -36,20 +36,20 @@ func (e PerformanceTelemetryEvent) CommonTelemetryEventData() TelemetryEventData
 	return e.TelemetryEventData
 }
 
-func (s *Subscription) decodePerfCounterEvent(
-	sample *perf.SampleRecord,
+func (s *Subscription) handlePerfCounterEvent(
+	eventid uint64,
+	sample *perf.Sample,
 	counters []perf.CounterEventValue,
 	totalTimeEnabled uint64,
 	totalTimeRunning uint64,
-) (interface{}, error) {
+) {
 	var e PerformanceTelemetryEvent
-	if !e.InitWithSample(s.sensor, sample, nil) {
-		return nil, nil
+	if e.InitWithSample(s.sensor, sample) {
+		e.TotalTimeEnabled = totalTimeEnabled
+		e.TotalTimeRunning = totalTimeRunning
+		e.Counters = counters
+		s.DispatchEvent(eventid, e, nil)
 	}
-	e.TotalTimeEnabled = totalTimeEnabled
-	e.TotalTimeRunning = totalTimeRunning
-	e.Counters = counters
-	return e, nil
 }
 
 // RegisterPerformanceEventFilter registers a performance event filter with a
@@ -60,7 +60,7 @@ func (s *Subscription) RegisterPerformanceEventFilter(
 ) {
 	eventName := "Performance Counters"
 	groupID, eventID, err := s.sensor.Monitor().RegisterCounterEventGroup(
-		eventName, counters, s.decodePerfCounterEvent,
+		eventName, counters, s.handlePerfCounterEvent, s.lostRecordHandler,
 		perf.WithEventAttr(&attr))
 	if err != nil {
 		s.logStatus(
@@ -68,6 +68,6 @@ func (s *Subscription) RegisterPerformanceEventFilter(
 				eventName, err))
 	} else {
 		s.counterGroupIDs = append(s.counterGroupIDs, groupID)
-		s.addEventSink(eventID, nil, nil)
+		s.addEventSink(eventID, nil)
 	}
 }

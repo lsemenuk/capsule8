@@ -28,16 +28,18 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func TestNetworkDecoders(t *testing.T) {
+func TestNetworkHandlers(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
 	s := newTestSubscription(t, sensor)
 
-	sample := &perf.SampleRecord{
-		Time: uint64(sys.CurrentMonotonicRaw()),
+	sample := &perf.Sample{
+		SampleID: perf.SampleID{
+			Time: uint64(sys.CurrentMonotonicRaw()),
+		},
 	}
-	data := perf.TraceEventSampleData{
+	data := expression.FieldValueMap{
 		"fd":             uint64(258675234),
 		"ret":            int64(8927364),
 		"backlog":        uint64(24576),
@@ -51,20 +53,20 @@ func TestNetworkDecoders(t *testing.T) {
 	families := []uint16{unix.AF_INET, unix.AF_INET6, unix.AF_LOCAL}
 
 	type testCase struct {
-		decoder      perf.TraceEventDecoderFn
+		handler      perf.TraceEventHandlerFn
 		expectedType interface{}
 		fieldChecks  map[string]string
 	}
 	testCases := []testCase{
 		testCase{
-			decoder:      s.decodeSysEnterAccept,
+			handler:      s.handleSysEnterAccept,
 			expectedType: NetworkAcceptAttemptTelemetryEvent{},
 			fieldChecks: map[string]string{
 				"fd": "FD",
 			},
 		},
 		testCase{
-			decoder:      s.decodeSysExitAccept,
+			handler:      s.handleSysExitAccept,
 			expectedType: NetworkAcceptResultTelemetryEvent{},
 			fieldChecks: map[string]string{
 				"ret": "Return",
@@ -72,7 +74,7 @@ func TestNetworkDecoders(t *testing.T) {
 		},
 		// 3x bind to catch all three address families
 		testCase{
-			decoder:      s.decodeSysBind,
+			handler:      s.handleSysBind,
 			expectedType: NetworkBindAttemptTelemetryEvent{},
 			fieldChecks: map[string]string{
 				"fd":        "FD",
@@ -80,7 +82,7 @@ func TestNetworkDecoders(t *testing.T) {
 			},
 		},
 		testCase{
-			decoder:      s.decodeSysBind,
+			handler:      s.handleSysBind,
 			expectedType: NetworkBindAttemptTelemetryEvent{},
 			fieldChecks: map[string]string{
 				"fd":        "FD",
@@ -88,7 +90,7 @@ func TestNetworkDecoders(t *testing.T) {
 			},
 		},
 		testCase{
-			decoder:      s.decodeSysBind,
+			handler:      s.handleSysBind,
 			expectedType: NetworkBindAttemptTelemetryEvent{},
 			fieldChecks: map[string]string{
 				"fd":        "FD",
@@ -96,7 +98,7 @@ func TestNetworkDecoders(t *testing.T) {
 			},
 		},
 		testCase{
-			decoder:      s.decodeSysExitBind,
+			handler:      s.handleSysExitBind,
 			expectedType: NetworkBindResultTelemetryEvent{},
 			fieldChecks: map[string]string{
 				"ret": "Return",
@@ -104,7 +106,7 @@ func TestNetworkDecoders(t *testing.T) {
 		},
 		// 3x connect to catch all three address families
 		testCase{
-			decoder:      s.decodeSysConnect,
+			handler:      s.handleSysConnect,
 			expectedType: NetworkConnectAttemptTelemetryEvent{},
 			fieldChecks: map[string]string{
 				"fd":        "FD",
@@ -112,7 +114,7 @@ func TestNetworkDecoders(t *testing.T) {
 			},
 		},
 		testCase{
-			decoder:      s.decodeSysConnect,
+			handler:      s.handleSysConnect,
 			expectedType: NetworkConnectAttemptTelemetryEvent{},
 			fieldChecks: map[string]string{
 				"fd":        "FD",
@@ -120,7 +122,7 @@ func TestNetworkDecoders(t *testing.T) {
 			},
 		},
 		testCase{
-			decoder:      s.decodeSysConnect,
+			handler:      s.handleSysConnect,
 			expectedType: NetworkConnectAttemptTelemetryEvent{},
 			fieldChecks: map[string]string{
 				"fd":        "FD",
@@ -128,14 +130,14 @@ func TestNetworkDecoders(t *testing.T) {
 			},
 		},
 		testCase{
-			decoder:      s.decodeSysExitConnect,
+			handler:      s.handleSysExitConnect,
 			expectedType: NetworkConnectResultTelemetryEvent{},
 			fieldChecks: map[string]string{
 				"ret": "Return",
 			},
 		},
 		testCase{
-			decoder:      s.decodeSysEnterListen,
+			handler:      s.handleSysEnterListen,
 			expectedType: NetworkListenAttemptTelemetryEvent{},
 			fieldChecks: map[string]string{
 				"fd":      "FD",
@@ -143,21 +145,21 @@ func TestNetworkDecoders(t *testing.T) {
 			},
 		},
 		testCase{
-			decoder:      s.decodeSysExitListen,
+			handler:      s.handleSysExitListen,
 			expectedType: NetworkListenResultTelemetryEvent{},
 			fieldChecks: map[string]string{
 				"ret": "Return",
 			},
 		},
 		testCase{
-			decoder:      s.decodeSysEnterRecvfrom,
+			handler:      s.handleSysEnterRecvfrom,
 			expectedType: NetworkRecvfromAttemptTelemetryEvent{},
 			fieldChecks: map[string]string{
 				"fd": "FD",
 			},
 		},
 		testCase{
-			decoder:      s.decodeSysExitRecvfrom,
+			handler:      s.handleSysExitRecvfrom,
 			expectedType: NetworkRecvfromResultTelemetryEvent{},
 			fieldChecks: map[string]string{
 				"ret": "Return",
@@ -166,7 +168,7 @@ func TestNetworkDecoders(t *testing.T) {
 
 		// 3x sendto to catch all three address families
 		testCase{
-			decoder:      s.decodeSysSendto,
+			handler:      s.handleSysSendto,
 			expectedType: NetworkSendtoAttemptTelemetryEvent{},
 			fieldChecks: map[string]string{
 				"fd":        "FD",
@@ -174,7 +176,7 @@ func TestNetworkDecoders(t *testing.T) {
 			},
 		},
 		testCase{
-			decoder:      s.decodeSysSendto,
+			handler:      s.handleSysSendto,
 			expectedType: NetworkSendtoAttemptTelemetryEvent{},
 			fieldChecks: map[string]string{
 				"fd":        "FD",
@@ -182,7 +184,7 @@ func TestNetworkDecoders(t *testing.T) {
 			},
 		},
 		testCase{
-			decoder:      s.decodeSysSendto,
+			handler:      s.handleSysSendto,
 			expectedType: NetworkSendtoAttemptTelemetryEvent{},
 			fieldChecks: map[string]string{
 				"fd":        "FD",
@@ -190,7 +192,7 @@ func TestNetworkDecoders(t *testing.T) {
 			},
 		},
 		testCase{
-			decoder:      s.decodeSysExitSendto,
+			handler:      s.handleSysExitSendto,
 			expectedType: NetworkSendtoResultTelemetryEvent{},
 			fieldChecks: map[string]string{
 				"ret": "Return",
@@ -199,42 +201,46 @@ func TestNetworkDecoders(t *testing.T) {
 	}
 
 	for x, tc := range testCases {
-		data["sa_family"] = families[x%len(families)]
+		dispatched := false
+		s.dispatchFn = func(event TelemetryEvent) {
+			e, ok := event.(TelemetryEvent)
+			require.True(t, ok)
+			require.IsType(t, tc.expectedType, e)
 
-		data["common_pid"] = int32(sensorPID)
-		i, err := tc.decoder(sample, data)
-		assert.Nil(t, i)
-		assert.NoError(t, err)
+			ok = testCommonTelemetryEventData(t, sensor, e)
+			require.True(t, ok)
 
-		delete(data, "common_pid")
-		i, err = tc.decoder(sample, data)
-		require.NotNil(t, i)
-		require.NoError(t, err)
-
-		e, ok := i.(TelemetryEvent)
-		require.True(t, ok)
-		require.IsType(t, tc.expectedType, i)
-
-		ok = testCommonTelemetryEventData(t, sensor, e)
-		require.True(t, ok)
-
-		value := reflect.ValueOf(i)
-		for k, v := range tc.fieldChecks {
-			assert.Equal(t, data[k], value.FieldByName(v).Interface())
-		}
-		if _, ok := tc.fieldChecks["sa_family"]; ok {
-			switch data["sa_family"] {
-			case unix.AF_INET:
-				assert.Equal(t, data["sin_addr"], value.FieldByName("IPv4Address").Interface())
-				assert.Equal(t, data["sin_port"], value.FieldByName("IPv4Port").Interface())
-			case unix.AF_INET6:
-				assert.Equal(t, data["sin6_addr_high"], value.FieldByName("IPv6AddressHigh").Interface())
-				assert.Equal(t, data["sin6_addr_low"], value.FieldByName("IPv6AddressLow").Interface())
-				assert.Equal(t, data["sin6_port"], value.FieldByName("IPv6Port").Interface())
-			case unix.AF_LOCAL:
-				assert.Equal(t, data["sun_path"], value.FieldByName("UnixPath").Interface())
+			value := reflect.ValueOf(e)
+			for k, v := range tc.fieldChecks {
+				assert.Equal(t, data[k], value.FieldByName(v).Interface())
 			}
+			if _, ok = tc.fieldChecks["sa_family"]; ok {
+				switch data["sa_family"] {
+				case unix.AF_INET:
+					assert.Equal(t, data["sin_addr"], value.FieldByName("IPv4Address").Interface())
+					assert.Equal(t, data["sin_port"], value.FieldByName("IPv4Port").Interface())
+				case unix.AF_INET6:
+					assert.Equal(t, data["sin6_addr_high"], value.FieldByName("IPv6AddressHigh").Interface())
+					assert.Equal(t, data["sin6_addr_low"], value.FieldByName("IPv6AddressLow").Interface())
+					assert.Equal(t, data["sin6_port"], value.FieldByName("IPv6Port").Interface())
+				case unix.AF_LOCAL:
+					assert.Equal(t, data["sun_path"], value.FieldByName("UnixPath").Interface())
+				}
+			}
+			dispatched = true
 		}
+
+		data["sa_family"] = families[x%len(families)]
+		setSampleRawData(sample, data)
+		eventid, _ := s.addTestEventSink(t, nil)
+
+		sample.TID = uint32(sensorPID)
+		tc.handler(eventid, sample)
+		require.False(t, dispatched)
+
+		sample.TID = 0
+		tc.handler(eventid, sample)
+		require.True(t, dispatched)
 	}
 }
 
@@ -283,11 +289,6 @@ func TestNetworkEventRegistration(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	e := expression.Equal(expression.Identifier("foo"), expression.Value("bar"))
-	expr, err := expression.NewExpression(e)
-	require.NotNil(t, expr)
-	require.NoError(t, err)
-
 	type testCase struct {
 		name    string
 		prepare func(*testing.T, *Subscription, uint64)
@@ -311,12 +312,6 @@ func TestNetworkEventRegistration(t *testing.T) {
 		s := newTestSubscription(t, sensor)
 		v := reflect.ValueOf(s)
 		m := v.MethodByName(tc.name)
-
-		if tc.prepare != nil {
-			tc.prepare(t, s, 0)
-		}
-		m.Call([]reflect.Value{reflect.ValueOf(expr)})
-		verifyNetworkEventRegistration(t, s, tc.name, -tc.count)
 
 		if tc.prepare != nil {
 			tc.prepare(t, s, 0)

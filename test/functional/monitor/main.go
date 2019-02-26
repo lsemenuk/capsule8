@@ -30,32 +30,20 @@ const (
 )
 
 var nEvents uint
-var nSamples uint
 
-func decodeSchedProcessFork(sample *perf.SampleRecord, data perf.TraceEventSampleData) (interface{}, error) {
+func handleSchedProcessFork(eventid uint64, sample *perf.Sample) {
 	nEvents++
-	glog.V(2).Infof("%+v %+v", sample, data)
-
-	return nil, nil
+	glog.V(2).Infof("eventid %d: %+v", eventid, sample)
 }
 
-func decodeSchedProcessExec(sample *perf.SampleRecord, data perf.TraceEventSampleData) (interface{}, error) {
+func handleSchedProcessExec(eventid uint64, sample *perf.Sample) {
 	nEvents++
-	glog.V(2).Infof("%+v %+v", sample, data)
-
-	return nil, nil
+	glog.V(2).Infof("eventid %d: %+v", eventid, sample)
 }
 
-func decodeDoExit(sample *perf.SampleRecord, data perf.TraceEventSampleData) (interface{}, error) {
+func handleDoExit(eventid uint64, sample *perf.Sample) {
 	nEvents++
-	glog.V(2).Infof("%+v %+v", sample, data)
-
-	return nil, nil
-}
-
-func onSamples(samples []perf.EventMonitorSample) {
-	nSamples += uint(len(samples))
-	// Do nothing
+	glog.V(2).Infof("eventid %d: %+v", eventid, sample)
 }
 
 func main() {
@@ -63,21 +51,32 @@ func main() {
 	flag.Parse()
 
 	glog.Info("Creating monitor on cgroup /docker")
-	monitor, err := perf.NewEventMonitor(perf.WithCgroup("/docker"), perf.WithFlags(0), perf.WithRingBufferNumPages(0))
+	monitor, err := perf.NewEventMonitor(
+		perf.WithCgroup("/docker"),
+		perf.WithFlags(0),
+		perf.WithRingBufferNumPages(0))
+	if err != nil {
+		glog.Fatal(err)
+	}
+
+	groupid, err := monitor.RegisterEventGroup("default", nil)
+	if err != nil {
+		glog.Fatal(err)
+	}
 
 	eventName := "sched/sched_process_fork"
-	_, err = monitor.RegisterTracepoint(eventName, decodeSchedProcessFork)
+	_, err = monitor.RegisterTracepoint(eventName, handleSchedProcessFork, groupid)
 	if err != nil {
 		glog.Fatal(err)
 	}
 
 	eventName = "sched/sched_process_exec"
-	_, err = monitor.RegisterTracepoint(eventName, decodeSchedProcessExec)
+	_, err = monitor.RegisterTracepoint(eventName, handleSchedProcessExec, groupid)
 	if err != nil {
 		glog.Fatal(err)
 	}
 
-	_, err = monitor.RegisterKprobe(exitSymbol, false, exitFetchargs, decodeDoExit)
+	_, err = monitor.RegisterKprobe(exitSymbol, false, exitFetchargs, handleDoExit, groupid)
 	if err != nil {
 		glog.Fatal(err)
 	}
@@ -96,9 +95,8 @@ func main() {
 	monitor.EnableAll()
 
 	glog.Info("Running monitor")
-	monitor.Run(onSamples)
+	monitor.Run()
 	glog.Info("Monitor stopped")
 
-	glog.Infof("Received %d samples, %d events",
-		nSamples, nEvents)
+	glog.Infof("Received %d events", nEvents)
 }

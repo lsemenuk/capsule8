@@ -20,33 +20,37 @@ import (
 	"time"
 
 	"github.com/capsule8/capsule8/pkg/expression"
-	"github.com/capsule8/capsule8/pkg/sys/perf"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestDecodeChargenEvent(t *testing.T) {
+func TestDispatchChargenEvent(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
 	s := newTestSubscription(t, sensor)
 
-	sample := &perf.SampleRecord{}
-	data := perf.TraceEventSampleData{
+	data := expression.FieldValueMap{
 		"index":      uint64(928734),
 		"characters": "character string",
 	}
-	i, err := s.decodeChargenEvent(sample, data)
-	require.NotNil(t, i)
-	require.NoError(t, err)
-	e, ok := i.(ChargenTelemetryEvent)
-	require.True(t, ok)
 
-	ok = testCommonTelemetryEventData(t, sensor, e)
-	require.True(t, ok)
-	assert.Equal(t, data["index"], e.Index)
-	assert.Equal(t, data["characters"], e.Characters)
+	dispatched := false
+	s.dispatchFn = func(event TelemetryEvent) {
+		e, ok := event.(ChargenTelemetryEvent)
+		require.True(t, ok)
+
+		ok = testCommonTelemetryEventData(t, sensor, e)
+		require.True(t, ok)
+		assert.Equal(t, data["index"], e.Index)
+		assert.Equal(t, data["characters"], e.Characters)
+		dispatched = true
+	}
+
+	eventid, _ := s.addTestEventSink(t, nil)
+	s.dispatchChargenEvent(eventid, data)
+	require.True(t, dispatched)
 }
 
 func TestGenerateCharacters(t *testing.T) {
@@ -88,16 +92,6 @@ func TestRegisterChargenEventFilter(t *testing.T) {
 
 	s = newTestSubscription(t, sensor)
 	s.RegisterChargenEventFilter(1<<16+1, nil)
-	verifyRegisterChargenEventFilter(t, s, -1)
-
-	// Invalid filter expression should fail
-	e := expression.Equal(expression.Identifier("foo"), expression.Value("bar"))
-	expr, err := expression.NewExpression(e)
-	require.NotNil(t, expr)
-	require.NoError(t, err)
-
-	s = newTestSubscription(t, sensor)
-	s.RegisterChargenEventFilter(32, expr)
 	verifyRegisterChargenEventFilter(t, s, -1)
 
 	// This should succeed

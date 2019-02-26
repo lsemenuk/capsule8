@@ -17,7 +17,7 @@ package main
 /*
 EXAMPLES
 
-$ sudo ./kprobe -output 'sockfd=%di sin_family=+0(%si):u16 sin_port=+2(%si):u16 sin_addr=+4(%si):u32' SyS_connect
+$ sudo ./kprobe -output 'sockfd=%di sin_family=+0(%si):u16 sin_port=+2(%si):u16 sin_addr=+4(%si):u32' sys_connect
 {"__probe_ip":18446744072118372864,"common_flags":1,"common_pid":11267,"common_preempt_count":0,"common_type":1627,"sin_addr":16777343,"sin_family":2,"sin_port":53764,"sockfd":3}
 [...]
 
@@ -37,7 +37,7 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 )
 
 var config struct {
@@ -78,7 +78,7 @@ func dialer(addr string, timeout time.Duration) (net.Conn, error) {
 	return net.DialTimeout(network, address, timeout)
 }
 
-func createSubscription() *api.Subscription {
+func createSubscription() *telemetryAPI.Subscription {
 	arguments := make(map[string]string)
 
 	if len(config.fetchargs) > 0 {
@@ -88,22 +88,22 @@ func createSubscription() *api.Subscription {
 		}
 	}
 
-	kernelCallEvents := []*api.KernelFunctionCallFilter{
+	kernelCallEvents := []*telemetryAPI.KernelFunctionCallFilter{
 		//
 		// Install a kprobe on connect(2)
 		//
-		&api.KernelFunctionCallFilter{
-			Type:      api.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_ENTER,
+		&telemetryAPI.KernelFunctionCallFilter{
+			Type:      telemetryAPI.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_ENTER,
 			Symbol:    config.symbol,
 			Arguments: arguments,
 		},
 	}
 
-	eventFilter := &api.EventFilter{
+	eventFilter := &telemetryAPI.EventFilter{
 		KernelEvents: kernelCallEvents,
 	}
 
-	sub := &api.Subscription{
+	sub := &telemetryAPI.Subscription{
 		EventFilter: eventFilter,
 	}
 
@@ -123,14 +123,14 @@ func main() {
 		grpc.WithDialer(dialer),
 		grpc.WithInsecure())
 
-	c := api.NewTelemetryServiceClient(conn)
+	c := telemetryAPI.NewTelemetryServiceClient(conn)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "grpc.Dial: %s\n", err)
 		os.Exit(1)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	stream, err := c.GetEvents(ctx, &api.GetEventsRequest{
+	stream, err := c.GetEvents(ctx, &telemetryAPI.GetEventsRequest{
 		Subscription: createSubscription(),
 	})
 
@@ -149,7 +149,8 @@ func main() {
 	}()
 
 	for {
-		ev, err := stream.Recv()
+		var ev *telemetryAPI.GetEventsResponse
+		ev, err = stream.Recv()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Recv: %s\n", err)
 			os.Exit(1)

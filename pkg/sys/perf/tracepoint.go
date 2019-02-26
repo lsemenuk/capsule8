@@ -16,7 +16,6 @@ package perf
 
 import (
 	"bufio"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -25,91 +24,78 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unsafe"
+
+	"github.com/capsule8/capsule8/pkg/expression"
 
 	"github.com/golang/glog"
 )
 
-// TraceEventSampleData is a type alias for map[string]interface{}, which is
-// the representation of sample data parsed from a Linux kernel sample.
-type TraceEventSampleData map[string]interface{}
-
 // TraceEventFormat represents the format of a kernel tracing event.
-type TraceEventFormat []traceEventField
+type TraceEventFormat map[string]TraceEventField
 
-const (
-	_ int32 = iota
-
-	// TraceEventFieldTypeString is a string.
-	TraceEventFieldTypeString
-
-	// TraceEventFieldTypeSignedInt8 is an 8-bit signed integer.
-	TraceEventFieldTypeSignedInt8
-	// TraceEventFieldTypeSignedInt16 is a 16-bit signed integer.
-	TraceEventFieldTypeSignedInt16
-	// TraceEventFieldTypeSignedInt32 is a 32-bit signed integer.
-	TraceEventFieldTypeSignedInt32
-	// TraceEventFieldTypeSignedInt64 is a 64-bit signed integer.
-	TraceEventFieldTypeSignedInt64
-
-	// TraceEventFieldTypeUnsignedInt8 is an 8-bit unsigned integer.
-	TraceEventFieldTypeUnsignedInt8
-	// TraceEventFieldTypeUnsignedInt16 is a 16-bit unsigned integer.
-	TraceEventFieldTypeUnsignedInt16
-	// TraceEventFieldTypeUnsignedInt32 is a 32-bit unsigned integer.
-	TraceEventFieldTypeUnsignedInt32
-	// TraceEventFieldTypeUnsignedInt64 is a 64-bit unsigned integer.
-	TraceEventFieldTypeUnsignedInt64
-)
-
-type traceEventField struct {
+// TraceEventField represents a single field in a TraceEventFormat.
+type TraceEventField struct {
+	// FieldName is the name of the field.
 	FieldName string
-	TypeName  string
-	Offset    int
-	Size      int
-	IsSigned  bool
-
-	dataType     int32 // data type constant from above
-	dataTypeSize int
-	dataLocSize  int
-	arraySize    int // 0 == [] array, >0 == # elements
+	// TypeName is the name of the field's type.
+	TypeName string
+	// Offset is the byte offset at which the field data begins.
+	Offset int
+	// Size is the number of bytes that make up the entirety of the field's
+	// data.
+	Size int
+	// IsSigned is true if the field is signed; otherwise, it is false.
+	IsSigned bool
+	// DataType is the data type of this field.
+	DataType expression.ValueType
+	// DataTypeSize is the size of the data type. For arrays, this is the
+	// size of each element. For scalars, this is the same as Size.
+	DataTypeSize int
+	// DataLocSize is the size of data location information, if present.
+	// This is used for strings and dynamically sized arrays.
+	DataLocSize int
+	// If non-zero, this specifies the length of a fixed-size array, with
+	// data present inline rather than using DataLocSize.
+	ArraySize int
 }
 
-func (field *traceEventField) setTypeFromSizeAndSign(isArray bool, arraySize int) bool {
+func (field *TraceEventField) setTypeFromSizeAndSign(isArray bool, arraySize int) bool {
 	if isArray {
 		if arraySize == -1 {
 			// If this is an array of unknown size, we have to
 			// skip it, because the field size is ambiguous
 			return true
 		}
-		field.dataTypeSize = field.Size / arraySize
+		field.DataTypeSize = field.Size / arraySize
 	} else {
-		field.dataTypeSize = field.Size
+		field.DataTypeSize = field.Size
 	}
 
-	switch field.dataTypeSize {
+	switch field.DataTypeSize {
 	case 1:
 		if field.IsSigned {
-			field.dataType = TraceEventFieldTypeSignedInt8
+			field.DataType = expression.ValueTypeSignedInt8
 		} else {
-			field.dataType = TraceEventFieldTypeUnsignedInt8
+			field.DataType = expression.ValueTypeUnsignedInt8
 		}
 	case 2:
 		if field.IsSigned {
-			field.dataType = TraceEventFieldTypeSignedInt16
+			field.DataType = expression.ValueTypeSignedInt16
 		} else {
-			field.dataType = TraceEventFieldTypeUnsignedInt16
+			field.DataType = expression.ValueTypeUnsignedInt16
 		}
 	case 4:
 		if field.IsSigned {
-			field.dataType = TraceEventFieldTypeSignedInt32
+			field.DataType = expression.ValueTypeSignedInt32
 		} else {
-			field.dataType = TraceEventFieldTypeUnsignedInt32
+			field.DataType = expression.ValueTypeUnsignedInt32
 		}
 	case 8:
 		if field.IsSigned {
-			field.dataType = TraceEventFieldTypeSignedInt64
+			field.DataType = expression.ValueTypeSignedInt64
 		} else {
-			field.dataType = TraceEventFieldTypeUnsignedInt64
+			field.DataType = expression.ValueTypeUnsignedInt64
 		}
 	default:
 		// We can't figure out the type from the information given to
@@ -120,7 +106,7 @@ func (field *traceEventField) setTypeFromSizeAndSign(isArray bool, arraySize int
 	return false
 }
 
-func (field *traceEventField) parseTypeName(s string, isArray bool, arraySize int) bool {
+func (field *TraceEventField) parseTypeName(s string, isArray bool, arraySize int) bool {
 	if strings.HasPrefix(s, "const ") {
 		s = s[6:]
 	}
@@ -140,99 +126,99 @@ func (field *traceEventField) parseTypeName(s string, isArray bool, arraySize in
 		skip := field.setTypeFromSizeAndSign(isArray, arraySize)
 		if skip {
 			if field.IsSigned {
-				field.dataType = TraceEventFieldTypeSignedInt32
+				field.DataType = expression.ValueTypeSignedInt32
 			} else {
-				field.dataType = TraceEventFieldTypeUnsignedInt32
+				field.DataType = expression.ValueTypeUnsignedInt32
 			}
-			field.dataTypeSize = 4
+			field.DataTypeSize = 4
 		}
 		return false
 	case "char", "signed char", "unsigned char":
 		if field.IsSigned {
-			field.dataType = TraceEventFieldTypeSignedInt8
+			field.DataType = expression.ValueTypeSignedInt8
 		} else {
-			field.dataType = TraceEventFieldTypeUnsignedInt8
+			field.DataType = expression.ValueTypeUnsignedInt8
 		}
-		field.dataTypeSize = 1
+		field.DataTypeSize = 1
 		return false
 	case "short", "signed short", "unsigned short":
 		if field.IsSigned {
-			field.dataType = TraceEventFieldTypeSignedInt16
+			field.DataType = expression.ValueTypeSignedInt16
 		} else {
-			field.dataType = TraceEventFieldTypeUnsignedInt16
+			field.DataType = expression.ValueTypeUnsignedInt16
 		}
-		field.dataTypeSize = 2
+		field.DataTypeSize = 2
 		return false
 	case "long", "signed long", "unsigned long":
 		skip := field.setTypeFromSizeAndSign(isArray, arraySize)
 		if skip {
 			// Assume a 64-bit kernel
 			if field.IsSigned {
-				field.dataType = TraceEventFieldTypeSignedInt64
+				field.DataType = expression.ValueTypeSignedInt64
 			} else {
-				field.dataType = TraceEventFieldTypeUnsignedInt64
+				field.DataType = expression.ValueTypeUnsignedInt64
 			}
-			field.dataTypeSize = 8
+			field.DataTypeSize = 8
 		}
 		return false
 	case "long long", "signed long long", "unsigned long long":
 		if field.IsSigned {
-			field.dataType = TraceEventFieldTypeSignedInt64
+			field.DataType = expression.ValueTypeSignedInt64
 		} else {
-			field.dataType = TraceEventFieldTypeUnsignedInt64
+			field.DataType = expression.ValueTypeUnsignedInt64
 		}
-		field.dataTypeSize = 8
+		field.DataTypeSize = 8
 		return false
 
 	// Fixed-size types
 	case "s8", "__s8", "int8_t", "__int8_t":
-		field.dataType = TraceEventFieldTypeSignedInt8
-		field.dataTypeSize = 1
+		field.DataType = expression.ValueTypeSignedInt8
+		field.DataTypeSize = 1
 		return false
 	case "u8", "__u8", "uint8_t", "__uint8_t":
-		field.dataType = TraceEventFieldTypeUnsignedInt8
-		field.dataTypeSize = 1
+		field.DataType = expression.ValueTypeUnsignedInt8
+		field.DataTypeSize = 1
 		return false
 	case "s16", "__s16", "int16_t", "__int16_t":
-		field.dataType = TraceEventFieldTypeSignedInt16
-		field.dataTypeSize = 2
+		field.DataType = expression.ValueTypeSignedInt16
+		field.DataTypeSize = 2
 		return false
 	case "u16", "__u16", "uint16_t", "__uint16_t":
-		field.dataType = TraceEventFieldTypeUnsignedInt16
-		field.dataTypeSize = 2
+		field.DataType = expression.ValueTypeUnsignedInt16
+		field.DataTypeSize = 2
 		return false
 	case "s32", "__s32", "int32_t", "__int32_t":
-		field.dataType = TraceEventFieldTypeSignedInt32
-		field.dataTypeSize = 4
+		field.DataType = expression.ValueTypeSignedInt32
+		field.DataTypeSize = 4
 		return false
 	case "u32", "__u32", "uint32_t", "__uint32_t":
-		field.dataType = TraceEventFieldTypeUnsignedInt32
-		field.dataTypeSize = 4
+		field.DataType = expression.ValueTypeUnsignedInt32
+		field.DataTypeSize = 4
 		return false
 	case "s64", "__s64", "int64_t", "__int64_t":
-		field.dataType = TraceEventFieldTypeSignedInt64
-		field.dataTypeSize = 8
+		field.DataType = expression.ValueTypeSignedInt64
+		field.DataTypeSize = 8
 		return false
 	case "u64", "__u64", "uint64_t", "__uint64_t":
-		field.dataType = TraceEventFieldTypeUnsignedInt64
-		field.dataTypeSize = 8
+		field.DataType = expression.ValueTypeUnsignedInt64
+		field.DataTypeSize = 8
 		return false
 
 		/*
 			// Known kernel typedefs in 4.10
 			case "clockid_t", "pid_t", "xfs_extnum_t":
-				field.dataType = TraceEventFieldTypeSignedInt32
-				field.dataTypeSize = 4
+				field.DataType = expression.ValueTypeSignedInt32
+				field.DataTypeSize = 4
 			case "dev_t", "gfp_t", "gid_t", "isolate_mode_t", "tid_t", "uid_t",
 				"ext4_lblk_t",
 				"xfs_agblock_t", "xfs_agino_t", "xfs_agnumber_t", "xfs_btnum_t",
 				"xfs_dahash_t", "xfs_exntst_t", "xfs_extlen_t", "xfs_lookup_t",
 				"xfs_nlink_t", "xlog_tid_t":
-				field.dataType = TraceEventFieldTypeUnsignedInt32
-				field.dataTypeSize = 4
+				field.DataType = expression.ValueTypeUnsignedInt32
+				field.DataTypeSize = 4
 			case "loff_t", "xfs_daddr_t", "xfs_fsize_t", "xfs_lsn_t", "xfs_off_t":
-				field.dataType = TraceEventFieldTypeSignedInt64
-				field.dataTypeSize = 8
+				field.DataType = expression.ValueTypeSignedInt64
+				field.DataTypeSize = 8
 			case "aio_context_t", "blkcnt_t", "cap_user_data_t",
 				"cap_user_header_t", "cputime_t", "dma_addr_t", "fl_owner_t",
 				"gfn_t", "gpa_t", "gva_t", "ino_t", "key_serial_t", "key_t",
@@ -241,16 +227,16 @@ func (field *traceEventField) parseTypeName(s string, isArray bool, arraySize in
 				"timer_t", "umode_t",
 				"ext4_fsblk_t",
 				"xfs_ino_t", "xfs_fileoff_t", "xfs_fsblock_t", "xfs_filblks_t":
-				field.dataType = TraceEventFieldTypeUnsignedInt64
-				field.dataTypeSize = 8
+				field.DataType = expression.ValueTypeUnsignedInt64
+				field.DataTypeSize = 8
 
 			case "xen_mc_callback_fn_t":
 				// This is presumably a pointer type
 				return true
 
 			case "uuid_be", "uuid_le":
-				field.dataType = TraceEventFieldTypeUnsignedInt8
-				field.dataTypeSize = 1
+				field.DataType = expression.ValueTypeUnsignedInt8
+				field.DataTypeSize = 1
 				field.arraySize = 16
 				return false
 		*/
@@ -290,11 +276,11 @@ func (field *traceEventField) parseTypeName(s string, isArray bool, arraySize in
 
 var linuxArraySizeSanityWarning = false
 
-func (field *traceEventField) parseTypeAndName(s string) (bool, error) {
+func (field *TraceEventField) parseTypeAndName(s string) (bool, error) {
 	s = strings.TrimSpace(s)
 	if strings.HasPrefix(s, "__data_loc") {
 		s = s[11:]
-		field.dataLocSize = field.Size
+		field.DataLocSize = field.Size
 
 		// We have to use the type name here. The size information will
 		// always indicate how big the data_loc information is, which
@@ -311,8 +297,8 @@ func (field *traceEventField) parseTypeAndName(s string) (bool, error) {
 		field.TypeName = s
 
 		if s == "char" {
-			field.dataType = TraceEventFieldTypeString
-			field.dataTypeSize = 1
+			field.DataType = expression.ValueTypeString
+			field.DataTypeSize = 1
 		} else if field.parseTypeName(s, true, -1) {
 			return true, nil
 		}
@@ -362,11 +348,11 @@ func (field *traceEventField) parseTypeAndName(s string) (bool, error) {
 	}
 	if isArray {
 		if arraySize >= 0 {
-			field.arraySize = arraySize
+			field.ArraySize = arraySize
 
 			// Sanity check what we've determined. Various versions
 			// of the Linux kernel misreport size information.
-			if arraySize != field.Size/field.dataTypeSize {
+			if arraySize != field.Size/field.DataTypeSize {
 				if !linuxArraySizeSanityWarning {
 					linuxArraySizeSanityWarning = true
 					glog.Warning("Linux kernel tracepoint format size information is incorrect; compensating")
@@ -375,17 +361,17 @@ func (field *traceEventField) parseTypeAndName(s string) (bool, error) {
 					// I'm pretty sure this isn't actually reachable
 					return true, nil
 				}
-				field.arraySize = field.Size / field.dataTypeSize
+				field.ArraySize = field.Size / field.DataTypeSize
 			}
 		} else {
-			field.arraySize = field.Size / field.dataTypeSize
+			field.ArraySize = field.Size / field.DataTypeSize
 		}
 	}
 
 	return false, nil
 }
 
-func parseTraceEventField(line string) (field traceEventField, err error) {
+func parseTraceEventField(line string) (field TraceEventField, err error) {
 	var fieldString string
 
 	fields := strings.Split(strings.TrimSpace(line), ";")
@@ -417,12 +403,12 @@ func parseTraceEventField(line string) (field traceEventField, err error) {
 	skip, err := field.parseTypeAndName(fieldString)
 	if err == nil && skip {
 		// If a field is marked as skip, treat it as an array of bytes
-		field.dataTypeSize = 1
-		field.arraySize = field.Size
+		field.DataTypeSize = 1
+		field.ArraySize = field.Size
 		if field.IsSigned {
-			field.dataType = TraceEventFieldTypeSignedInt8
+			field.DataType = expression.ValueTypeSignedInt8
 		} else {
-			field.dataType = TraceEventFieldTypeUnsignedInt8
+			field.DataType = expression.ValueTypeUnsignedInt8
 		}
 	}
 
@@ -443,10 +429,10 @@ func getTraceEventFormat(tracingDir, name string) (uint16, TraceEventFormat, err
 func readTraceEventFormat(name string, reader io.Reader) (uint16, TraceEventFormat, error) {
 	var (
 		eventID  uint16
-		fields   TraceEventFormat
 		inFormat bool
 	)
 
+	fields := make(TraceEventFormat)
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		rawLine := scanner.Text()
@@ -462,7 +448,7 @@ func readTraceEventFormat(name string, reader io.Reader) (uint16, TraceEventForm
 				continue
 			}
 			if field, err := parseTraceEventField(line); err == nil {
-				fields = append(fields, field)
+				fields[field.FieldName] = field
 			} else {
 				glog.Infof("Couldn't parse trace event format: %v", err)
 				return 0, nil, err
@@ -486,79 +472,266 @@ func readTraceEventFormat(name string, reader io.Reader) (uint16, TraceEventForm
 	return eventID, fields, nil
 }
 
-func decodeDataType(dataType int32, rawData []byte) (interface{}, error) {
+func (field *TraceEventField) typeMismatch(
+	expectedType expression.ValueType,
+) expression.FieldTypeMismatch {
+	return expression.FieldTypeMismatch{
+		Name:         field.FieldName,
+		ExpectedType: expectedType,
+		ActualType:   field.DataType,
+	}
+}
+
+func (field *TraceEventField) dataOffsetAndLength(rawData []byte) (int, int, error) {
+	var dataLength, dataOffset int
+	switch field.DataLocSize {
+	case 4:
+		dataOffset = int(*(*uint16)(unsafe.Pointer(&rawData[field.Offset])))
+		dataLength = int(*(*uint16)(unsafe.Pointer(&rawData[field.Offset+2])))
+	case 8:
+		dataOffset = int(*(*uint32)(unsafe.Pointer(&rawData[field.Offset])))
+		dataLength = int(*(*uint32)(unsafe.Pointer(&rawData[field.Offset+4])))
+	default:
+		return 0, 0, fmt.Errorf("__data_loc size is neither 4 nor 8 (got %d)", field.DataLocSize)
+	}
+	return dataOffset, dataLength, nil
+}
+
+// Much of the following 9 methods is duplicated code, which sucks, but since Go
+// does not have a preprocessor or generics and since we are desperately trying
+// to avoid as many tiny, transient memory allocations as possible to reduce GC
+// pressure, we want to avoid using the naked interface and return explicit
+// types instead.
+
+// DecodeString decodes a string field from raw data.
+func (field *TraceEventField) DecodeString(rawData []byte) (string, error) {
+	if field.DataType != expression.ValueTypeString {
+		return "", field.typeMismatch(expression.ValueTypeString)
+	}
+	dataOffset, dataLength, err := field.dataOffsetAndLength(rawData)
+	if err != nil {
+		return "", err
+	}
+	if dataLength > 0 && rawData[dataOffset+dataLength-1] == 0 {
+		dataLength--
+	}
+	return string(rawData[dataOffset : dataOffset+dataLength]), nil
+}
+
+// DecodeSignedInt8 decodes a signed 8-bit integer field from raw data.
+func (field *TraceEventField) DecodeSignedInt8(rawData []byte) (int8, error) {
+	if field.DataType != expression.ValueTypeSignedInt8 {
+		return 0, field.typeMismatch(expression.ValueTypeSignedInt8)
+	}
+	if field.ArraySize != 0 || field.DataLocSize != 0 {
+		// XXX This isn't going to give us precisely what we want for
+		// an error message, because the actual is the right base type;
+		// it's just a vector rather than a scalar. Since the expression
+		// package has no notion of an array, it's not possible to
+		// represent this in the FieldTypeMismatch error.
+		return 0, field.typeMismatch(expression.ValueTypeSignedInt8)
+	}
+	return int8(rawData[field.Offset]), nil
+}
+
+// DecodeSignedInt16 decodes a signed 16-bit integer field from raw data.
+func (field *TraceEventField) DecodeSignedInt16(rawData []byte) (int16, error) {
+	if field.DataType != expression.ValueTypeSignedInt16 {
+		return 0, field.typeMismatch(expression.ValueTypeSignedInt16)
+	}
+	if field.ArraySize != 0 || field.DataLocSize != 0 {
+		// XXX This isn't going to give us precisely what we want for
+		// an error message, because the actual is the right base type;
+		// it's just a vector rather than a scalar. Since the expression
+		// package has no notion of an array, it's not possible to
+		// represent this in the FieldTypeMismatch error.
+		return 0, field.typeMismatch(expression.ValueTypeSignedInt16)
+	}
+	return *(*int16)(unsafe.Pointer(&rawData[field.Offset])), nil
+}
+
+// DecodeSignedInt32 decodes a signed 32-bit integer field from raw data.
+func (field *TraceEventField) DecodeSignedInt32(rawData []byte) (int32, error) {
+	if field.DataType != expression.ValueTypeSignedInt32 {
+		return 0, field.typeMismatch(expression.ValueTypeSignedInt32)
+	}
+	if field.ArraySize != 0 || field.DataLocSize != 0 {
+		// XXX This isn't going to give us precisely what we want for
+		// an error message, because the actual is the right base type;
+		// it's just a vector rather than a scalar. Since the expression
+		// package has no notion of an array, it's not possible to
+		// represent this in the FieldTypeMismatch error.
+		return 0, field.typeMismatch(expression.ValueTypeSignedInt32)
+	}
+	return *(*int32)(unsafe.Pointer(&rawData[field.Offset])), nil
+}
+
+// DecodeSignedInt64 decodes a signed 64-bit integer field from raw data.
+func (field *TraceEventField) DecodeSignedInt64(rawData []byte) (int64, error) {
+	if field.DataType != expression.ValueTypeSignedInt64 {
+		return 0, field.typeMismatch(expression.ValueTypeSignedInt64)
+	}
+	if field.ArraySize != 0 || field.DataLocSize != 0 {
+		// XXX This isn't going to give us precisely what we want for
+		// an error message, because the actual is the right base type;
+		// it's just a vector rather than a scalar. Since the expression
+		// package has no notion of an array, it's not possible to
+		// represent this in the FieldTypeMismatch error.
+		return 0, field.typeMismatch(expression.ValueTypeSignedInt64)
+	}
+	return *(*int64)(unsafe.Pointer(&rawData[field.Offset])), nil
+}
+
+// DecodeUnsignedInt8 decodes an unsigned 8-bit integer field from raw data.
+func (field *TraceEventField) DecodeUnsignedInt8(rawData []byte) (uint8, error) {
+	if field.DataType != expression.ValueTypeUnsignedInt8 {
+		return 0, field.typeMismatch(expression.ValueTypeUnsignedInt8)
+	}
+	if field.ArraySize != 0 || field.DataLocSize != 0 {
+		// XXX This isn't going to give us precisely what we want for
+		// an error message, because the actual is the right base type;
+		// it's just a vector rather than a scalar. Since the expression
+		// package has no notion of an array, it's not possible to
+		// represent this in the FieldTypeMismatch error.
+		return 0, field.typeMismatch(expression.ValueTypeUnsignedInt8)
+	}
+	return uint8(rawData[field.Offset]), nil
+}
+
+// DecodeUnsignedInt16 decodes an unsigned 16-bit integer field from raw data.
+func (field *TraceEventField) DecodeUnsignedInt16(rawData []byte) (uint16, error) {
+	if field.DataType != expression.ValueTypeUnsignedInt16 {
+		return 0, field.typeMismatch(expression.ValueTypeUnsignedInt16)
+	}
+	if field.ArraySize != 0 || field.DataLocSize != 0 {
+		// XXX This isn't going to give us precisely what we want for
+		// an error message, because the actual is the right base type;
+		// it's just a vector rather than a scalar. Since the expression
+		// package has no notion of an array, it's not possible to
+		// represent this in the FieldTypeMismatch error.
+		return 0, field.typeMismatch(expression.ValueTypeUnsignedInt16)
+	}
+	return *(*uint16)(unsafe.Pointer(&rawData[field.Offset])), nil
+}
+
+// DecodeUnsignedInt32 decodes an unsigned 32-bit integer field from raw data.
+func (field *TraceEventField) DecodeUnsignedInt32(rawData []byte) (uint32, error) {
+	if field.DataType != expression.ValueTypeUnsignedInt32 {
+		return 0, field.typeMismatch(expression.ValueTypeUnsignedInt32)
+	}
+	if field.ArraySize != 0 || field.DataLocSize != 0 {
+		// XXX This isn't going to give us precisely what we want for
+		// an error message, because the actual is the right base type;
+		// it's just a vector rather than a scalar. Since the expression
+		// package has no notion of an array, it's not possible to
+		// represent this in the FieldTypeMismatch error.
+		return 0, field.typeMismatch(expression.ValueTypeUnsignedInt32)
+	}
+	return *(*uint32)(unsafe.Pointer(&rawData[field.Offset])), nil
+}
+
+// DecodeUnsignedInt64 decodes an unsigned 64-bit integer field from raw data.
+func (field *TraceEventField) DecodeUnsignedInt64(rawData []byte) (uint64, error) {
+	if field.DataType != expression.ValueTypeUnsignedInt64 {
+		return 0, field.typeMismatch(expression.ValueTypeUnsignedInt64)
+	}
+	if field.ArraySize != 0 || field.DataLocSize != 0 {
+		// XXX This isn't going to give us precisely what we want for
+		// an error message, because the actual is the right base type;
+		// it's just a vector rather than a scalar. Since the expression
+		// package has no notion of an array, it's not possible to
+		// represent this in the FieldTypeMismatch error.
+		return 0, field.typeMismatch(expression.ValueTypeUnsignedInt64)
+	}
+	return *(*uint64)(unsafe.Pointer(&rawData[field.Offset])), nil
+}
+
+func decodeDataType(dataType expression.ValueType, rawData []byte) (interface{}, error) {
 	switch dataType {
-	case TraceEventFieldTypeString:
-		return nil, errors.New("internal error; got unexpected TraceEventFieldTypeString")
-	case TraceEventFieldTypeSignedInt8:
+	case expression.ValueTypeString:
+		return nil, errors.New("internal error; got unexpected expression.ValueTypeString")
+	case expression.ValueTypeSignedInt8:
 		return int8(rawData[0]), nil
-	case TraceEventFieldTypeSignedInt16:
-		return int16(binary.LittleEndian.Uint16(rawData)), nil
-	case TraceEventFieldTypeSignedInt32:
-		return int32(binary.LittleEndian.Uint32(rawData)), nil
-	case TraceEventFieldTypeSignedInt64:
-		return int64(binary.LittleEndian.Uint64(rawData)), nil
-	case TraceEventFieldTypeUnsignedInt8:
+	case expression.ValueTypeSignedInt16:
+		return *(*int16)(unsafe.Pointer(&rawData[0])), nil
+	case expression.ValueTypeSignedInt32:
+		return *(*int32)(unsafe.Pointer(&rawData[0])), nil
+	case expression.ValueTypeSignedInt64:
+		return *(*int64)(unsafe.Pointer(&rawData[0])), nil
+	case expression.ValueTypeUnsignedInt8:
 		return uint8(rawData[0]), nil
-	case TraceEventFieldTypeUnsignedInt16:
-		return binary.LittleEndian.Uint16(rawData), nil
-	case TraceEventFieldTypeUnsignedInt32:
-		return binary.LittleEndian.Uint32(rawData), nil
-	case TraceEventFieldTypeUnsignedInt64:
-		return binary.LittleEndian.Uint64(rawData), nil
+	case expression.ValueTypeUnsignedInt16:
+		return *(*uint16)(unsafe.Pointer(&rawData[0])), nil
+	case expression.ValueTypeUnsignedInt32:
+		return *(*uint32)(unsafe.Pointer(&rawData[0])), nil
+	case expression.ValueTypeUnsignedInt64:
+		return *(*uint64)(unsafe.Pointer(&rawData[0])), nil
 	}
 	return nil, errors.New("internal error; undefined dataType")
 }
 
+// DecodeRawData decodes a field from raw data.
+func (field *TraceEventField) DecodeRawData(rawData []byte) (interface{}, error) {
+	var arraySize, dataLength, dataOffset int
+	var err error
+
+	if field.DataLocSize > 0 {
+		dataOffset, dataLength, err = field.dataOffsetAndLength(rawData)
+		if err != nil {
+			return nil, err
+		}
+
+		if field.DataType == expression.ValueTypeString {
+			if dataLength > 0 && rawData[dataOffset+dataLength-1] == 0 {
+				dataLength--
+			}
+			return string(rawData[dataOffset : dataOffset+dataLength]), nil
+		}
+		arraySize = dataLength / field.DataTypeSize
+	} else if field.ArraySize == 0 {
+		return decodeDataType(field.DataType, rawData[field.Offset:])
+	} else {
+		arraySize = field.ArraySize
+		dataOffset = field.Offset
+		dataLength = arraySize * field.DataTypeSize
+	}
+
+	switch field.DataType {
+	case expression.ValueTypeSignedInt8:
+		array := make([]int8, arraySize)
+		var slice = struct {
+			addr     uintptr
+			len, cap int
+		}{uintptr(unsafe.Pointer(&rawData[dataOffset])), arraySize, arraySize}
+		copy(array, *(*[]int8)(unsafe.Pointer(&slice)))
+		return array, nil
+	case expression.ValueTypeUnsignedInt8:
+		array := make([]uint8, arraySize)
+		copy(array, rawData[dataOffset:])
+		return array, nil
+	default:
+		array := make([]interface{}, arraySize)
+		for i := 0; i < arraySize; i++ {
+			array[i], err = decodeDataType(field.DataType, rawData[dataOffset:])
+			if err != nil {
+				return nil, err
+			}
+			dataOffset += field.DataTypeSize
+		}
+		return array, nil
+	}
+}
+
 // DecodeRawData decodes a buffer of raw bytes according to the kernel defined
 // format that has been parsed from the tracing filesystem.
-func (f TraceEventFormat) DecodeRawData(rawData []byte) (TraceEventSampleData, error) {
-	data := make(TraceEventSampleData)
+func (f TraceEventFormat) DecodeRawData(rawData []byte) (expression.FieldValueMap, error) {
+	data := make(expression.FieldValueMap)
 	for _, field := range f {
-		var arraySize, dataLength, dataOffset int
 		var err error
-
-		if field.dataLocSize > 0 {
-			switch field.dataLocSize {
-			case 4:
-				dataOffset = int(binary.LittleEndian.Uint16(rawData[field.Offset:]))
-				dataLength = int(binary.LittleEndian.Uint16(rawData[field.Offset+2:]))
-			case 8:
-				dataOffset = int(binary.LittleEndian.Uint32(rawData[field.Offset:]))
-				dataLength = int(binary.LittleEndian.Uint32(rawData[field.Offset+4:]))
-			default:
-				return nil, fmt.Errorf("__data_loc size is neither 4 nor 8 (got %d)", field.dataLocSize)
-			}
-
-			if field.dataType == TraceEventFieldTypeString {
-				if dataLength > 0 && rawData[dataOffset+dataLength-1] == 0 {
-					dataLength--
-				}
-				data[field.FieldName] = string(rawData[dataOffset : dataOffset+dataLength])
-				continue
-			}
-			arraySize = dataLength / field.dataTypeSize
-		} else if field.arraySize == 0 {
-			data[field.FieldName], err = decodeDataType(field.dataType, rawData[field.Offset:])
-			if err != nil {
-				return nil, err
-			}
-			continue
-		} else {
-			arraySize = field.arraySize
-			dataOffset = field.Offset
-			dataLength = arraySize * field.dataTypeSize
+		data[field.FieldName], err = field.DecodeRawData(rawData)
+		if err != nil {
+			return nil, err
 		}
-
-		var array = make([]interface{}, arraySize)
-		for i := 0; i < arraySize; i++ {
-			array[i], err = decodeDataType(field.dataType, rawData[dataOffset:])
-			if err != nil {
-				return nil, err
-			}
-			dataOffset += field.dataTypeSize
-		}
-		data[field.FieldName] = array
 	}
 
 	return data, nil

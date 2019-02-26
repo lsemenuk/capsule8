@@ -15,14 +15,15 @@
 package expression
 
 import (
-	"reflect"
 	"testing"
 	"time"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
+
+	"github.com/stretchr/testify/assert"
 )
 
-func callConvertValue(value *api.Value) (v valueExpr, err error) {
+func callConvertValue(value *telemetryAPI.Value) (v *valueExpr, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if e, ok := r.(exprError); ok {
@@ -33,49 +34,43 @@ func callConvertValue(value *api.Value) (v valueExpr, err error) {
 		}
 	}()
 
-	v = convertValue(value).(valueExpr)
+	v = convertValue(value).(*valueExpr)
 	return
 }
 
 func TestConvertValue(t *testing.T) {
-	values := map[api.ValueType]interface{}{
-		api.ValueType_STRING:    "string",
-		api.ValueType_SINT8:     int8(8),
-		api.ValueType_SINT16:    int16(8),
-		api.ValueType_SINT32:    int32(8),
-		api.ValueType_SINT64:    int64(8),
-		api.ValueType_UINT8:     uint8(8),
-		api.ValueType_UINT16:    uint16(8),
-		api.ValueType_UINT32:    uint32(8),
-		api.ValueType_UINT64:    uint64(8),
-		api.ValueType_BOOL:      true,
-		api.ValueType_DOUBLE:    8.0,
-		api.ValueType_TIMESTAMP: time.Unix(8, 8),
+	values := map[telemetryAPI.ValueType]interface{}{
+		telemetryAPI.ValueType_STRING:    "string",
+		telemetryAPI.ValueType_SINT8:     int8(8),
+		telemetryAPI.ValueType_SINT16:    int16(8),
+		telemetryAPI.ValueType_SINT32:    int32(8),
+		telemetryAPI.ValueType_SINT64:    int64(8),
+		telemetryAPI.ValueType_UINT8:     uint8(8),
+		telemetryAPI.ValueType_UINT16:    uint16(8),
+		telemetryAPI.ValueType_UINT32:    uint32(8),
+		telemetryAPI.ValueType_UINT64:    uint64(8),
+		telemetryAPI.ValueType_BOOL:      true,
+		telemetryAPI.ValueType_DOUBLE:    8.0,
+		telemetryAPI.ValueType_TIMESTAMP: time.Unix(8, 8),
 	}
 
 	for valueType, value := range values {
-		if _, err := callConvertValue(&api.Value{Type: valueType}); err == nil {
-			t.Errorf("convertValue failure for %s",
-				api.ValueType_name[int32(valueType)])
-		}
+		testCase := telemetryAPI.ValueType_name[int32(valueType)]
 
-		if v, err := callConvertValue(NewValue(value)); err != nil {
-			t.Errorf("convertValue failure for %s: %v",
-				api.ValueType_name[int32(valueType)], err)
-		} else if !reflect.DeepEqual(value, v.v) {
-			t.Errorf("convertValue failure for %s: %v (%s) vs. %v (%s)",
-				api.ValueType_name[int32(valueType)],
-				value, reflect.TypeOf(value),
-				v.v, reflect.TypeOf(v.v))
+		_, err := callConvertValue(&telemetryAPI.Value{Type: valueType})
+		assert.Error(t, err, testCase)
+
+		v, err := callConvertValue(NewValue(value))
+		if assert.NoError(t, err, testCase) {
+			assert.Equal(t, v.v, value, testCase)
 		}
 	}
 
-	if _, err := callConvertValue(&api.Value{Type: 987234}); err == nil {
-		t.Error("convertValue failure")
-	}
+	_, err := callConvertValue(&telemetryAPI.Value{Type: 987234})
+	assert.Error(t, err)
 }
 
-func callConvertBinaryOp(expr *api.Expression, op binaryOp) (b binaryExpr, err error) {
+func callConvertBinaryOp(expr *telemetryAPI.Expression, types FieldTypeMap, op binaryOp) (b *binaryExpr, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if e, ok := r.(exprError); ok {
@@ -86,58 +81,54 @@ func callConvertBinaryOp(expr *api.Expression, op binaryOp) (b binaryExpr, err e
 		}
 	}()
 
-	b = convertBinaryOp(expr, op).(binaryExpr)
+	b = convertBinaryOp(expr, types, op).(*binaryExpr)
 	return
 }
 
 func TestConvertBinaryOp(t *testing.T) {
-	expr := &api.Expression{Type: api.Expression_EQ}
-	if _, err := callConvertBinaryOp(expr, binaryOpEQ); err == nil {
-		t.Error("convertBinaryOp failure")
+	types := FieldTypeMap{
+		"foo": ValueTypeSignedInt32,
 	}
 
-	expr = newBinaryExpr(api.Expression_EQ, nil, nil)
-	if _, err := callConvertBinaryOp(expr, binaryOpEQ); err == nil {
-		t.Error("convertBinaryOp failure")
-	}
+	expr := &telemetryAPI.Expression{Type: telemetryAPI.Expression_EQ}
+	_, err := callConvertBinaryOp(expr, types, binaryOpEQ)
+	assert.Error(t, err)
 
-	expr = newBinaryExpr(api.Expression_EQ, Identifier("foo"), nil)
-	if _, err := callConvertBinaryOp(expr, binaryOpEQ); err == nil {
-		t.Error("convertBinaryOp failure")
-	}
+	expr = newBinaryExpr(telemetryAPI.Expression_EQ, nil, nil)
+	_, err = callConvertBinaryOp(expr, types, binaryOpEQ)
+	assert.Error(t, err)
+
+	expr = newBinaryExpr(telemetryAPI.Expression_EQ, Identifier("foo"), nil)
+	_, err = callConvertBinaryOp(expr, types, binaryOpEQ)
+	assert.Error(t, err)
 
 	lhs := Identifier("foo")
 	rhs := Value(int32(8))
-	ops := map[api.Expression_ExpressionType]binaryOp{
-		api.Expression_LOGICAL_AND: binaryOpLogicalAnd,
-		api.Expression_LOGICAL_OR:  binaryOpLogicalOr,
-		api.Expression_EQ:          binaryOpEQ,
-		api.Expression_NE:          binaryOpNE,
-		api.Expression_LT:          binaryOpLT,
-		api.Expression_LE:          binaryOpLE,
-		api.Expression_GT:          binaryOpGT,
-		api.Expression_GE:          binaryOpGE,
-		api.Expression_BITWISE_AND: binaryOpBitwiseAnd,
+	ops := map[telemetryAPI.Expression_ExpressionType]binaryOp{
+		telemetryAPI.Expression_LOGICAL_AND: binaryOpLogicalAnd,
+		telemetryAPI.Expression_LOGICAL_OR:  binaryOpLogicalOr,
+		telemetryAPI.Expression_EQ:          binaryOpEQ,
+		telemetryAPI.Expression_NE:          binaryOpNE,
+		telemetryAPI.Expression_LT:          binaryOpLT,
+		telemetryAPI.Expression_LE:          binaryOpLE,
+		telemetryAPI.Expression_GT:          binaryOpGT,
+		telemetryAPI.Expression_GE:          binaryOpGE,
+		telemetryAPI.Expression_BITWISE_AND: binaryOpBitwiseAnd,
 	}
 	for apiOp, op := range ops {
+		testCase := telemetryAPI.Expression_ExpressionType_name[int32(apiOp)]
 		expr = newBinaryExpr(apiOp, lhs, rhs)
-		if b, err := callConvertBinaryOp(expr, op); err != nil {
-			t.Errorf("convertBinaryOp failure for %s: %v",
-				api.Expression_ExpressionType_name[int32(apiOp)], err)
-		} else if b.op != op {
-			t.Errorf("convertBinaryOp failure for %s",
-				api.Expression_ExpressionType_name[int32(apiOp)])
-		} else if !reflect.DeepEqual(b.x, identExpr{name: "foo"}) {
-			t.Errorf("convertBinaryOp failure for %s",
-				api.Expression_ExpressionType_name[int32(apiOp)])
-		} else if !reflect.DeepEqual(b.y, valueExpr{v: int32(8)}) {
-			t.Errorf("convertBinaryOp failure for %s",
-				api.Expression_ExpressionType_name[int32(apiOp)])
+		var b *binaryExpr
+		b, err = callConvertBinaryOp(expr, types, op)
+		if assert.NoError(t, err, testCase) {
+			assert.Equal(t, op, b.op, testCase)
+			assert.Equal(t, &identExpr{name: "foo", t: ValueTypeSignedInt32}, b.x, testCase)
+			assert.Equal(t, &valueExpr{v: int32(8)}, b.y, testCase)
 		}
 	}
 }
 
-func callConvertUnaryOp(expr *api.Expression, op unaryOp) (u unaryExpr, err error) {
+func callConvertUnaryOp(expr *telemetryAPI.Expression, types FieldTypeMap, op unaryOp) (u *unaryExpr, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if e, ok := r.(exprError); ok {
@@ -148,58 +139,62 @@ func callConvertUnaryOp(expr *api.Expression, op unaryOp) (u unaryExpr, err erro
 		}
 	}()
 
-	u = convertUnaryOp(expr, op).(unaryExpr)
+	u = convertUnaryOp(expr, types, op).(*unaryExpr)
 	return
 }
 
 func TestConvertUnaryOp(t *testing.T) {
-	expr := &api.Expression{Type: api.Expression_IS_NULL}
-	if _, err := callConvertUnaryOp(expr, unaryOpIsNull); err == nil {
-		t.Error("convertUnaryOp failure")
+	types := FieldTypeMap{
+		"foo": ValueTypeSignedInt32,
 	}
 
+	expr := &telemetryAPI.Expression{Type: telemetryAPI.Expression_IS_NULL}
+	_, err := callConvertUnaryOp(expr, types, unaryOpIsNull)
+	assert.Error(t, err)
+
 	operand := Identifier("foo")
-	ops := map[api.Expression_ExpressionType]unaryOp{
-		api.Expression_IS_NULL:     unaryOpIsNull,
-		api.Expression_IS_NOT_NULL: unaryOpIsNotNull,
+	ops := map[telemetryAPI.Expression_ExpressionType]unaryOp{
+		telemetryAPI.Expression_IS_NULL:     unaryOpIsNull,
+		telemetryAPI.Expression_IS_NOT_NULL: unaryOpIsNotNull,
 	}
 	for apiOp, op := range ops {
+		testCase := telemetryAPI.Expression_ExpressionType_name[int32(apiOp)]
 		expr = newUnaryExpr(apiOp, operand)
-		if b, err := callConvertUnaryOp(expr, op); err != nil {
-			t.Errorf("convertUnaryOp failure for %s: %v",
-				api.Expression_ExpressionType_name[int32(apiOp)], err)
-		} else if b.op != op {
-			t.Errorf("convertUnaryOp failure for %s",
-				api.Expression_ExpressionType_name[int32(apiOp)])
-		} else if !reflect.DeepEqual(b.x, identExpr{name: "foo"}) {
-			t.Errorf("convertUnaryOp failure for %s",
-				api.Expression_ExpressionType_name[int32(apiOp)])
+		var u *unaryExpr
+		u, err = callConvertUnaryOp(expr, types, op)
+		if assert.NoError(t, err, testCase) {
+			assert.Equal(t, op, u.op, testCase)
+			assert.Equal(t, &identExpr{name: "foo", t: ValueTypeSignedInt32}, u.x, testCase)
 		}
 	}
 }
 
 func TestConvertExpression(t *testing.T) {
-	e := &api.Expression{Type: api.Expression_IDENTIFIER}
-	if _, err := convertExpression(e); err == nil {
-		t.Error("convertExpression failure")
-	}
-	e = Identifier("foo$")
-	if _, err := convertExpression(e); err == nil {
-		t.Error("convertExpression failure")
+	types := FieldTypeMap{
+		"foo": ValueTypeUnsignedInt32,
 	}
 
-	e = &api.Expression{Type: api.Expression_VALUE}
-	if _, err := convertExpression(e); err == nil {
-		t.Error("convertExpression failure")
-	}
+	e := &telemetryAPI.Expression{Type: telemetryAPI.Expression_IDENTIFIER}
+	_, err := convertExpression(e, types)
+	assert.Error(t, err)
+	e = Identifier("foo$")
+	_, err = convertExpression(e, types)
+	assert.Error(t, err)
+	e = Identifier("bar")
+	_, err = convertExpression(e, types)
+	assert.Error(t, err)
+
+	e = &telemetryAPI.Expression{Type: telemetryAPI.Expression_VALUE}
+	_, err = convertExpression(e, types)
+	assert.Error(t, err)
 
 	apiLHS := Identifier("foo")
-	astLHS := identExpr{name: "foo"}
+	astLHS := &identExpr{name: "foo", t: ValueTypeUnsignedInt32}
 	apiRHS := Value(uint32(8))
-	astRHS := valueExpr{v: uint32(8)}
+	astRHS := &valueExpr{v: uint32(8)}
 
 	type testCase struct {
-		apiExpr *api.Expression
+		apiExpr *telemetryAPI.Expression
 		astExpr expr
 	}
 	testCases := []testCase{
@@ -207,61 +202,59 @@ func TestConvertExpression(t *testing.T) {
 		testCase{apiRHS, astRHS},
 		testCase{
 			BitwiseAnd(apiLHS, apiRHS),
-			binaryExpr{astLHS, astRHS, binaryOpBitwiseAnd},
+			&binaryExpr{astLHS, astRHS, binaryOpBitwiseAnd},
 		},
 		testCase{
 			Equal(apiLHS, apiRHS),
-			binaryExpr{astLHS, astRHS, binaryOpEQ},
+			&binaryExpr{astLHS, astRHS, binaryOpEQ},
 		},
 		testCase{
 			NotEqual(apiLHS, apiRHS),
-			binaryExpr{astLHS, astRHS, binaryOpNE},
+			&binaryExpr{astLHS, astRHS, binaryOpNE},
 		},
 		testCase{
 			LessThan(apiLHS, apiRHS),
-			binaryExpr{astLHS, astRHS, binaryOpLT},
+			&binaryExpr{astLHS, astRHS, binaryOpLT},
 		},
 		testCase{
 			LessThanEqualTo(apiLHS, apiRHS),
-			binaryExpr{astLHS, astRHS, binaryOpLE},
+			&binaryExpr{astLHS, astRHS, binaryOpLE},
 		},
 		testCase{
 			GreaterThan(apiLHS, apiRHS),
-			binaryExpr{astLHS, astRHS, binaryOpGT},
+			&binaryExpr{astLHS, astRHS, binaryOpGT},
 		},
 		testCase{
 			GreaterThanEqualTo(apiLHS, apiRHS),
-			binaryExpr{astLHS, astRHS, binaryOpGE},
+			&binaryExpr{astLHS, astRHS, binaryOpGE},
 		},
 		testCase{
 			Like(apiLHS, apiRHS),
-			binaryExpr{astLHS, astRHS, binaryOpLike},
+			&binaryExpr{astLHS, astRHS, binaryOpLike},
 		},
 		testCase{
 			IsNull(apiLHS),
-			unaryExpr{astLHS, unaryOpIsNull},
+			&unaryExpr{astLHS, unaryOpIsNull},
 		},
 		testCase{
 			IsNotNull(apiLHS),
-			unaryExpr{astLHS, unaryOpIsNotNull},
+			&unaryExpr{astLHS, unaryOpIsNotNull},
 		},
 		testCase{
 			LogicalAnd(apiLHS, apiRHS),
-			binaryExpr{astLHS, astRHS, binaryOpLogicalAnd},
+			&binaryExpr{astLHS, astRHS, binaryOpLogicalAnd},
 		},
 		testCase{
 			LogicalOr(apiLHS, apiRHS),
-			binaryExpr{astLHS, astRHS, binaryOpLogicalOr},
+			&binaryExpr{astLHS, astRHS, binaryOpLogicalOr},
 		},
 	}
 	for _, tc := range testCases {
-		if ast, err := convertExpression(tc.apiExpr); err != nil {
-			t.Errorf("convertExpression failure for %s: %v",
-				api.Expression_ExpressionType_name[int32(tc.apiExpr.Type)],
-				err)
-		} else if !reflect.DeepEqual(ast, tc.astExpr) {
-			t.Errorf("convertExpression failure for %s",
-				api.Expression_ExpressionType_name[int32(tc.apiExpr.Type)])
+		testCase := telemetryAPI.Expression_ExpressionType_name[int32(tc.apiExpr.Type)]
+		var ast expr
+		ast, err = convertExpression(tc.apiExpr, types)
+		if assert.NoError(t, err, testCase) {
+			assert.Equal(t, tc.astExpr, ast, testCase)
 		}
 	}
 }

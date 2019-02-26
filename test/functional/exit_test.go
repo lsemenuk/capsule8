@@ -19,7 +19,7 @@ import (
 	"strconv"
 	"testing"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 	"github.com/golang/glog"
 	"github.com/golang/protobuf/ptypes/wrappers"
 )
@@ -73,56 +73,56 @@ func (ct *exitTest) RunContainer(t *testing.T) {
 	ct.testContainer.Wait()
 }
 
-func (ct *exitTest) CreateSubscription(t *testing.T) *api.Subscription {
-	containerEvents := []*api.ContainerEventFilter{
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
+func (ct *exitTest) CreateSubscription(t *testing.T) *telemetryAPI.Subscription {
+	containerEvents := []*telemetryAPI.ContainerEventFilter{
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
 		},
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
 		},
-		&api.ContainerEventFilter{
-			Type: api.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
-		},
-	}
-
-	processEvents := []*api.ProcessEventFilter{
-		&api.ProcessEventFilter{
-			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_FORK,
-		},
-
-		&api.ProcessEventFilter{
-			Type:         api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
-			ExecFilename: &wrappers.StringValue{testExitProc1Filename},
-		},
-
-		&api.ProcessEventFilter{
-			Type:                api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
-			ExecFilenamePattern: &wrappers.StringValue{testExitProc2Patt},
-		},
-
-		&api.ProcessEventFilter{
-			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_EXIT,
+		&telemetryAPI.ContainerEventFilter{
+			Type: telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
 		},
 	}
 
-	eventFilter := &api.EventFilter{
+	processEvents := []*telemetryAPI.ProcessEventFilter{
+		&telemetryAPI.ProcessEventFilter{
+			Type: telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_FORK,
+		},
+
+		&telemetryAPI.ProcessEventFilter{
+			Type:         telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
+			ExecFilename: &wrappers.StringValue{Value: testExitProc1Filename},
+		},
+
+		&telemetryAPI.ProcessEventFilter{
+			Type:                telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
+			ExecFilenamePattern: &wrappers.StringValue{Value: testExitProc2Patt},
+		},
+
+		&telemetryAPI.ProcessEventFilter{
+			Type: telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXIT,
+		},
+	}
+
+	eventFilter := &telemetryAPI.EventFilter{
 		ContainerEvents: containerEvents,
 		ProcessEvents:   processEvents,
 	}
 
-	sub := &api.Subscription{
+	sub := &telemetryAPI.Subscription{
 		EventFilter: eventFilter,
 	}
 
 	return sub
 }
 
-func (ct *exitTest) HandleTelemetryEvent(t *testing.T, telemetryEvent *api.ReceivedTelemetryEvent) bool {
+func (ct *exitTest) HandleTelemetryEvent(t *testing.T, telemetryEvent *telemetryAPI.ReceivedTelemetryEvent) bool {
 	switch event := telemetryEvent.Event.Event.(type) {
-	case *api.TelemetryEvent_Container:
+	case *telemetryAPI.TelemetryEvent_Container:
 		switch event.Container.Type {
-		case api.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED:
+		case telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED:
 			if event.Container.ImageId == ct.testContainer.ImageID {
 				if len(ct.containerID) > 0 {
 					t.Error("Already saw container created")
@@ -133,7 +133,7 @@ func (ct *exitTest) HandleTelemetryEvent(t *testing.T, telemetryEvent *api.Recei
 				glog.V(1).Infof("containerID = %s", ct.containerID)
 			}
 
-		case api.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED:
+		case telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED:
 			if len(ct.containerID) > 0 &&
 				telemetryEvent.Event.ContainerId == ct.containerID {
 
@@ -148,9 +148,9 @@ func (ct *exitTest) HandleTelemetryEvent(t *testing.T, telemetryEvent *api.Recei
 			}
 		}
 
-	case *api.TelemetryEvent_Process:
+	case *telemetryAPI.TelemetryEvent_Process:
 		switch event.Process.Type {
-		case api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC:
+		case telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXEC:
 			if telemetryEvent.Event.ContainerId == ct.containerID {
 				switch event.Process.ExecFilename {
 				case testExitProc1Filename:
@@ -173,7 +173,7 @@ func (ct *exitTest) HandleTelemetryEvent(t *testing.T, telemetryEvent *api.Recei
 				}
 			}
 
-		case api.ProcessEventType_PROCESS_EVENT_TYPE_EXIT:
+		case telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXIT:
 			switch telemetryEvent.Event.ProcessId {
 			case "":
 

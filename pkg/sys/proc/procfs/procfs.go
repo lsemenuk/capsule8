@@ -51,6 +51,9 @@ type FileSystem struct {
 
 	hostProcFS     proc.FileSystem
 	hostProcFSOnce sync.Once
+
+	selfTGID int
+	selfOnce sync.Once
 }
 
 // NewFileSystem returns a new concrete procfs FileSystem instance attached to

@@ -15,34 +15,46 @@
 package procfs
 
 import (
-	"github.com/capsule8/capsule8/pkg/sys/proc"
+	"fmt"
 	"testing"
+
+	"github.com/capsule8/capsule8/pkg/sys/proc"
+
+	"github.com/stretchr/testify/assert"
 )
+
+func TestSelfTGID(t *testing.T) {
+	fs, err := NewFileSystem("testdata/proc")
+	assert.NoError(t, err)
+
+	tgid := fs.SelfTGID()
+	assert.Equal(t, 2432, tgid)
+}
 
 func TestProcessContainerID(t *testing.T) {
 	fs, err := NewFileSystem("testdata/proc")
-	ok(t, err)
+	assert.NoError(t, err)
 
 	id, err := fs.ProcessContainerID(405)
-	ok(t, err)
-	equals(t, "", id)
+	assert.NoError(t, err)
+	assert.Equal(t, "", id)
 
 	id, err = fs.ProcessContainerID(111343)
-	ok(t, err)
-	equals(t, "29923fe3b8d282573feac35570414a21546ecc64427b976b178dfa57e04500ae", id)
+	assert.NoError(t, err)
+	assert.Equal(t, "29923fe3b8d282573feac35570414a21546ecc64427b976b178dfa57e04500ae", id)
 
 	_, err = fs.ProcessContainerID(322)
-	assert(t, err != nil, "Expected non-nil error return")
+	assert.Error(t, err)
 }
 
 func TestProcessCommandLine(t *testing.T) {
 	fs, err := NewFileSystem("testdata/proc")
-	ok(t, err)
+	assert.NoError(t, err)
 
 	expectedCommandLine := []string{"/sbin/init", "noprompt"}
 	actualCommandLine, err := fs.ProcessCommandLine(1)
-	ok(t, err)
-	equals(t, expectedCommandLine, actualCommandLine)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedCommandLine, actualCommandLine)
 
 	expectedCommandLine = []string{
 		"vmware-vmblock-fuse",
@@ -51,16 +63,47 @@ func TestProcessCommandLine(t *testing.T) {
 		"rw,subtype=vmware-vmblock,default_permissions,allow_other,dev,suid",
 	}
 	actualCommandLine, err = fs.ProcessCommandLine(405)
-	ok(t, err)
-	equals(t, expectedCommandLine, actualCommandLine)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedCommandLine, actualCommandLine)
 
 	_, err = fs.ProcessCommandLine(322)
-	assert(t, err != nil, "Expected non-nil error return")
+	assert.Error(t, err)
+}
+
+func TestProcessMappings(t *testing.T) {
+	fs, err := NewFileSystem("testdata/proc")
+	assert.NoError(t, err)
+
+	expectedMappings := []proc.MemoryMapping{
+		proc.MemoryMapping{
+			Start: 0x55bbfdb7a000,
+			End:   0x55bbfdb7b000,
+			Path:  "/sbin/init",
+		},
+		proc.MemoryMapping{
+			Start: 0x55bbfe046000,
+			End:   0x55bbfe067000,
+			Path:  "[heap]",
+		},
+		proc.MemoryMapping{
+			Start: 0x7febb3216000,
+			End:   0x7febb3217000,
+			Path:  "",
+		},
+		proc.MemoryMapping{
+			Start: 0x7ffff8fe6000,
+			End:   0x7ffff9007000,
+			Path:  "[stack]",
+		},
+	}
+	actualMappings, err := fs.ProcessMappings(1)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedMappings, actualMappings)
 }
 
 func TestTaskControlGroups(t *testing.T) {
 	fs, err := NewFileSystem("testdata/proc")
-	ok(t, err)
+	assert.NoError(t, err)
 
 	expectedControlGroups := []proc.ControlGroup{
 		proc.ControlGroup{
@@ -121,56 +164,57 @@ func TestTaskControlGroups(t *testing.T) {
 	}
 
 	actualControlGroups, err := fs.TaskControlGroups(111343, 111343)
-	ok(t, err)
-	equals(t, expectedControlGroups, actualControlGroups)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedControlGroups, actualControlGroups)
 
 	_, err = fs.TaskControlGroups(322, 223)
-	assert(t, err != nil, "Expected non-nil error return")
+	assert.Error(t, err)
 }
 
 func TestTaskCWD(t *testing.T) {
 	fs, err := NewFileSystem("testdata/proc")
-	ok(t, err)
+	assert.NoError(t, err)
 
-	expectedCWD := "/"
+	expectedCWD := "/foo/bar"
 	actualCWD, err := fs.TaskCWD(1, 1)
-	equals(t, expectedCWD, actualCWD)
+	assert.Equal(t, expectedCWD, actualCWD)
 
 	expectedCWD = "/home/capsule8"
 	actualCWD, err = fs.TaskCWD(111343, 111343)
-	equals(t, expectedCWD, actualCWD)
+	assert.Equal(t, expectedCWD, actualCWD)
 
 	_, err = fs.TaskCWD(322, 223)
-	assert(t, err != nil, "Expected non-nil error return")
+	assert.Error(t, err)
 }
 
 func TestStartTime(t *testing.T) {
 	fs, err := NewFileSystem("testdata/proc")
-	ok(t, err)
+	assert.NoError(t, err)
 
 	expectedStartTime := int64(1134871)
 	actualStartTime, err := fs.TaskStartTime(111343, 111343)
-	equals(t, expectedStartTime, actualStartTime)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedStartTime, actualStartTime)
 
 	_, err = fs.TaskStartTime(322, 223)
-	assert(t, err != nil, "Expected non-nil error return")
+	assert.Error(t, err)
 }
 
 func TestTaskUniqueID(t *testing.T) {
 	fs, err := NewFileSystem("testdata/proc")
-	ok(t, err)
+	assert.NoError(t, err)
 
 	startTime, err := fs.TaskStartTime(405, 414)
-	ok(t, err)
+	assert.NoError(t, err)
 
-	expectedUniqueID := "aae249deb87f12637a73bb224b4a7fc6835666860232c8f21ee3cc47f9235df0"
-	actualUniqueID, err := fs.TaskUniqueID(405, 414, startTime)
-	equals(t, expectedUniqueID, actualUniqueID)
+	expectedUniqueID := fmt.Sprintf("8eb7a4c9-0b6f-4d7f-8f60-98c88eedf67c-414-%d", startTime)
+	actualUniqueID := fs.TaskUniqueID(405, 414, startTime)
+	assert.Equal(t, expectedUniqueID, actualUniqueID)
 }
 
 func TestWalkTasks(t *testing.T) {
 	fs, err := NewFileSystem("testdata/proc")
-	ok(t, err)
+	assert.NoError(t, err)
 
 	knownTasks := map[uint64]bool{
 		uint64(1)<<32 | uint64(1):           false,
@@ -187,7 +231,7 @@ func TestWalkTasks(t *testing.T) {
 		count++
 		return true
 	})
-	equals(t, len(knownTasks), count)
+	assert.Len(t, knownTasks, count)
 
 	for k, v := range knownTasks {
 		if !v {
@@ -200,7 +244,7 @@ func TestWalkTasks(t *testing.T) {
 
 func TestReadTaskStatus(t *testing.T) {
 	fs, err := NewFileSystem("testdata/proc")
-	ok(t, err)
+	assert.NoError(t, err)
 
 	type status struct {
 		Name   string   `Name`
@@ -222,9 +266,19 @@ func TestReadTaskStatus(t *testing.T) {
 
 	var actualStatus status
 	err = fs.ReadTaskStatus(405, 406, &actualStatus)
-	ok(t, err)
-	equals(t, expectedStatus, actualStatus)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedStatus, actualStatus)
 
 	err = fs.ReadTaskStatus(322, 223, &actualStatus)
-	assert(t, err != nil, "Expected non-nil error return")
+	assert.Error(t, err)
+}
+
+func TestProcessExecutable(t *testing.T) {
+	fs, err := NewFileSystem("testdata/proc")
+	assert.NoError(t, err)
+
+	// test retrieval from pid/exe
+	programPath, err := fs.ProcessExecutable(9988)
+	assert.NoError(t, err)
+	assert.Equal(t, "/usr/lib/gnome-terminal/gnome-terminal-server", programPath)
 }

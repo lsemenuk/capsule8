@@ -17,7 +17,6 @@ package sensor
 import (
 	"testing"
 
-	"github.com/capsule8/capsule8/pkg/sys"
 	"github.com/capsule8/capsule8/pkg/sys/perf"
 
 	"github.com/stretchr/testify/assert"
@@ -61,38 +60,27 @@ func TestTelemetryEventDataInitWithSample(t *testing.T) {
 	sensor := newUnitTestSensor(t)
 	defer sensor.Stop()
 
-	sample := perf.SampleRecord{
-		SampleID: 923584,
-		IP:       982734,
-		Pid:      12839,
-		Tid:      12839,
-		Time:     928347529 + uint64(sensor.bootMonotimeNanos),
-		Addr:     2389047,
-		ID:       827634,
-		StreamID: 827634,
-		CPU:      2,
-		Period:   98276345,
+	sample := &perf.Sample{
+		SampleID: perf.SampleID{
+			ID:       923584,
+			PID:      12839,
+			TID:      12839,
+			Time:     928347529 + uint64(sensor.bootMonotimeNanos),
+			CPU:      2,
+			StreamID: 827634,
+		},
+		IP:     982734,
+		Addr:   2389047,
+		Period: 98276345,
 	}
 
 	task := sensor.ProcessCache.LookupTask(12839)
-	changes := map[string]interface{}{
-		"TGID":  12839,
-		"Creds": newCredentials(1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007),
-	}
-	task.Update(changes, uint64(sys.CurrentMonotonicRaw()), sensor.ProcFS)
-
-	sampleData := []perf.TraceEventSampleData{
-		perf.TraceEventSampleData{
-			"__task__": task,
-		},
-		perf.TraceEventSampleData{
-			"common_pid": int32(12839),
-		},
-	}
+	task.TGID = 12839
+	task.Creds = newCredentials(1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007)
 
 	for x := 0; x < 2; x++ {
 		var e testTelemetryEvent
-		ok := e.InitWithSample(sensor, &sample, sampleData[x])
+		ok := e.InitWithSample(sensor, sample)
 		require.True(t, ok)
 		testCommonTelemetryEventData(t, sensor, e)
 		assert.Equal(t, task.ProcessID, e.ProcessID)

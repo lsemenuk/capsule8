@@ -15,390 +15,284 @@
 package expression
 
 import (
+	"bytes"
+	"fmt"
 	"testing"
 	"time"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 
 	"github.com/golang/protobuf/ptypes/timestamp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestExpressionStruct(t *testing.T) {
-	if _, err := NewExpression(nil); err == nil {
-		t.Error("NewExpression failure")
-	}
-
-	expr, err := NewExpression(Equal(Identifier("foo"), Value(uint8(8))))
-	if err != nil {
-		t.Errorf("NewExpression failure: %v", err)
-		return
-	}
-
-	if s := expr.String(); s != "foo = 8" {
-		t.Errorf("Expression.String failure; got %s", s)
-	}
-	if s := expr.KernelFilterString(); s != "foo == 8" {
-		t.Errorf("Expression.KernelFilterString failure; got %s", s)
-	}
-
-	if err = expr.ValidateKernelFilter(); err != nil {
-		t.Errorf("Expression.ValidateKernelFilter: %v", err)
-	}
+	_, err := ConvertExpression(nil, nil)
+	assert.Error(t, err)
 
 	types := FieldTypeMap{
 		"foo": ValueTypeUnsignedInt8,
 	}
-	if err = expr.Validate(types); err != nil {
-		t.Errorf("Expression.Validate: %v", err)
-	}
+
+	invalidExpr := Equal(Identifier("foo"), Value("string"))
+	validExpr := Equal(Identifier("foo"), Value(uint8(8)))
+
+	// Intentional type mismatch uint8 vs. string
+	_, err = ConvertExpression(invalidExpr, types)
+	assert.Error(t, err)
+
+	expr, err := ConvertExpression(validExpr, types)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+
+	assert.Equal(t, "foo = 8", expr.String())
+	assert.Equal(t, "foo == 8", expr.KernelFilterString())
+
+	err = expr.ValidateKernelFilter()
+	assert.NoError(t, err)
+
+	// Cannot bind more than once
+	err = expr.BindTypes(types)
+	assert.Error(t, err)
 
 	values := FieldValueMap{
 		"foo": uint8(8),
 	}
-	result, err := expr.Evaluate(types, values)
-	if err != nil {
-		t.Errorf("Expression.Evaluate: %v", err)
-	} else if !IsValueTrue(result) {
-		t.Errorf("Expression.Evaluate: unexpected result: %v", result)
+	result, err := expr.Evaluate(values)
+	if assert.NoError(t, err) {
+		assert.True(t, IsValueTrue(result))
+	}
+
+	// Test late binding
+	expr, err = ConvertExpression(validExpr, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+
+	fmt.Printf("expr: %#v\n", expr)
+	assert.Equal(t, "foo = 8", expr.String())
+	assert.Equal(t, "foo == 8", expr.KernelFilterString())
+
+	err = expr.ValidateKernelFilter()
+	assert.NoError(t, err)
+
+	// Cannot evaluate without binding types
+	_, err = expr.Evaluate(values)
+	assert.Error(t, err)
+
+	err = expr.BindTypes(types)
+	require.NoError(t, err)
+
+	// Cannot bind more than once
+	err = expr.BindTypes(types)
+	assert.Error(t, err)
+
+	result, err = expr.Evaluate(values)
+	if assert.NoError(t, err) {
+		assert.True(t, IsValueTrue(result))
+	}
+}
+
+func TestParseBytes(t *testing.T) {
+	_, err := ParseBytes([]byte("u16 == 12"), ParseModeInvalid, parserTestTypes)
+	assert.Error(t, err)
+
+	e, err := ParseBytes([]byte("u16 == 12"), ParseModeKernelFilter, parserTestTypes)
+	assert.NoError(t, err)
+	if assert.NotNil(t, e) {
+		assert.Equal(t, "u16 == 12", e.KernelFilterString())
+	}
+}
+
+func TestParseString(t *testing.T) {
+	_, err := ParseString("u16 == 12", ParseModeInvalid, parserTestTypes)
+	assert.Error(t, err)
+
+	e, err := ParseString("u16 == 12", ParseModeKernelFilter, parserTestTypes)
+	assert.NoError(t, err)
+	if assert.NotNil(t, e) {
+		assert.Equal(t, "u16 == 12", e.KernelFilterString())
+	}
+}
+
+func TestParse(t *testing.T) {
+	r := bytes.NewReader([]byte("u16 == 12"))
+	_, err := Parse(r, ParseModeInvalid, parserTestTypes)
+	assert.Error(t, err)
+
+	r = bytes.NewReader([]byte("u16 == 12"))
+	e, err := Parse(r, ParseModeKernelFilter, parserTestTypes)
+	assert.NoError(t, err)
+	if assert.NotNil(t, e) {
+		assert.Equal(t, "u16 == 12", e.KernelFilterString())
 	}
 }
 
 func TestIsValueTrue(t *testing.T) {
-	if IsValueTrue("") {
-		t.Error("IsValueTrue failure")
+	falseTests := []interface{}{
+		"",
+		int8(0),
+		int16(0),
+		int32(0),
+		int64(0),
+		uint8(0),
+		uint16(0),
+		uint32(0),
+		uint64(0),
+		false,
+		0.0,
+		time.Unix(0, 0),
+		make(chan interface{}),
 	}
-	if !IsValueTrue("string") {
-		t.Error("IsValueTrue failure")
-	}
-
-	if IsValueTrue(int8(0)) {
-		t.Error("IsValueTrue failure")
-	}
-	if !IsValueTrue(int8(8)) {
-		t.Error("IsValueTrue failure")
-	}
-
-	if IsValueTrue(int16(0)) {
-		t.Error("IsValueTrue failure")
-	}
-	if !IsValueTrue(int16(8)) {
-		t.Error("IsValueTrue failure")
-	}
-
-	if IsValueTrue(int32(0)) {
-		t.Error("IsValueTrue failure")
-	}
-	if !IsValueTrue(int32(8)) {
-		t.Error("IsValueTrue failure")
-	}
-
-	if IsValueTrue(int64(0)) {
-		t.Error("IsValueTrue failure")
-	}
-	if !IsValueTrue(int64(8)) {
-		t.Error("IsValueTrue failure")
+	trueTests := []interface{}{
+		"string",
+		int8(8),
+		int16(8),
+		int32(8),
+		int64(8),
+		uint8(8),
+		uint16(8),
+		uint32(8),
+		uint64(8),
+		true,
+		8.0,
+		time.Now(),
 	}
 
-	if IsValueTrue(uint8(0)) {
-		t.Error("IsValueTrue failure")
+	for _, v := range falseTests {
+		assert.False(t, IsValueTrue(v), fmt.Sprintf("%#v", v))
 	}
-	if !IsValueTrue(uint8(8)) {
-		t.Error("IsValueTrue failure")
-	}
-
-	if IsValueTrue(uint16(0)) {
-		t.Error("IsValueTrue failure")
-	}
-	if !IsValueTrue(uint16(8)) {
-		t.Error("IsValueTrue failure")
-	}
-
-	if IsValueTrue(uint32(0)) {
-		t.Error("IsValueTrue failure")
-	}
-	if !IsValueTrue(uint32(8)) {
-		t.Error("IsValueTrue failure")
-	}
-
-	if IsValueTrue(uint64(0)) {
-		t.Error("IsValueTrue failure")
-	}
-	if !IsValueTrue(uint64(8)) {
-		t.Error("IsValueTrue failure")
-	}
-
-	if IsValueTrue(false) {
-		t.Error("IsValueTrue failure")
-	}
-	if !IsValueTrue(true) {
-		t.Error("IsValueTrue failure")
-	}
-
-	if IsValueTrue(0.0) {
-		t.Error("IsValueTrue failure")
-	}
-	if !IsValueTrue(8.0) {
-		t.Error("IsValueTrue failure")
-	}
-
-	if IsValueTrue(time.Unix(0, 0)) {
-		t.Error("IsValueTrue failure")
-	}
-	if !IsValueTrue(time.Now()) {
-		t.Error("IsValueTrue failure")
-	}
-
-	if IsValueTrue(make(chan interface{})) {
-		t.Error("IsValueTrue failure")
+	for _, v := range trueTests {
+		assert.True(t, IsValueTrue(v), fmt.Sprintf("%#v", v))
 	}
 }
 
 func TestNewValue(t *testing.T) {
-	var v *api.Value
+	var v *telemetryAPI.Value
 
 	v = NewValue("string")
-	if v.GetStringValue() != "string" {
-		t.Error("NewValue failure")
-	}
+	assert.Equal(t, "string", v.GetStringValue())
 
 	v = NewValue(int8(8))
-	if v.GetSignedValue() != 8 {
-		t.Error("NewValue failure")
-	}
+	assert.Equal(t, int64(8), v.GetSignedValue())
 
 	v = NewValue(int16(8))
-	if v.GetSignedValue() != 8 {
-		t.Error("NewValue failure")
-	}
+	assert.Equal(t, int64(8), v.GetSignedValue())
 
 	v = NewValue(int32(8))
-	if v.GetSignedValue() != 8 {
-		t.Error("NewValue failure")
-	}
+	assert.Equal(t, int64(8), v.GetSignedValue())
 
 	v = NewValue(int64(8))
-	if v.GetSignedValue() != 8 {
-		t.Error("NewValue failure")
-	}
+	assert.Equal(t, int64(8), v.GetSignedValue())
 
 	v = NewValue(uint8(8))
-	if v.GetUnsignedValue() != 8 {
-		t.Error("NewValue failure")
-	}
+	assert.Equal(t, uint64(8), v.GetUnsignedValue())
 
 	v = NewValue(uint16(8))
-	if v.GetUnsignedValue() != 8 {
-		t.Error("NewValue failure")
-	}
+	assert.Equal(t, uint64(8), v.GetUnsignedValue())
 
 	v = NewValue(uint32(8))
-	if v.GetUnsignedValue() != 8 {
-		t.Error("NewValue failure")
-	}
+	assert.Equal(t, uint64(8), v.GetUnsignedValue())
 
 	v = NewValue(uint64(8))
-	if v.GetUnsignedValue() != 8 {
-		t.Error("NewValue failure")
-	}
+	assert.Equal(t, uint64(8), v.GetUnsignedValue())
 
 	v = NewValue(true)
-	if v.GetBoolValue() != true {
-		t.Error("NewValue failure")
-	}
+	assert.Equal(t, true, v.GetBoolValue())
 
 	v = NewValue(8.0)
-	if v.GetDoubleValue() != 8.0 {
-		t.Error("NewValue failure")
-	}
+	assert.Equal(t, 8.0, v.GetDoubleValue())
 
 	ts := &timestamp.Timestamp{
 		Seconds: 8,
-		Nanos:   8,
+		Nanos:   88,
 	}
 	v = NewValue(ts)
-	if ts = v.GetTimestampValue(); ts.Seconds != 8 || ts.Nanos != 8 {
-		t.Error("NewValue failure")
-	}
+	ts = v.GetTimestampValue()
+	assert.Equal(t, int64(8), ts.Seconds)
+	assert.Equal(t, int32(88), ts.Nanos)
 
-	if NewValue(make(chan interface{})) != nil {
-		t.Error("NewValue failure")
-	}
+	v = NewValue(make(chan interface{}))
+	assert.Nil(t, v)
 }
 
 func TestExpressionNodes(t *testing.T) {
-	var e *api.Expression
+	var e *telemetryAPI.Expression
 
 	e = Identifier("foo")
-	if e.GetType() != api.Expression_IDENTIFIER || e.GetIdentifier() != "foo" {
-		t.Error("Identifier failure")
-	}
+	assert.Equal(t, telemetryAPI.Expression_IDENTIFIER, e.GetType())
+	assert.Equal(t, "foo", e.GetIdentifier())
 
 	e = Value("foo")
-	if e.GetType() != api.Expression_VALUE || e.GetValue().GetStringValue() != "foo" {
-		t.Error("Value failure")
+	if assert.Equal(t, telemetryAPI.Expression_VALUE, e.GetType()) {
+		assert.Equal(t, "foo", e.GetValue().GetStringValue())
 	}
 
 	// Unary ops
 
-	e = IsNull(Identifier("foo"))
-	if e.GetType() != api.Expression_IS_NULL {
-		t.Error("IsNull failure")
-	} else {
-		e2 := e.GetUnaryOp()
-		if e2.GetType() != api.Expression_IDENTIFIER || e2.GetIdentifier() != "foo" {
-			t.Error("IsNull failure")
-		}
+	i := Identifier("foo")
+	unaryTestCases := []struct {
+		t telemetryAPI.Expression_ExpressionType
+		f func(*telemetryAPI.Expression) *telemetryAPI.Expression
+	}{
+		{telemetryAPI.Expression_IS_NULL, IsNull},
+		{telemetryAPI.Expression_IS_NOT_NULL, IsNotNull},
 	}
-
-	e = IsNotNull(Identifier("foo"))
-	if e.GetType() != api.Expression_IS_NOT_NULL {
-		t.Error("IsNotNull failure")
-	} else {
-		e2 := e.GetUnaryOp()
-		if e2.GetType() != api.Expression_IDENTIFIER || e2.GetIdentifier() != "foo" {
-			t.Error("IsNotNull failure")
+	for _, tc := range unaryTestCases {
+		testCase := telemetryAPI.Expression_ExpressionType_name[int32(tc.t)]
+		e = tc.f(i)
+		if assert.Equal(t, tc.t, e.GetType(), testCase) {
+			assert.Equal(t, i, e.GetUnaryOp(), testCase)
 		}
 	}
 
 	// Binary ops
 
-	i := Identifier("foo")
 	v := Value("string")
 	v2 := Value(int32(8))
-
-	e = Equal(i, v)
-	if e.GetType() != api.Expression_EQ {
-		t.Error("Equal failure")
-	} else {
-		if e.GetBinaryOp().GetLhs() != i {
-			t.Error("Equal failure")
-		}
-		if e.GetBinaryOp().GetRhs() != v {
-			t.Error("Equal failure")
-		}
+	binaryTestCases := []struct {
+		t telemetryAPI.Expression_ExpressionType
+		f func(*telemetryAPI.Expression, *telemetryAPI.Expression) *telemetryAPI.Expression
+		v *telemetryAPI.Expression
+	}{
+		{telemetryAPI.Expression_EQ, Equal, v},
+		{telemetryAPI.Expression_NE, NotEqual, v},
+		{telemetryAPI.Expression_LT, LessThan, v},
+		{telemetryAPI.Expression_LE, LessThanEqualTo, v},
+		{telemetryAPI.Expression_GT, GreaterThan, v},
+		{telemetryAPI.Expression_GE, GreaterThanEqualTo, v},
+		{telemetryAPI.Expression_LIKE, Like, v},
+		{telemetryAPI.Expression_BITWISE_AND, BitwiseAnd, v2},
 	}
-
-	e = NotEqual(i, v)
-	if e.GetType() != api.Expression_NE {
-		t.Error("NotEqual failure")
-	} else {
-		if e.GetBinaryOp().GetLhs() != i {
-			t.Error("NotEqual failure")
-		}
-		if e.GetBinaryOp().GetRhs() != v {
-			t.Error("NotEqual failure")
-		}
-	}
-
-	e = LessThan(i, v2)
-	if e.GetType() != api.Expression_LT {
-		t.Error("LessThan failure")
-	} else {
-		if e.GetBinaryOp().GetLhs() != i {
-			t.Error("LessThan failure")
-		}
-		if e.GetBinaryOp().GetRhs() != v2 {
-			t.Error("LessThan failure")
-		}
-	}
-
-	e = LessThanEqualTo(i, v2)
-	if e.GetType() != api.Expression_LE {
-		t.Error("LessThanEqualTo failure")
-	} else {
-		if e.GetBinaryOp().GetLhs() != i {
-			t.Error("LessThanEqualTo failure")
-		}
-		if e.GetBinaryOp().GetRhs() != v2 {
-			t.Error("LessThanEqualTo failure")
-		}
-	}
-
-	e = GreaterThan(i, v2)
-	if e.GetType() != api.Expression_GT {
-		t.Error("GreaterThan failure")
-	} else {
-		if e.GetBinaryOp().GetLhs() != i {
-			t.Error("GreaterThan failure")
-		}
-		if e.GetBinaryOp().GetRhs() != v2 {
-			t.Error("GreaterThan failure")
-		}
-	}
-
-	e = GreaterThanEqualTo(i, v2)
-	if e.GetType() != api.Expression_GE {
-		t.Error("GreaterThanEqualTo failure")
-	} else {
-		if e.GetBinaryOp().GetLhs() != i {
-			t.Error("GreaterThanEqualTo failure")
-		}
-		if e.GetBinaryOp().GetRhs() != v2 {
-			t.Error("GreaterThanEqualTo failure")
-		}
-	}
-
-	e = Like(i, v)
-	if e.GetType() != api.Expression_LIKE {
-		t.Error("Like failure")
-	} else {
-		if e.GetBinaryOp().GetLhs() != i {
-			t.Error("Like failure")
-		}
-		if e.GetBinaryOp().GetRhs() != v {
-			t.Error("Like failure")
-		}
-	}
-
-	e = BitwiseAnd(i, v2)
-	if e.GetType() != api.Expression_BITWISE_AND {
-		t.Error("BitwiseAnd failure")
-	} else {
-		if e.GetBinaryOp().GetLhs() != i {
-			t.Error("BitwiseAnd failure")
-		}
-		if e.GetBinaryOp().GetRhs() != v2 {
-			t.Error("BitwiseAnd failure")
+	for _, tc := range binaryTestCases {
+		testCase := telemetryAPI.Expression_ExpressionType_name[int32(tc.t)]
+		e = tc.f(i, tc.v)
+		if assert.Equal(t, tc.t, e.GetType(), testCase) {
+			e2 := e.GetBinaryOp()
+			assert.Equal(t, i, e2.GetLhs(), testCase)
+			assert.Equal(t, tc.v, e2.GetRhs(), testCase)
 		}
 	}
 
 	// Do LogicalAnd and LogicalOr last after we know that Equal works
 	lhs := Equal(Identifier("foo"), Value(true))
 	rhs := Equal(Identifier("bar"), Value(true))
-
-	if LogicalAnd(lhs, nil) != lhs {
-		t.Error("LogicalAnd failure")
+	logicalTestCases := []struct {
+		t telemetryAPI.Expression_ExpressionType
+		f func(*telemetryAPI.Expression, *telemetryAPI.Expression) *telemetryAPI.Expression
+	}{
+		{telemetryAPI.Expression_LOGICAL_AND, LogicalAnd},
+		{telemetryAPI.Expression_LOGICAL_OR, LogicalOr},
 	}
-	if LogicalAnd(nil, rhs) != rhs {
-		t.Error("LogicalAnd failure")
-	}
-	e = LogicalAnd(lhs, rhs)
-	if e.GetType() != api.Expression_LOGICAL_AND {
-		t.Error("LogicalAnd failure")
-	} else {
-		if e.GetBinaryOp().GetLhs() != lhs {
-			t.Error("LogicalAnd failure")
-		}
-		if e.GetBinaryOp().GetRhs() != rhs {
-			t.Error("LogicalAnd failure")
-		}
-	}
-
-	if LogicalOr(lhs, nil) != lhs {
-		t.Error("LogicalOr failure")
-	}
-	if LogicalOr(nil, rhs) != rhs {
-		t.Error("LogicalOr failure")
-	}
-	e = LogicalOr(lhs, rhs)
-	if e.GetType() != api.Expression_LOGICAL_OR {
-		t.Error("LogicalOr failure")
-	} else {
-		if e.GetBinaryOp().GetLhs() != lhs {
-			t.Error("LogicalOr failure")
-		}
-		if e.GetBinaryOp().GetRhs() != rhs {
-			t.Error("LogicalOr failure")
+	for _, tc := range logicalTestCases {
+		testCase := telemetryAPI.Expression_ExpressionType_name[int32(tc.t)]
+		assert.Equal(t, lhs, tc.f(lhs, nil), testCase)
+		assert.Equal(t, rhs, tc.f(nil, rhs), testCase)
+		e = tc.f(lhs, rhs)
+		if assert.Equal(t, tc.t, e.GetType(), testCase) {
+			e2 := e.GetBinaryOp()
+			assert.Equal(t, lhs, e2.GetLhs(), testCase)
+			assert.Equal(t, rhs, e2.GetRhs(), testCase)
 		}
 	}
 }

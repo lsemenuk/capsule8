@@ -17,7 +17,7 @@ package functional
 import (
 	"testing"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 
 	"github.com/golang/glog"
 	"github.com/golang/protobuf/ptypes/wrappers"
@@ -50,10 +50,10 @@ func (ct *execTest) RunContainer(t *testing.T) {
 	}
 }
 
-func (ct *execTest) CreateSubscription(t *testing.T) *api.Subscription {
-	processEvents := []*api.ProcessEventFilter{
-		&api.ProcessEventFilter{
-			Type: api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
+func (ct *execTest) CreateSubscription(t *testing.T) *telemetryAPI.Subscription {
+	processEvents := []*telemetryAPI.ProcessEventFilter{
+		&telemetryAPI.ProcessEventFilter{
+			Type: telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
 			ExecFilenamePattern: &wrappers.StringValue{
 				// Want to only match execs of 'uname'
 				Value: "*nam*",
@@ -61,21 +61,21 @@ func (ct *execTest) CreateSubscription(t *testing.T) *api.Subscription {
 		},
 	}
 
-	eventFilter := &api.EventFilter{
+	eventFilter := &telemetryAPI.EventFilter{
 		ProcessEvents: processEvents,
 	}
 
-	sub := &api.Subscription{
+	sub := &telemetryAPI.Subscription{
 		EventFilter: eventFilter,
 	}
 
 	return sub
 }
 
-func (ct *execTest) HandleTelemetryEvent(t *testing.T, telemetryEvent *api.ReceivedTelemetryEvent) bool {
+func (ct *execTest) HandleTelemetryEvent(t *testing.T, telemetryEvent *telemetryAPI.ReceivedTelemetryEvent) bool {
 	switch event := telemetryEvent.Event.Event.(type) {
-	case *api.TelemetryEvent_Process:
-		if event.Process.Type == api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC &&
+	case *telemetryAPI.TelemetryEvent_Process:
+		if event.Process.Type == telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXEC &&
 			event.Process.ExecFilename == "/bin/uname" {
 
 			if len(ct.processID) > 0 {

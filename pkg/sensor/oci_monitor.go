@@ -220,12 +220,9 @@ func (om *ociMonitor) maybeDeferAction(f func()) {
 	f()
 }
 
-func (om *ociMonitor) decodeSysOpen(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
-	pid := int(data["common_pid"].(int32))
-	configFilename := data["filename"].(string)
+func (om *ociMonitor) decodeSysOpen(_ uint64, sample *perf.Sample) {
+	pid := int(sample.TID)
+	configFilename, _ := sample.GetString("filename")
 
 	om.maybeDeferAction(func() {
 		om.configOpens[pid] = append(om.configOpens[pid], configFilename)
@@ -234,20 +231,11 @@ func (om *ociMonitor) decodeSysOpen(
 	return nil, nil
 }
 
-func (om *ociMonitor) decodeImaFileFree(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
-	pid := int(data["common_pid"].(int32))
-
-	sampleID := perf.SampleID{
-		Time: sample.Time,
-		PID:  sample.Pid,
-		TID:  sample.Tid,
-		CPU:  sample.CPU,
-	}
+func (om *ociMonitor) decodeImaFileFree(_ uint64, sample *perf.Sample) {
+	sampleID := sample.SampleID
 
 	om.maybeDeferAction(func() {
+		pid := int(sample.TID)
 		opens := om.configOpens[pid]
 		if len(opens) == 0 {
 			return
@@ -270,21 +258,12 @@ func (om *ociMonitor) decodeImaFileFree(
 	return nil, nil
 }
 
-func (om *ociMonitor) decodeUnlink(
-	sample *perf.SampleRecord,
-	data perf.TraceEventSampleData,
-) (interface{}, error) {
-	configFilename := data["pathname"].(string)
-	if !strings.HasPrefix(configFilename, om.containerDir) {
+func (om *ociMonitor) decodeUnlink(_ uint64, sample *perf.Sample) {
+	configFilename, err := sample.GetString("pathname")
+	if err != nil || !strings.HasPrefix(configFilename, om.containerDir) {
 		return nil, nil
 	}
-
-	sampleID := perf.SampleID{
-		Time: sample.Time,
-		PID:  sample.Pid,
-		TID:  sample.Tid,
-		CPU:  sample.CPU,
-	}
+	sampleID := sample.SampleID
 
 	om.maybeDeferAction(func() {
 		parts := strings.Split(configFilename, "/")

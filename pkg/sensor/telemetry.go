@@ -26,7 +26,7 @@ import (
 	"strings"
 	"time"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 	"github.com/capsule8/capsule8/pkg/config"
 	"github.com/capsule8/capsule8/pkg/expression"
 	"github.com/capsule8/capsule8/pkg/sys/perf"
@@ -45,14 +45,14 @@ import (
 // TelemetryServiceGetEventsRequestFunc is a function called when a new
 // subscription is requested.
 type TelemetryServiceGetEventsRequestFunc func(
-	request *api.GetEventsRequest,
+	request *telemetryAPI.GetEventsRequest,
 )
 
 // TelemetryServiceGetEventsResponseFunc is a function called when a new
 // subscscription is processed. The response will be included or an error if
 // there was an error processing the subscription.
 type TelemetryServiceGetEventsResponseFunc func(
-	response *api.GetEventsResponse,
+	response *telemetryAPI.GetEventsResponse,
 	err error,
 )
 
@@ -200,13 +200,15 @@ func (ts *TelemetryService) Serve() error {
 	if config.Sensor.UseTLS {
 		glog.V(1).Infoln("Starting telemetry server with TLS credentials")
 
-		certificate, err := tls.LoadX509KeyPair(config.Sensor.TLSServerCertPath, config.Sensor.TLSServerKeyPath)
+		var certificate tls.Certificate
+		certificate, err = tls.LoadX509KeyPair(config.Sensor.TLSServerCertPath, config.Sensor.TLSServerKeyPath)
 		if err != nil {
 			return fmt.Errorf("could not load server key pair: %s", err)
 		}
 
+		var ca []byte
 		certPool := x509.NewCertPool()
-		ca, err := ioutil.ReadFile(config.Sensor.TLSCACertPath)
+		ca, err = ioutil.ReadFile(config.Sensor.TLSCACertPath)
 		if err != nil {
 			return fmt.Errorf("could not read ca certificate: %s", err)
 		}
@@ -230,7 +232,7 @@ func (ts *TelemetryService) Serve() error {
 		sensor:  ts.sensor,
 		service: ts,
 	}
-	api.RegisterTelemetryServiceServer(ts.server, t)
+	telemetryAPI.RegisterTelemetryServiceServer(ts.server, t)
 
 	if ts.options.start != nil {
 		ts.options.start()
@@ -260,8 +262,8 @@ func (t *telemetryServiceServer) getEventsError(err error) error {
 }
 
 func (t *telemetryServiceServer) GetEvents(
-	req *api.GetEventsRequest,
-	stream api.TelemetryService_GetEventsServer,
+	req *telemetryAPI.GetEventsRequest,
+	stream telemetryAPI.TelemetryService_GetEventsServer,
 ) error {
 	if t.service.options.getEventsRequest != nil {
 		t.service.options.getEventsRequest(req)
@@ -299,13 +301,13 @@ func (t *telemetryServiceServer) GetEvents(
 			throttleDuration =
 				time.Duration(sub.Modifier.Throttle.Interval)
 			switch sub.Modifier.Throttle.IntervalType {
-			case api.ThrottleModifier_MILLISECOND:
+			case telemetryAPI.ThrottleModifier_MILLISECOND:
 				throttleDuration *= time.Millisecond
-			case api.ThrottleModifier_SECOND:
+			case telemetryAPI.ThrottleModifier_SECOND:
 				throttleDuration *= time.Second
-			case api.ThrottleModifier_MINUTE:
+			case telemetryAPI.ThrottleModifier_MINUTE:
 				throttleDuration *= time.Minute
-			case api.ThrottleModifier_HOUR:
+			case telemetryAPI.ThrottleModifier_HOUR:
 				throttleDuration *= time.Hour
 			default:
 				err = fmt.Errorf("ThrottleModifier interval type is invalid (%d)",
@@ -316,7 +318,7 @@ func (t *telemetryServiceServer) GetEvents(
 	}
 
 	subscr := t.sensor.NewSubscription()
-	subscr.translateTelemetryServiceSubscription(sub)
+	subscr.ProcessTelemetryServiceSubscription(sub)
 	if len(subscr.eventSinks) == 0 && len(subscr.status) == 0 {
 		glog.V(1).Infof("Invalid subscription: %+v", sub)
 		return t.getEventsError(errors.New("Invalid subscription (empty EventFilter)"))
@@ -338,20 +340,13 @@ func (t *telemetryServiceServer) GetEvents(
 
 	statuses, runErr := subscr.Run(ctx, f)
 	if runErr == nil || len(statuses) > 0 {
-		r := &api.GetEventsResponse{}
+		r := &telemetryAPI.GetEventsResponse{}
 		if len(statuses) == 0 {
 			r.Statuses = []*status.Status{
 				&status.Status{Code: int32(code.Code_OK)},
 			}
 		} else {
-			r.Statuses = make([]*status.Status, 0, len(statuses))
-			for _, st := range statuses {
-				r.Statuses = append(r.Statuses,
-					&status.Status{
-						Code:    int32(code.Code_UNKNOWN),
-						Message: st,
-					})
-			}
+			r.Statuses = subscr.TranslateSubscriptionStatuses(statuses)
 		}
 		if err = stream.Send(r); err != nil {
 			return t.getEventsError(err)
@@ -374,21 +369,23 @@ func (t *telemetryServiceServer) GetEvents(
 			glog.V(1).Infof("Client disconnected, closing stream")
 			return ctx.Err()
 		case e := <-events:
-			if throttleDuration != 0 {
-				now := time.Now()
-				if now.Before(nextEventTime) {
-					break
+			r := &telemetryAPI.GetEventsResponse{}
+			if e != nil {
+				if throttleDuration != 0 {
+					now := time.Now()
+					if now.Before(nextEventTime) {
+						break
+					}
+					nextEventTime = now
+					nextEventTime.Add(throttleDuration)
 				}
-				nextEventTime = now
-				nextEventTime.Add(throttleDuration)
-			}
-			r := &api.GetEventsResponse{
-				Events: []*api.ReceivedTelemetryEvent{
-					&api.ReceivedTelemetryEvent{
-						Event: subscr.translateEvent(e),
+				r.Events = []*telemetryAPI.ReceivedTelemetryEvent{
+					&telemetryAPI.ReceivedTelemetryEvent{
+						Event: subscr.TranslateTelemetryEvent(e),
 					},
-				},
+				}
 			}
+			r.Statuses = subscr.TranslateSubscriptionStatuses(subscr.GetStatuses())
 			if err = stream.Send(r); err != nil {
 				return err
 			}
@@ -401,12 +398,29 @@ func (t *telemetryServiceServer) GetEvents(
 			}
 		}
 	}
-
-	// unreachable
-	return nil
 }
 
-func (s *Subscription) translateTelemetryServiceSubscription(sub *api.Subscription) {
+// TranslateSubscriptionStatuses translates status information from a
+// subscription for delivery to a telemetry client.
+func (s *Subscription) TranslateSubscriptionStatuses(
+	statuses []string,
+) []*status.Status {
+	if len(statuses) == 0 {
+		return nil
+	}
+	result := make([]*status.Status, len(statuses))
+	for i, s := range statuses {
+		result[i] = &status.Status{
+			Code:    int32(code.Code_UNKNOWN),
+			Message: s,
+		}
+	}
+	return result
+}
+
+// ProcessTelemetryServiceSubscription processes a Subscription message from
+// the telemetry service API.
+func (s *Subscription) ProcessTelemetryServiceSubscription(sub *telemetryAPI.Subscription) {
 	if sub.ContainerFilter != nil {
 		cf := NewContainerFilter()
 		for _, id := range sub.ContainerFilter.Ids {
@@ -435,19 +449,20 @@ func (s *Subscription) translateTelemetryServiceSubscription(sub *api.Subscripti
 	s.registerProcessEvents(sub.EventFilter.ProcessEvents)
 	s.registerSyscallEvents(sub.EventFilter.SyscallEvents)
 	s.registerTickerEvents(sub.EventFilter.TickerEvents)
+	s.registerUserFunctionCallEvents(sub.EventFilter.UserEvents)
 }
 
-func (s *Subscription) registerChargenEvents(events []*api.ChargenEventFilter) {
+func (s *Subscription) registerChargenEvents(events []*telemetryAPI.ChargenEventFilter) {
 	for _, e := range events {
 		s.RegisterChargenEventFilter(e.Length, nil)
 	}
 }
 
-func (s *Subscription) registerContainerEvents(events []*api.ContainerEventFilter) {
+func (s *Subscription) registerContainerEvents(events []*telemetryAPI.ContainerEventFilter) {
 	type registerFunc func(*expression.Expression)
 
 	var (
-		filters       [6]*api.Expression
+		filters       [6]*telemetryAPI.Expression
 		subscriptions [6]registerFunc
 		views         [6]bool
 		wildcards     [6]bool
@@ -463,19 +478,19 @@ func (s *Subscription) registerContainerEvents(events []*api.ContainerEventFilte
 
 		if subscriptions[t] == nil {
 			switch t {
-			case api.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED:
+			case telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED:
 				subscriptions[t] = s.RegisterContainerCreatedEventFilter
-			case api.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING:
+			case telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING:
 				subscriptions[t] = s.RegisterContainerRunningEventFilter
-			case api.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED:
+			case telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED:
 				subscriptions[t] = s.RegisterContainerExitedEventFilter
-			case api.ContainerEventType_CONTAINER_EVENT_TYPE_DESTROYED:
+			case telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_DESTROYED:
 				subscriptions[t] = s.RegisterContainerDestroyedEventFilter
-			case api.ContainerEventType_CONTAINER_EVENT_TYPE_UPDATED:
+			case telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_UPDATED:
 				subscriptions[t] = s.RegisterContainerUpdatedEventFilter
 			}
 		}
-		if e.View == api.ContainerEventView_FULL {
+		if e.View == telemetryAPI.ContainerEventView_FULL {
 			views[t] = true
 		}
 		if e.FilterExpression == nil {
@@ -496,7 +511,7 @@ func (s *Subscription) registerContainerEvents(events []*api.ContainerEventFilte
 		}
 		if wildcards[i] {
 			f(nil)
-		} else if expr, err := expression.NewExpression(filters[i]); err == nil {
+		} else if expr, err := expression.ConvertExpression(filters[i], ContainerEventTypes); err == nil {
 			f(expr)
 		} else {
 			s.logStatus(
@@ -505,7 +520,7 @@ func (s *Subscription) registerContainerEvents(events []*api.ContainerEventFilte
 	}
 }
 
-func rewriteFileEventFilter(fef *api.FileEventFilter) {
+func rewriteFileEventFilter(fef *telemetryAPI.FileEventFilter) {
 	if fef.Filename != nil {
 		newExpr := expression.Equal(
 			expression.Identifier("filename"),
@@ -546,49 +561,90 @@ func rewriteFileEventFilter(fef *api.FileEventFilter) {
 	}
 }
 
-func (s *Subscription) registerFileEvents(events []*api.FileEventFilter) {
+func (s *Subscription) registerFileEvents(events []*telemetryAPI.FileEventFilter) {
+	type registerFunc func(*expression.Expression)
+
 	var (
-		filter   *api.Expression
-		wildcard bool
+		filters       [10]*telemetryAPI.Expression
+		subscriptions [10]registerFunc
+		types         [10]expression.FieldTypeMap
+		wildcards     [10]bool
 	)
 
 	for _, e := range events {
-		if e.Type != api.FileEventType_FILE_EVENT_TYPE_OPEN {
-			s.logStatus(
-				fmt.Sprintf("FileEventType %d is invalid", e.Type))
-			continue
-		}
-
 		// Translate deprecated fields into an expression
 		rewriteFileEventFilter(e)
 
+		t := e.GetType()
+		if t < 1 || t > telemetryAPI.FileEventType(len(subscriptions)-1) {
+			s.logStatus(
+				fmt.Sprintf("FileEventType %d is invalid", t))
+			continue
+		}
+
+		if subscriptions[t] == nil {
+			switch t {
+			case telemetryAPI.FileEventType_FILE_EVENT_TYPE_CREATE:
+				subscriptions[t] = s.RegisterFileCreateEventFilter
+				types[t] = FileCreateEventTypes
+			case telemetryAPI.FileEventType_FILE_EVENT_TYPE_DELETE:
+				subscriptions[t] = s.RegisterFileDeleteEventFilter
+				types[t] = FileDeleteEventTypes
+			case telemetryAPI.FileEventType_FILE_EVENT_TYPE_LINK:
+				subscriptions[t] = s.RegisterFileLinkEventFilter
+				types[t] = FileLinkEventTypes
+			case telemetryAPI.FileEventType_FILE_EVENT_TYPE_MODIFY:
+				subscriptions[t] = s.RegisterFileModifyEventFilter
+				types[t] = FileModifyEventTypes
+			case telemetryAPI.FileEventType_FILE_EVENT_TYPE_OPEN:
+				subscriptions[t] = s.RegisterFileOpenEventFilter
+				types[t] = FileOpenEventTypes
+			case telemetryAPI.FileEventType_FILE_EVENT_TYPE_RENAME:
+				subscriptions[t] = s.RegisterFileRenameEventFilter
+				types[t] = FileRenameEventTypes
+			case telemetryAPI.FileEventType_FILE_EVENT_TYPE_OPEN_FOR_MODIFY:
+				subscriptions[t] = s.RegisterFileOpenForModifyEventFilter
+				types[t] = FileOpenForModifyEventTypes
+			case telemetryAPI.FileEventType_FILE_EVENT_TYPE_CLOSE_FOR_MODIFY:
+				subscriptions[t] = s.RegisterFileCloseForModifyEventFilter
+				types[t] = FileCloseForModifyEventTypes
+			case telemetryAPI.FileEventType_FILE_EVENT_TYPE_ATTRIBUTE_CHANGE:
+				subscriptions[t] = s.RegisterFileAttributeChangeEventFilter
+				types[t] = FileAttributeChangeEventTypes
+			}
+		}
 		if e.FilterExpression == nil {
-			wildcard = true
-			filter = nil
-		} else if !wildcard {
-			filter = expression.LogicalOr(e.FilterExpression, filter)
+			wildcards[t] = true
+			filters[t] = nil
+		} else if !wildcards[t] {
+			filters[t] = expression.LogicalOr(
+				e.FilterExpression,
+				filters[t])
 		}
 	}
 
-	if wildcard {
-		s.RegisterFileOpenEventFilter(nil)
-	} else if filter == nil {
-		return
-	} else if expr, err := expression.NewExpression(filter); err == nil {
-		s.RegisterFileOpenEventFilter(expr)
-	} else {
-		s.logStatus(
-			fmt.Sprintf("Invalid filter expression for file open filter: %v", err))
+	for i, f := range subscriptions {
+		if f == nil {
+			continue
+		}
+		if wildcards[i] {
+			f(nil)
+		} else if expr, err := expression.ConvertExpression(filters[i], types[i]); err == nil {
+			f(expr)
+		} else {
+			s.logStatus(
+				fmt.Sprintf("Invalid file filter expression: %v", err))
+		}
 	}
 }
 
-func (s *Subscription) registerKernelFunctionCallEvents(events []*api.KernelFunctionCallFilter) {
+func (s *Subscription) registerKernelFunctionCallEvents(events []*telemetryAPI.KernelFunctionCallFilter) {
 	for _, e := range events {
 		var onReturn bool
 		switch e.Type {
-		case api.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_ENTER:
+		case telemetryAPI.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_ENTER:
 			onReturn = false
-		case api.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_EXIT:
+		case telemetryAPI.KernelFunctionCallEventType_KERNEL_FUNCTION_CALL_EVENT_TYPE_EXIT:
 			onReturn = true
 		default:
 			s.logStatus(
@@ -599,7 +655,9 @@ func (s *Subscription) registerKernelFunctionCallEvents(events []*api.KernelFunc
 		var filterExpression *expression.Expression
 		if expr := e.GetFilterExpression(); expr != nil {
 			var err error
-			filterExpression, err = expression.NewExpression(expr)
+			// Types cannot be bound here, because they're dynamic
+			// This is a special case for now and will be done later.
+			filterExpression, err = expression.ConvertExpression(expr, nil)
 			if err != nil {
 				s.logStatus(
 					fmt.Sprintf("Invalid filter expression for kernel function call filter: %v", err))
@@ -613,11 +671,11 @@ func (s *Subscription) registerKernelFunctionCallEvents(events []*api.KernelFunc
 }
 
 type networkFilterItem struct {
-	filter   *api.Expression
+	filter   *telemetryAPI.Expression
 	wildcard bool
 }
 
-func (nfi *networkFilterItem) add(nef *api.NetworkEventFilter) {
+func (nfi *networkFilterItem) add(nef *telemetryAPI.NetworkEventFilter) {
 	if nef.FilterExpression == nil {
 		nfi.wildcard = true
 		nfi.filter = nil
@@ -632,12 +690,13 @@ type networkFilterItemRegisterFunc func(*expression.Expression)
 func (nfi *networkFilterItem) register(
 	s *Subscription,
 	f networkFilterItemRegisterFunc,
+	t expression.FieldTypeMap,
 ) {
 	if nfi != nil {
 		if nfi.wildcard {
 			f(nil)
 		} else if nfi.filter != nil {
-			if expr, err := expression.NewExpression(nfi.filter); err != nil {
+			if expr, err := expression.ConvertExpression(nfi.filter, t); err != nil {
 				s.logStatus(
 					fmt.Sprintf("Invalid filter expression for network accept attempt filter: %v", err))
 			} else {
@@ -664,32 +723,32 @@ type networkFilterSet struct {
 
 func (nfs *networkFilterSet) add(
 	subscr *Subscription,
-	nef *api.NetworkEventFilter,
+	nef *telemetryAPI.NetworkEventFilter,
 ) {
 	switch nef.Type {
-	case api.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_ATTEMPT:
+	case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_ATTEMPT:
 		nfs.acceptAttemptFilters.add(nef)
-	case api.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_RESULT:
+	case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_RESULT:
 		nfs.acceptResultFilters.add(nef)
-	case api.NetworkEventType_NETWORK_EVENT_TYPE_BIND_ATTEMPT:
+	case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_BIND_ATTEMPT:
 		nfs.bindAttemptFilters.add(nef)
-	case api.NetworkEventType_NETWORK_EVENT_TYPE_BIND_RESULT:
+	case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_BIND_RESULT:
 		nfs.bindResultFilters.add(nef)
-	case api.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_ATTEMPT:
+	case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_ATTEMPT:
 		nfs.connectAttemptFilters.add(nef)
-	case api.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_RESULT:
+	case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_RESULT:
 		nfs.connectResultFilters.add(nef)
-	case api.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_ATTEMPT:
+	case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_ATTEMPT:
 		nfs.listenAttemptFilters.add(nef)
-	case api.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_RESULT:
+	case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_RESULT:
 		nfs.listenResultFilters.add(nef)
-	case api.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_ATTEMPT:
+	case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_ATTEMPT:
 		nfs.recvfromAttemptFilters.add(nef)
-	case api.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_RESULT:
+	case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_RESULT:
 		nfs.recvfromResultFilters.add(nef)
-	case api.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_ATTEMPT:
+	case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_ATTEMPT:
 		nfs.sendtoAttemptFilters.add(nef)
-	case api.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_RESULT:
+	case telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_RESULT:
 		nfs.sendtoResultFilters.add(nef)
 	default:
 		subscr.logStatus(
@@ -697,35 +756,34 @@ func (nfs *networkFilterSet) add(
 	}
 }
 
-func (s *Subscription) registerNetworkEvents(events []*api.NetworkEventFilter) {
+func (s *Subscription) registerNetworkEvents(events []*telemetryAPI.NetworkEventFilter) {
 	nfs := networkFilterSet{}
 	for _, nef := range events {
 		nfs.add(s, nef)
 	}
 
-	nfs.acceptAttemptFilters.register(s, s.RegisterNetworkAcceptAttemptEventFilter)
-	nfs.acceptResultFilters.register(s, s.RegisterNetworkAcceptResultEventFilter)
-
-	nfs.bindAttemptFilters.register(s, s.RegisterNetworkBindAttemptEventFilter)
-	nfs.bindResultFilters.register(s, s.RegisterNetworkBindResultEventFilter)
-	nfs.connectAttemptFilters.register(s, s.RegisterNetworkConnectAttemptEventFilter)
-	nfs.connectResultFilters.register(s, s.RegisterNetworkConnectResultEventFilter)
-	nfs.listenAttemptFilters.register(s, s.RegisterNetworkListenAttemptEventFilter)
-	nfs.listenResultFilters.register(s, s.RegisterNetworkListenResultEventFilter)
-	nfs.recvfromAttemptFilters.register(s, s.RegisterNetworkRecvfromAttemptEventFilter)
-	nfs.recvfromResultFilters.register(s, s.RegisterNetworkRecvfromResultEventFilter)
-	nfs.sendtoAttemptFilters.register(s, s.RegisterNetworkSendtoAttemptEventFilter)
-	nfs.sendtoResultFilters.register(s, s.RegisterNetworkSendtoResultEventFilter)
+	nfs.acceptAttemptFilters.register(s, s.RegisterNetworkAcceptAttemptEventFilter, NetworkAttemptEventTypes)
+	nfs.acceptResultFilters.register(s, s.RegisterNetworkAcceptResultEventFilter, NetworkResultEventTypes)
+	nfs.bindAttemptFilters.register(s, s.RegisterNetworkBindAttemptEventFilter, NetworkAttemptWithAddressEventTypes)
+	nfs.bindResultFilters.register(s, s.RegisterNetworkBindResultEventFilter, NetworkResultEventTypes)
+	nfs.connectAttemptFilters.register(s, s.RegisterNetworkConnectAttemptEventFilter, NetworkAttemptWithAddressEventTypes)
+	nfs.connectResultFilters.register(s, s.RegisterNetworkConnectResultEventFilter, NetworkResultEventTypes)
+	nfs.listenAttemptFilters.register(s, s.RegisterNetworkListenAttemptEventFilter, NetworkListenAttemptEventTypes)
+	nfs.listenResultFilters.register(s, s.RegisterNetworkListenResultEventFilter, NetworkResultEventTypes)
+	nfs.recvfromAttemptFilters.register(s, s.RegisterNetworkRecvfromAttemptEventFilter, NetworkAttemptEventTypes)
+	nfs.recvfromResultFilters.register(s, s.RegisterNetworkRecvfromResultEventFilter, NetworkResultEventTypes)
+	nfs.sendtoAttemptFilters.register(s, s.RegisterNetworkSendtoAttemptEventFilter, NetworkAttemptWithAddressEventTypes)
+	nfs.sendtoResultFilters.register(s, s.RegisterNetworkSendtoResultEventFilter, NetworkResultEventTypes)
 }
 
-func (s *Subscription) registerPerformanceEvents(events []*api.PerformanceEventFilter) {
+func (s *Subscription) registerPerformanceEvents(events []*telemetryAPI.PerformanceEventFilter) {
 	for _, e := range events {
 		attr := perf.EventAttr{
 			SampleType: perf.PERF_SAMPLE_CPU | perf.PERF_SAMPLE_RAW,
 		}
 		switch e.SampleRateType {
-		case api.SampleRateType_SAMPLE_RATE_TYPE_PERIOD:
-			if rate, ok := e.SampleRate.(*api.PerformanceEventFilter_Period); !ok {
+		case telemetryAPI.SampleRateType_SAMPLE_RATE_TYPE_PERIOD:
+			if rate, ok := e.SampleRate.(*telemetryAPI.PerformanceEventFilter_Period); !ok {
 				s.logStatus(
 					fmt.Sprintf("Period not properly specified for periodic sample rate"))
 				continue
@@ -733,8 +791,8 @@ func (s *Subscription) registerPerformanceEvents(events []*api.PerformanceEventF
 				attr.SamplePeriod = rate.Period
 				attr.Freq = false
 			}
-		case api.SampleRateType_SAMPLE_RATE_TYPE_FREQUENCY:
-			if rate, ok := e.SampleRate.(*api.PerformanceEventFilter_Frequency); !ok {
+		case telemetryAPI.SampleRateType_SAMPLE_RATE_TYPE_FREQUENCY:
+			if rate, ok := e.SampleRate.(*telemetryAPI.PerformanceEventFilter_Frequency); !ok {
 				s.logStatus(
 					fmt.Sprintf("Frequency not properly specified for frequency sample rate"))
 				continue
@@ -754,11 +812,11 @@ func (s *Subscription) registerPerformanceEvents(events []*api.PerformanceEventF
 				Config: ev.Config,
 			}
 			switch ev.Type {
-			case api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE:
+			case telemetryAPI.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE:
 				m.EventType = perf.EventTypeHardware
-			case api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE_CACHE:
+			case telemetryAPI.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE_CACHE:
 				m.EventType = perf.EventTypeHardwareCache
-			case api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_SOFTWARE:
+			case telemetryAPI.PerformanceEventType_PERFORMANCE_EVENT_TYPE_SOFTWARE:
 				m.EventType = perf.EventTypeSoftware
 			default:
 				s.logStatus(
@@ -772,9 +830,9 @@ func (s *Subscription) registerPerformanceEvents(events []*api.PerformanceEventF
 	}
 }
 
-func rewriteProcessEventFilter(pef *api.ProcessEventFilter) {
+func rewriteProcessEventFilter(pef *telemetryAPI.ProcessEventFilter) {
 	switch pef.Type {
-	case api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC:
+	case telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXEC:
 		if pef.ExecFilename != nil {
 			newExpr := expression.Equal(
 				expression.Identifier("filename"),
@@ -791,7 +849,7 @@ func rewriteProcessEventFilter(pef *api.ProcessEventFilter) {
 				pef.FilterExpression, newExpr)
 			pef.ExecFilenamePattern = nil
 		}
-	case api.ProcessEventType_PROCESS_EVENT_TYPE_EXIT:
+	case telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXIT:
 		if pef.ExitCode != nil {
 			newExpr := expression.Equal(
 				expression.Identifier("code"),
@@ -803,12 +861,13 @@ func rewriteProcessEventFilter(pef *api.ProcessEventFilter) {
 	}
 }
 
-func (s *Subscription) registerProcessEvents(events []*api.ProcessEventFilter) {
+func (s *Subscription) registerProcessEvents(events []*telemetryAPI.ProcessEventFilter) {
 	type registerFunc func(*expression.Expression)
 
 	var (
-		filters       [5]*api.Expression
+		filters       [5]*telemetryAPI.Expression
 		subscriptions [5]registerFunc
+		types         [5]expression.FieldTypeMap
 		wildcards     [5]bool
 	)
 
@@ -817,7 +876,7 @@ func (s *Subscription) registerProcessEvents(events []*api.ProcessEventFilter) {
 		rewriteProcessEventFilter(e)
 
 		t := e.GetType()
-		if t < 1 || t > api.ProcessEventType(len(subscriptions)-1) {
+		if t < 1 || t > telemetryAPI.ProcessEventType(len(subscriptions)-1) {
 			s.logStatus(
 				fmt.Sprintf("ProcessEventType %d is invalid", t))
 			continue
@@ -825,14 +884,18 @@ func (s *Subscription) registerProcessEvents(events []*api.ProcessEventFilter) {
 
 		if subscriptions[t] == nil {
 			switch t {
-			case api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC:
+			case telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXEC:
 				subscriptions[t] = s.RegisterProcessExecEventFilter
-			case api.ProcessEventType_PROCESS_EVENT_TYPE_FORK:
+				types[t] = ProcessExecEventTypes
+			case telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_FORK:
 				subscriptions[t] = s.RegisterProcessForkEventFilter
-			case api.ProcessEventType_PROCESS_EVENT_TYPE_EXIT:
+				types[t] = ProcessForkEventTypes
+			case telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXIT:
 				subscriptions[t] = s.RegisterProcessExitEventFilter
-			case api.ProcessEventType_PROCESS_EVENT_TYPE_UPDATE:
+				types[t] = ProcessExitEventTypes
+			case telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_UPDATE:
 				subscriptions[t] = s.RegisterProcessUpdateEventFilter
+				types[t] = ProcessUpdateEventTypes
 			}
 		}
 		if e.FilterExpression == nil {
@@ -851,7 +914,7 @@ func (s *Subscription) registerProcessEvents(events []*api.ProcessEventFilter) {
 		}
 		if wildcards[i] {
 			f(nil)
-		} else if expr, err := expression.NewExpression(filters[i]); err == nil {
+		} else if expr, err := expression.ConvertExpression(filters[i], types[i]); err == nil {
 			f(expr)
 		} else {
 			s.logStatus(
@@ -860,7 +923,7 @@ func (s *Subscription) registerProcessEvents(events []*api.ProcessEventFilter) {
 	}
 }
 
-func rewriteSyscallEventFilter(sef *api.SyscallEventFilter) {
+func rewriteSyscallEventFilter(sef *telemetryAPI.SyscallEventFilter) {
 	if sef.Id != nil {
 		newExpr := expression.Equal(
 			expression.Identifier("id"),
@@ -870,7 +933,7 @@ func rewriteSyscallEventFilter(sef *api.SyscallEventFilter) {
 		sef.Id = nil
 	}
 
-	if sef.Type == api.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER {
+	if sef.Type == telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER {
 		if sef.Arg0 != nil {
 			newExpr := expression.Equal(
 				expression.Identifier("arg0"),
@@ -924,7 +987,7 @@ func rewriteSyscallEventFilter(sef *api.SyscallEventFilter) {
 				sef.FilterExpression, newExpr)
 			sef.Arg5 = nil
 		}
-	} else if sef.Type == api.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT {
+	} else if sef.Type == telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT {
 		if sef.Ret != nil {
 			newExpr := expression.Equal(
 				expression.Identifier("ret"),
@@ -936,20 +999,20 @@ func rewriteSyscallEventFilter(sef *api.SyscallEventFilter) {
 	}
 }
 
-func containsIDFilter(expr *api.Expression) bool {
+func containsIDFilter(expr *telemetryAPI.Expression) bool {
 	if expr != nil {
 		switch expr.GetType() {
-		case api.Expression_LOGICAL_AND:
+		case telemetryAPI.Expression_LOGICAL_AND:
 			operands := expr.GetBinaryOp()
 			return containsIDFilter(operands.Lhs) ||
 				containsIDFilter(operands.Rhs)
-		case api.Expression_LOGICAL_OR:
+		case telemetryAPI.Expression_LOGICAL_OR:
 			operands := expr.GetBinaryOp()
 			return containsIDFilter(operands.Lhs) &&
 				containsIDFilter(operands.Rhs)
-		case api.Expression_EQ:
+		case telemetryAPI.Expression_EQ:
 			operands := expr.GetBinaryOp()
-			if operands.Lhs.GetType() != api.Expression_IDENTIFIER {
+			if operands.Lhs.GetType() != telemetryAPI.Expression_IDENTIFIER {
 				return false
 			}
 			if operands.Lhs.GetIdentifier() != "id" {
@@ -961,8 +1024,8 @@ func containsIDFilter(expr *api.Expression) bool {
 	return false
 }
 
-func (s *Subscription) registerSyscallEvents(events []*api.SyscallEventFilter) {
-	var enterFilter, exitFilter *api.Expression
+func (s *Subscription) registerSyscallEvents(events []*telemetryAPI.SyscallEventFilter) {
+	var enterFilter, exitFilter *telemetryAPI.Expression
 
 	for _, e := range events {
 		// Translate deprecated fields into an expression
@@ -976,10 +1039,10 @@ func (s *Subscription) registerSyscallEvents(events []*api.SyscallEventFilter) {
 		}
 
 		switch t := e.GetType(); t {
-		case api.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER:
+		case telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER:
 			enterFilter = expression.LogicalOr(enterFilter,
 				e.FilterExpression)
-		case api.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT:
+		case telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT:
 			exitFilter = expression.LogicalOr(exitFilter,
 				e.FilterExpression)
 		default:
@@ -990,7 +1053,7 @@ func (s *Subscription) registerSyscallEvents(events []*api.SyscallEventFilter) {
 	}
 
 	if enterFilter != nil {
-		if expr, err := expression.NewExpression(enterFilter); err == nil {
+		if expr, err := expression.ConvertExpression(enterFilter, SyscallEnterEventTypes); err == nil {
 			s.RegisterSyscallEnterEventFilter(expr)
 		} else {
 			s.logStatus(
@@ -998,7 +1061,7 @@ func (s *Subscription) registerSyscallEvents(events []*api.SyscallEventFilter) {
 		}
 	}
 	if exitFilter != nil {
-		if expr, err := expression.NewExpression(exitFilter); err == nil {
+		if expr, err := expression.ConvertExpression(exitFilter, SyscallExitEventTypes); err == nil {
 			s.RegisterSyscallExitEventFilter(expr)
 		} else {
 			s.logStatus(
@@ -1007,14 +1070,47 @@ func (s *Subscription) registerSyscallEvents(events []*api.SyscallEventFilter) {
 	}
 }
 
-func (s *Subscription) registerTickerEvents(events []*api.TickerEventFilter) {
+func (s *Subscription) registerTickerEvents(events []*telemetryAPI.TickerEventFilter) {
 	for _, e := range events {
 		s.RegisterTickerEventFilter(e.Interval, nil)
 	}
 }
 
-func newTelemetryEvent(e TelemetryEventData) *api.TelemetryEvent {
-	event := &api.TelemetryEvent{
+func (s *Subscription) registerUserFunctionCallEvents(events []*telemetryAPI.UserFunctionCallFilter) {
+	for _, e := range events {
+		var onReturn bool
+		switch e.Type {
+		case telemetryAPI.UserFunctionCallEventType_USER_FUNCTION_CALL_EVENT_TYPE_ENTER:
+			onReturn = false
+		case telemetryAPI.UserFunctionCallEventType_USER_FUNCTION_CALL_EVENT_TYPE_EXIT:
+			onReturn = true
+		default:
+			s.logStatus(
+				fmt.Sprintf("UserFunctionCallEventType %d is invalid", e.Type))
+			continue
+		}
+
+		var filterExpression *expression.Expression
+		if expr := e.GetFilterExpression(); expr != nil {
+			var err error
+			// Types cannot be bound here, because they're dynamic
+			// This is a special case for now and will be done later.
+			filterExpression, err = expression.ConvertExpression(expr, nil)
+			if err != nil {
+				s.logStatus(
+					fmt.Sprintf("Invalid filter expression for user function call filter: %v", err))
+				continue
+			}
+		}
+
+		s.RegisterUserFunctionCallEventFilter(e.Executable, e.Symbol, onReturn,
+			e.Arguments, filterExpression)
+	}
+}
+
+// NewTelemetryEvent creates a filled TelemetryEvent from a TelemetryEventData
+func NewTelemetryEvent(e TelemetryEventData) *telemetryAPI.TelemetryEvent {
+	event := &telemetryAPI.TelemetryEvent{
 		Id:                   e.EventID,
 		ProcessId:            e.ProcessID,
 		ProcessPid:           int32(e.PID),
@@ -1030,7 +1126,7 @@ func newTelemetryEvent(e TelemetryEventData) *api.TelemetryEvent {
 	}
 
 	if e.HasCredentials {
-		event.Credentials = &api.Credentials{
+		event.Credentials = &telemetryAPI.Credentials{
 			Uid:   e.Credentials.UID,
 			Gid:   e.Credentials.GID,
 			Euid:  e.Credentials.EUID,
@@ -1045,21 +1141,21 @@ func newTelemetryEvent(e TelemetryEventData) *api.TelemetryEvent {
 	return event
 }
 
-func translateNetworkAddress(addr NetworkAddressTelemetryEventData) *api.NetworkAddress {
+func translateNetworkAddress(addr NetworkAddressTelemetryEventData) *telemetryAPI.NetworkAddress {
 	switch addr.Family {
 	case unix.AF_LOCAL:
-		return &api.NetworkAddress{
-			Family: api.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_LOCAL,
-			Address: &api.NetworkAddress_LocalAddress{
+		return &telemetryAPI.NetworkAddress{
+			Family: telemetryAPI.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_LOCAL,
+			Address: &telemetryAPI.NetworkAddress_LocalAddress{
 				LocalAddress: addr.UnixPath,
 			},
 		}
 	case unix.AF_INET:
-		return &api.NetworkAddress{
-			Family: api.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_INET,
-			Address: &api.NetworkAddress_Ipv4Address{
-				Ipv4Address: &api.IPv4AddressAndPort{
-					Address: &api.IPv4Address{
+		return &telemetryAPI.NetworkAddress{
+			Family: telemetryAPI.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_INET,
+			Address: &telemetryAPI.NetworkAddress_Ipv4Address{
+				Ipv4Address: &telemetryAPI.IPv4AddressAndPort{
+					Address: &telemetryAPI.IPv4Address{
 						Address: addr.IPv4Address,
 					},
 					Port: uint32(addr.IPv4Port),
@@ -1067,11 +1163,11 @@ func translateNetworkAddress(addr NetworkAddressTelemetryEventData) *api.Network
 			},
 		}
 	case unix.AF_INET6:
-		return &api.NetworkAddress{
-			Family: api.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_INET6,
-			Address: &api.NetworkAddress_Ipv6Address{
-				Ipv6Address: &api.IPv6AddressAndPort{
-					Address: &api.IPv6Address{
+		return &telemetryAPI.NetworkAddress{
+			Family: telemetryAPI.NetworkAddressFamily_NETWORK_ADDRESS_FAMILY_INET6,
+			Address: &telemetryAPI.NetworkAddress_Ipv6Address{
+				Ipv6Address: &telemetryAPI.IPv6AddressAndPort{
+					Address: &telemetryAPI.IPv6Address{
 						High: addr.IPv6AddressHigh,
 						Low:  addr.IPv6AddressLow,
 					},
@@ -1083,7 +1179,9 @@ func translateNetworkAddress(addr NetworkAddressTelemetryEventData) *api.Network
 	return nil
 }
 
-func (s *Subscription) translateEvent(ev TelemetryEvent) *api.TelemetryEvent {
+// TranslateTelemetryEvent translates a sensor telemetry event into a telemetry
+// service TelemetryEvent.
+func (s *Subscription) TranslateTelemetryEvent(ev TelemetryEvent) *telemetryAPI.TelemetryEvent {
 	eventData := ev.CommonTelemetryEventData()
 	if len(eventData.Container.ID) > 0 && len(eventData.Container.Name) == 0 {
 		// We have a container ID without a name. Let's see if
@@ -1094,21 +1192,21 @@ func (s *Subscription) translateEvent(ev TelemetryEvent) *api.TelemetryEvent {
 			eventData.Container = *ci
 		}
 	}
-	event := newTelemetryEvent(eventData)
+	event := NewTelemetryEvent(eventData)
 
 	switch e := ev.(type) {
 	case ChargenTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Chargen{
-			Chargen: &api.ChargenEvent{
+		event.Event = &telemetryAPI.TelemetryEvent_Chargen{
+			Chargen: &telemetryAPI.ChargenEvent{
 				Index:      e.Index,
 				Characters: e.Characters,
 			},
 		}
 
 	case ContainerCreatedTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Container{
-			Container: &api.ContainerEvent{
-				Type:             api.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
+		event.Event = &telemetryAPI.TelemetryEvent_Container{
+			Container: &telemetryAPI.ContainerEvent{
+				Type:             telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_CREATED,
 				Name:             e.Container.Name,
 				ImageId:          e.Container.ImageID,
 				ImageName:        e.Container.ImageName,
@@ -1119,9 +1217,9 @@ func (s *Subscription) translateEvent(ev TelemetryEvent) *api.TelemetryEvent {
 		}
 
 	case ContainerDestroyedTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Container{
-			Container: &api.ContainerEvent{
-				Type:             api.ContainerEventType_CONTAINER_EVENT_TYPE_DESTROYED,
+		event.Event = &telemetryAPI.TelemetryEvent_Container{
+			Container: &telemetryAPI.ContainerEvent{
+				Type:             telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_DESTROYED,
 				Name:             e.Container.Name,
 				ImageId:          e.Container.ImageID,
 				ImageName:        e.Container.ImageName,
@@ -1139,9 +1237,9 @@ func (s *Subscription) translateEvent(ev TelemetryEvent) *api.TelemetryEvent {
 		if ws.Signaled() {
 			exitSignal = uint32(ws.Signal())
 		}
-		event.Event = &api.TelemetryEvent_Container{
-			Container: &api.ContainerEvent{
-				Type:             api.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
+		event.Event = &telemetryAPI.TelemetryEvent_Container{
+			Container: &telemetryAPI.ContainerEvent{
+				Type:             telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_EXITED,
 				Name:             e.Container.Name,
 				ImageId:          e.Container.ImageID,
 				ImageName:        e.Container.ImageName,
@@ -1155,9 +1253,9 @@ func (s *Subscription) translateEvent(ev TelemetryEvent) *api.TelemetryEvent {
 			},
 		}
 	case ContainerRunningTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Container{
-			Container: &api.ContainerEvent{
-				Type:             api.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
+		event.Event = &telemetryAPI.TelemetryEvent_Container{
+			Container: &telemetryAPI.ContainerEvent{
+				Type:             telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_RUNNING,
 				Name:             e.Container.Name,
 				ImageId:          e.Container.ImageID,
 				ImageName:        e.Container.ImageName,
@@ -1168,9 +1266,9 @@ func (s *Subscription) translateEvent(ev TelemetryEvent) *api.TelemetryEvent {
 		}
 
 	case ContainerUpdatedTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Container{
-			Container: &api.ContainerEvent{
-				Type:             api.ContainerEventType_CONTAINER_EVENT_TYPE_UPDATED,
+		event.Event = &telemetryAPI.TelemetryEvent_Container{
+			Container: &telemetryAPI.ContainerEvent{
+				Type:             telemetryAPI.ContainerEventType_CONTAINER_EVENT_TYPE_UPDATED,
 				Name:             e.Container.Name,
 				ImageId:          e.Container.ImageID,
 				ImageName:        e.Container.ImageName,
@@ -1180,199 +1278,305 @@ func (s *Subscription) translateEvent(ev TelemetryEvent) *api.TelemetryEvent {
 			},
 		}
 
+	case FileCreateTelemetryEvent:
+		event.Event = &telemetryAPI.TelemetryEvent_File{
+			File: &telemetryAPI.FileEvent{
+				Type:     telemetryAPI.FileEventType_FILE_EVENT_TYPE_CREATE,
+				Filename: e.Filename,
+				OpenMode: e.Mode,
+			},
+		}
+
+	case FileDeleteTelemetryEvent:
+		event.Event = &telemetryAPI.TelemetryEvent_File{
+			File: &telemetryAPI.FileEvent{
+				Type:     telemetryAPI.FileEventType_FILE_EVENT_TYPE_DELETE,
+				Filename: e.Filename,
+			},
+		}
+
+	case FileLinkTelemetryEvent:
+		event.Event = &telemetryAPI.TelemetryEvent_File{
+			File: &telemetryAPI.FileEvent{
+				Type:       telemetryAPI.FileEventType_FILE_EVENT_TYPE_LINK,
+				SourceFile: e.SourceFile,
+				TargetFile: e.TargetFile,
+				Symlink:    e.Symlink,
+			},
+		}
+
+	case FileModifyTelemetryEvent:
+		event.Event = &telemetryAPI.TelemetryEvent_File{
+			File: &telemetryAPI.FileEvent{
+				Type:     telemetryAPI.FileEventType_FILE_EVENT_TYPE_MODIFY,
+				Filename: e.Filename,
+			},
+		}
+
 	case FileOpenTelemetryEvent:
-		event.Event = &api.TelemetryEvent_File{
-			File: &api.FileEvent{
-				Type:      api.FileEventType_FILE_EVENT_TYPE_OPEN,
+		event.Event = &telemetryAPI.TelemetryEvent_File{
+			File: &telemetryAPI.FileEvent{
+				Type:      telemetryAPI.FileEventType_FILE_EVENT_TYPE_OPEN,
 				Filename:  e.Filename,
 				OpenFlags: e.Flags,
 				OpenMode:  e.Mode,
 			},
 		}
 
+	case FileRenameTelemetryEvent:
+		event.Event = &telemetryAPI.TelemetryEvent_File{
+			File: &telemetryAPI.FileEvent{
+				Type:    telemetryAPI.FileEventType_FILE_EVENT_TYPE_RENAME,
+				Oldname: e.Oldname,
+				Newname: e.Newname,
+			},
+		}
+
+	case FileOpenForModifyTelemetryEvent:
+		event.Event = &telemetryAPI.TelemetryEvent_File{
+			File: &telemetryAPI.FileEvent{
+				Type:     telemetryAPI.FileEventType_FILE_EVENT_TYPE_OPEN_FOR_MODIFY,
+				Filename: e.Filename,
+			},
+		}
+
+	case FileCloseForModifyTelemetryEvent:
+		event.Event = &telemetryAPI.TelemetryEvent_File{
+			File: &telemetryAPI.FileEvent{
+				Type:     telemetryAPI.FileEventType_FILE_EVENT_TYPE_CLOSE_FOR_MODIFY,
+				Filename: e.Filename,
+			},
+		}
+
+	case FileAttributeChangeTelemetryEvent:
+		event.Event = &telemetryAPI.TelemetryEvent_File{
+			File: &telemetryAPI.FileEvent{
+				Type:     telemetryAPI.FileEventType_FILE_EVENT_TYPE_ATTRIBUTE_CHANGE,
+				Filename: e.Filename,
+			},
+		}
+
 	case KernelFunctionCallTelemetryEvent:
-		args := make(map[string]*api.KernelFunctionCallEvent_FieldValue)
+		args := make(map[string]*telemetryAPI.KernelFunctionCallEvent_FieldValue)
 		for k, v := range e.Arguments {
-			value := &api.KernelFunctionCallEvent_FieldValue{}
+			value := &telemetryAPI.KernelFunctionCallEvent_FieldValue{}
 			switch v := v.(type) {
 			case []byte:
-				value.FieldType = api.KernelFunctionCallEvent_BYTES
-				value.Value = &api.KernelFunctionCallEvent_FieldValue_BytesValue{BytesValue: v}
+				value.FieldType = telemetryAPI.KernelFunctionCallEvent_BYTES
+				value.Value = &telemetryAPI.KernelFunctionCallEvent_FieldValue_BytesValue{BytesValue: v}
 			case string:
-				value.FieldType = api.KernelFunctionCallEvent_STRING
-				value.Value = &api.KernelFunctionCallEvent_FieldValue_StringValue{StringValue: v}
+				value.FieldType = telemetryAPI.KernelFunctionCallEvent_STRING
+				value.Value = &telemetryAPI.KernelFunctionCallEvent_FieldValue_StringValue{StringValue: v}
 			case int8:
-				value.FieldType = api.KernelFunctionCallEvent_SINT8
-				value.Value = &api.KernelFunctionCallEvent_FieldValue_SignedValue{SignedValue: int64(v)}
+				value.FieldType = telemetryAPI.KernelFunctionCallEvent_SINT8
+				value.Value = &telemetryAPI.KernelFunctionCallEvent_FieldValue_SignedValue{SignedValue: int64(v)}
 			case int16:
-				value.FieldType = api.KernelFunctionCallEvent_SINT16
-				value.Value = &api.KernelFunctionCallEvent_FieldValue_SignedValue{SignedValue: int64(v)}
+				value.FieldType = telemetryAPI.KernelFunctionCallEvent_SINT16
+				value.Value = &telemetryAPI.KernelFunctionCallEvent_FieldValue_SignedValue{SignedValue: int64(v)}
 			case int32:
-				value.FieldType = api.KernelFunctionCallEvent_SINT32
-				value.Value = &api.KernelFunctionCallEvent_FieldValue_SignedValue{SignedValue: int64(v)}
+				value.FieldType = telemetryAPI.KernelFunctionCallEvent_SINT32
+				value.Value = &telemetryAPI.KernelFunctionCallEvent_FieldValue_SignedValue{SignedValue: int64(v)}
 			case int64:
-				value.FieldType = api.KernelFunctionCallEvent_SINT64
-				value.Value = &api.KernelFunctionCallEvent_FieldValue_SignedValue{SignedValue: v}
+				value.FieldType = telemetryAPI.KernelFunctionCallEvent_SINT64
+				value.Value = &telemetryAPI.KernelFunctionCallEvent_FieldValue_SignedValue{SignedValue: v}
 			case uint8:
-				value.FieldType = api.KernelFunctionCallEvent_UINT8
-				value.Value = &api.KernelFunctionCallEvent_FieldValue_UnsignedValue{UnsignedValue: uint64(v)}
+				value.FieldType = telemetryAPI.KernelFunctionCallEvent_UINT8
+				value.Value = &telemetryAPI.KernelFunctionCallEvent_FieldValue_UnsignedValue{UnsignedValue: uint64(v)}
 			case uint16:
-				value.FieldType = api.KernelFunctionCallEvent_UINT16
-				value.Value = &api.KernelFunctionCallEvent_FieldValue_UnsignedValue{UnsignedValue: uint64(v)}
+				value.FieldType = telemetryAPI.KernelFunctionCallEvent_UINT16
+				value.Value = &telemetryAPI.KernelFunctionCallEvent_FieldValue_UnsignedValue{UnsignedValue: uint64(v)}
 			case uint32:
-				value.FieldType = api.KernelFunctionCallEvent_UINT32
-				value.Value = &api.KernelFunctionCallEvent_FieldValue_UnsignedValue{UnsignedValue: uint64(v)}
+				value.FieldType = telemetryAPI.KernelFunctionCallEvent_UINT32
+				value.Value = &telemetryAPI.KernelFunctionCallEvent_FieldValue_UnsignedValue{UnsignedValue: uint64(v)}
 			case uint64:
-				value.FieldType = api.KernelFunctionCallEvent_UINT64
-				value.Value = &api.KernelFunctionCallEvent_FieldValue_UnsignedValue{UnsignedValue: v}
+				value.FieldType = telemetryAPI.KernelFunctionCallEvent_UINT64
+				value.Value = &telemetryAPI.KernelFunctionCallEvent_FieldValue_UnsignedValue{UnsignedValue: v}
 			}
 			args[k] = value
 		}
-		event.Event = &api.TelemetryEvent_KernelCall{
-			KernelCall: &api.KernelFunctionCallEvent{
+		event.Event = &telemetryAPI.TelemetryEvent_KernelCall{
+			KernelCall: &telemetryAPI.KernelFunctionCallEvent{
 				Arguments: args,
 			},
 		}
 
 	case NetworkAcceptAttemptTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Network{
-			Network: &api.NetworkEvent{
-				Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_ATTEMPT,
+		event.Event = &telemetryAPI.TelemetryEvent_Network{
+			Network: &telemetryAPI.NetworkEvent{
+				Type:   telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_ATTEMPT,
 				Sockfd: e.FD,
 			},
 		}
 
 	case NetworkAcceptResultTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Network{
-			Network: &api.NetworkEvent{
-				Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_RESULT,
+		event.Event = &telemetryAPI.TelemetryEvent_Network{
+			Network: &telemetryAPI.NetworkEvent{
+				Type:   telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_ACCEPT_RESULT,
 				Result: e.Return,
 			},
 		}
 
 	case NetworkBindAttemptTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Network{
-			Network: &api.NetworkEvent{
-				Type:    api.NetworkEventType_NETWORK_EVENT_TYPE_BIND_ATTEMPT,
+		event.Event = &telemetryAPI.TelemetryEvent_Network{
+			Network: &telemetryAPI.NetworkEvent{
+				Type:    telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_BIND_ATTEMPT,
 				Sockfd:  e.FD,
 				Address: translateNetworkAddress(e.NetworkAddressTelemetryEventData),
 			},
 		}
 
 	case NetworkBindResultTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Network{
-			Network: &api.NetworkEvent{
-				Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_BIND_RESULT,
+		event.Event = &telemetryAPI.TelemetryEvent_Network{
+			Network: &telemetryAPI.NetworkEvent{
+				Type:   telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_BIND_RESULT,
 				Result: e.Return,
 			},
 		}
 
 	case NetworkConnectAttemptTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Network{
-			Network: &api.NetworkEvent{
-				Type:    api.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_ATTEMPT,
+		event.Event = &telemetryAPI.TelemetryEvent_Network{
+			Network: &telemetryAPI.NetworkEvent{
+				Type:    telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_ATTEMPT,
 				Sockfd:  e.FD,
 				Address: translateNetworkAddress(e.NetworkAddressTelemetryEventData),
 			},
 		}
 
 	case NetworkConnectResultTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Network{
-			Network: &api.NetworkEvent{
-				Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_RESULT,
+		event.Event = &telemetryAPI.TelemetryEvent_Network{
+			Network: &telemetryAPI.NetworkEvent{
+				Type:   telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_CONNECT_RESULT,
 				Result: e.Return,
 			},
 		}
 
 	case NetworkListenAttemptTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Network{
-			Network: &api.NetworkEvent{
-				Type:    api.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_ATTEMPT,
+		event.Event = &telemetryAPI.TelemetryEvent_Network{
+			Network: &telemetryAPI.NetworkEvent{
+				Type:    telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_ATTEMPT,
 				Sockfd:  e.FD,
 				Backlog: e.Backlog,
 			},
 		}
 
 	case NetworkListenResultTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Network{
-			Network: &api.NetworkEvent{
-				Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_RESULT,
+		event.Event = &telemetryAPI.TelemetryEvent_Network{
+			Network: &telemetryAPI.NetworkEvent{
+				Type:   telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_LISTEN_RESULT,
 				Result: e.Return,
 			},
 		}
 
 	case NetworkRecvfromAttemptTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Network{
-			Network: &api.NetworkEvent{
-				Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_ATTEMPT,
+		event.Event = &telemetryAPI.TelemetryEvent_Network{
+			Network: &telemetryAPI.NetworkEvent{
+				Type:   telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_ATTEMPT,
 				Sockfd: e.FD,
 			},
 		}
 
 	case NetworkRecvfromResultTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Network{
-			Network: &api.NetworkEvent{
-				Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_RESULT,
+		event.Event = &telemetryAPI.TelemetryEvent_Network{
+			Network: &telemetryAPI.NetworkEvent{
+				Type:   telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_RECVFROM_RESULT,
 				Result: e.Return,
 			},
 		}
 
 	case NetworkSendtoAttemptTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Network{
-			Network: &api.NetworkEvent{
-				Type:    api.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_ATTEMPT,
+		event.Event = &telemetryAPI.TelemetryEvent_Network{
+			Network: &telemetryAPI.NetworkEvent{
+				Type:    telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_ATTEMPT,
 				Sockfd:  e.FD,
 				Address: translateNetworkAddress(e.NetworkAddressTelemetryEventData),
 			},
 		}
 
 	case NetworkSendtoResultTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Network{
-			Network: &api.NetworkEvent{
-				Type:   api.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_RESULT,
+		event.Event = &telemetryAPI.TelemetryEvent_Network{
+			Network: &telemetryAPI.NetworkEvent{
+				Type:   telemetryAPI.NetworkEventType_NETWORK_EVENT_TYPE_SENDTO_RESULT,
 				Result: e.Return,
 			},
 		}
 
 	case PerformanceTelemetryEvent:
-		values := make([]*api.PerformanceEventValue, len(e.Counters))
+		values := make([]*telemetryAPI.PerformanceEventValue, len(e.Counters))
 		for i, v := range e.Counters {
-			var t api.PerformanceEventType
+			var t telemetryAPI.PerformanceEventType
 			switch v.EventType {
 			case perf.EventTypeHardware:
-				t = api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE
+				t = telemetryAPI.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE
 			case perf.EventTypeHardwareCache:
-				t = api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE_CACHE
+				t = telemetryAPI.PerformanceEventType_PERFORMANCE_EVENT_TYPE_HARDWARE_CACHE
 			case perf.EventTypeSoftware:
-				t = api.PerformanceEventType_PERFORMANCE_EVENT_TYPE_SOFTWARE
+				t = telemetryAPI.PerformanceEventType_PERFORMANCE_EVENT_TYPE_SOFTWARE
 			}
-			values[i] = &api.PerformanceEventValue{
+			values[i] = &telemetryAPI.PerformanceEventValue{
 				Type:   t,
 				Config: v.Config,
 				Value:  v.Value,
 			}
 		}
-		event.Event = &api.TelemetryEvent_Performance{
-			Performance: &api.PerformanceEvent{
+		event.Event = &telemetryAPI.TelemetryEvent_Performance{
+			Performance: &telemetryAPI.PerformanceEvent{
 				TotalTimeEnabled: e.TotalTimeEnabled,
 				TotalTimeRunning: e.TotalTimeRunning,
 				Values:           values,
 			},
 		}
 
+	case LostRecordTelemetryEvent:
+		var t telemetryAPI.LostRecordEventType
+		switch e.Type {
+		case LostRecordTypeUnknown:
+			t = telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_UNKNOWN
+		case LostRecordTypeSubscription:
+			t = telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_SUBSCRIPTION
+		case LostRecordTypeProcess:
+			t = telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_PROCESS
+		case LostRecordTypeContainer:
+			t = telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_CONTAINER
+		case LostRecordTypeFileCreate:
+			t = telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_CREATE
+		case LostRecordTypeFileDelete:
+			t = telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_DELETE
+		case LostRecordTypeFileLink:
+			t = telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_LINK
+		case LostRecordTypeFileSymlink:
+			t = telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_SYMLINK
+		case LostRecordTypeFileOpenModify:
+			t = telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_OPEN_MODIFY
+		case LostRecordTypeFileCloseModify:
+			t = telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_CLOSE_MODIFY
+		case LostRecordTypeFileModify:
+			t = telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_MODIFY
+		case LostRecordTypeFileRename:
+			t = telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_RENAME
+		case LostRecordTypeFileAttributeChange:
+			t = telemetryAPI.LostRecordEventType_LOST_RECORD_EVENT_TYPE_FILE_ATTRIBUTE_CHANGE
+		}
+		event.Event = &telemetryAPI.TelemetryEvent_Lost{
+			Lost: &telemetryAPI.LostRecordEvent{
+				Lost: e.Lost,
+				Type: t,
+			},
+		}
+
 	case ProcessExecTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Process{
-			Process: &api.ProcessEvent{
-				Type:            api.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
+		event.Event = &telemetryAPI.TelemetryEvent_Process{
+			Process: &telemetryAPI.ProcessEvent{
+				Type:            telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXEC,
 				ExecFilename:    e.Filename,
 				ExecCommandLine: e.CommandLine,
+				UpdateCwd:       e.CWD,
 			},
 		}
 
 	case ProcessExitTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Process{
-			Process: &api.ProcessEvent{
-				Type:           api.ProcessEventType_PROCESS_EVENT_TYPE_EXIT,
+		event.Event = &telemetryAPI.TelemetryEvent_Process{
+			Process: &telemetryAPI.ProcessEvent{
+				Type:           telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_EXIT,
 				ExitCode:       e.ExitCode,
 				ExitStatus:     e.ExitStatus,
 				ExitSignal:     e.ExitSignal,
@@ -1381,26 +1585,29 @@ func (s *Subscription) translateEvent(ev TelemetryEvent) *api.TelemetryEvent {
 		}
 
 	case ProcessForkTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Process{
-			Process: &api.ProcessEvent{
-				Type:         api.ProcessEventType_PROCESS_EVENT_TYPE_FORK,
-				ForkChildId:  e.ChildProcessID,
-				ForkChildPid: e.ChildPID,
+		event.Event = &telemetryAPI.TelemetryEvent_Process{
+			Process: &telemetryAPI.ProcessEvent{
+				Type:           telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_FORK,
+				ForkChildId:    e.ChildProcessID,
+				ForkChildPid:   e.ChildPID,
+				ForkCloneFlags: e.CloneFlags,
+				ForkStackStart: e.StackStart,
+				UpdateCwd:      e.CWD,
 			},
 		}
 
 	case ProcessUpdateTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Process{
-			Process: &api.ProcessEvent{
-				Type:      api.ProcessEventType_PROCESS_EVENT_TYPE_UPDATE,
+		event.Event = &telemetryAPI.TelemetryEvent_Process{
+			Process: &telemetryAPI.ProcessEvent{
+				Type:      telemetryAPI.ProcessEventType_PROCESS_EVENT_TYPE_UPDATE,
 				UpdateCwd: e.CWD,
 			},
 		}
 
 	case SyscallEnterTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Syscall{
-			Syscall: &api.SyscallEvent{
-				Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
+		event.Event = &telemetryAPI.TelemetryEvent_Syscall{
+			Syscall: &telemetryAPI.SyscallEvent{
+				Type: telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_ENTER,
 				Id:   e.ID,
 				Arg0: e.Arguments[0],
 				Arg1: e.Arguments[1],
@@ -1412,19 +1619,63 @@ func (s *Subscription) translateEvent(ev TelemetryEvent) *api.TelemetryEvent {
 		}
 
 	case SyscallExitTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Syscall{
-			Syscall: &api.SyscallEvent{
-				Type: api.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT,
+		event.Event = &telemetryAPI.TelemetryEvent_Syscall{
+			Syscall: &telemetryAPI.SyscallEvent{
+				Type: telemetryAPI.SyscallEventType_SYSCALL_EVENT_TYPE_EXIT,
 				Id:   e.ID,
 				Ret:  e.Return,
 			},
 		}
 
 	case TickerTelemetryEvent:
-		event.Event = &api.TelemetryEvent_Ticker{
-			Ticker: &api.TickerEvent{
+		event.Event = &telemetryAPI.TelemetryEvent_Ticker{
+			Ticker: &telemetryAPI.TickerEvent{
 				Seconds:     e.Seconds,
 				Nanoseconds: e.Nanoseconds,
+			},
+		}
+
+	case UserFunctionCallTelemetryEvent:
+		args := make(map[string]*telemetryAPI.UserFunctionCallEvent_FieldValue)
+		for k, v := range e.Arguments {
+			value := &telemetryAPI.UserFunctionCallEvent_FieldValue{}
+			switch v := v.(type) {
+			case []byte:
+				value.FieldType = telemetryAPI.UserFunctionCallEvent_BYTES
+				value.Value = &telemetryAPI.UserFunctionCallEvent_FieldValue_BytesValue{BytesValue: v}
+			case string:
+				value.FieldType = telemetryAPI.UserFunctionCallEvent_STRING
+				value.Value = &telemetryAPI.UserFunctionCallEvent_FieldValue_StringValue{StringValue: v}
+			case int8:
+				value.FieldType = telemetryAPI.UserFunctionCallEvent_SINT8
+				value.Value = &telemetryAPI.UserFunctionCallEvent_FieldValue_SignedValue{SignedValue: int64(v)}
+			case int16:
+				value.FieldType = telemetryAPI.UserFunctionCallEvent_SINT16
+				value.Value = &telemetryAPI.UserFunctionCallEvent_FieldValue_SignedValue{SignedValue: int64(v)}
+			case int32:
+				value.FieldType = telemetryAPI.UserFunctionCallEvent_SINT32
+				value.Value = &telemetryAPI.UserFunctionCallEvent_FieldValue_SignedValue{SignedValue: int64(v)}
+			case int64:
+				value.FieldType = telemetryAPI.UserFunctionCallEvent_SINT64
+				value.Value = &telemetryAPI.UserFunctionCallEvent_FieldValue_SignedValue{SignedValue: v}
+			case uint8:
+				value.FieldType = telemetryAPI.UserFunctionCallEvent_UINT8
+				value.Value = &telemetryAPI.UserFunctionCallEvent_FieldValue_UnsignedValue{UnsignedValue: uint64(v)}
+			case uint16:
+				value.FieldType = telemetryAPI.UserFunctionCallEvent_UINT16
+				value.Value = &telemetryAPI.UserFunctionCallEvent_FieldValue_UnsignedValue{UnsignedValue: uint64(v)}
+			case uint32:
+				value.FieldType = telemetryAPI.UserFunctionCallEvent_UINT32
+				value.Value = &telemetryAPI.UserFunctionCallEvent_FieldValue_UnsignedValue{UnsignedValue: uint64(v)}
+			case uint64:
+				value.FieldType = telemetryAPI.UserFunctionCallEvent_UINT64
+				value.Value = &telemetryAPI.UserFunctionCallEvent_FieldValue_UnsignedValue{UnsignedValue: v}
+			}
+			args[k] = value
+		}
+		event.Event = &telemetryAPI.TelemetryEvent_UserCall{
+			UserCall: &telemetryAPI.UserFunctionCallEvent{
+				Arguments: args,
 			},
 		}
 	}

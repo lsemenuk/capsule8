@@ -20,14 +20,89 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"reflect"
-	"sync"
 	"testing"
+
+	"github.com/capsule8/capsule8/pkg/expression"
+
+	"github.com/stretchr/testify/assert"
 )
+
+func TestCheckRawDataSize(t *testing.T) {
+	rawData := make([]byte, 8)
+
+	// have 8, want 16 -> error
+	err := checkRawDataSize(rawData, 16)
+	assert.Error(t, err)
+
+	// have 8, want 8 -> ok
+	err = checkRawDataSize(rawData, 8)
+	assert.NoError(t, err)
+
+	// have 8, want 4 -> ok
+	err = checkRawDataSize(rawData, 4)
+	assert.NoError(t, err)
+}
+
+func TestComputeSizes(t *testing.T) {
+	testCases := []struct {
+		sampleType         uint64
+		readFormat         uint64
+		sizeofSampleID     int
+		sizeofSampleRecord int
+	}{
+		{PERF_SAMPLE_TID, 0, 8, 8},
+		{PERF_SAMPLE_TIME, 0, 8, 8},
+		{PERF_SAMPLE_ID, 0, 8, 8},
+		{PERF_SAMPLE_STREAM_ID, 0, 8, 8},
+		{PERF_SAMPLE_CPU, 0, 8, 8},
+		{PERF_SAMPLE_IDENTIFIER, 0, 8, 8},
+		{PERF_SAMPLE_TID | PERF_SAMPLE_TIME, 0, 16, 16},
+		{PERF_SAMPLE_ID | PERF_SAMPLE_CPU, 0, 16, 16},
+		{PERF_SAMPLE_TID | PERF_SAMPLE_TIME | PERF_SAMPLE_ID, 0, 24, 24},
+		{PERF_SAMPLE_IDENTIFIER | PERF_SAMPLE_TID | PERF_SAMPLE_STREAM_ID, 0, 24, 24},
+		{PERF_SAMPLE_TID | PERF_SAMPLE_TIME | PERF_SAMPLE_ID | PERF_SAMPLE_CPU, 0, 32, 32},
+		{PERF_SAMPLE_TID | PERF_SAMPLE_TIME | PERF_SAMPLE_ID |
+			PERF_SAMPLE_STREAM_ID | PERF_SAMPLE_CPU |
+			PERF_SAMPLE_IDENTIFIER, 0, 48, 48},
+
+		{PERF_SAMPLE_IP, 0, 0, 8},
+		{PERF_SAMPLE_ADDR, 0, 0, 8},
+		{PERF_SAMPLE_PERIOD, 0, 0, 8},
+
+		{PERF_SAMPLE_READ, 0, 0, 8},
+		{PERF_SAMPLE_READ, PERF_FORMAT_ID, 0, 16},
+		{PERF_SAMPLE_READ, PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_TOTAL_TIME_RUNNING, 0, 24},
+		{PERF_SAMPLE_READ, PERF_FORMAT_GROUP, 0, 8},
+		{PERF_SAMPLE_READ, PERF_FORMAT_GROUP | PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_TOTAL_TIME_RUNNING, 0, 24},
+
+		{PERF_SAMPLE_CALLCHAIN, 0, 0, 8},
+		{PERF_SAMPLE_RAW, 0, 0, 4},
+		{PERF_SAMPLE_BRANCH_STACK, 0, 0, 8},
+	}
+	for _, tc := range testCases {
+		ea := EventAttr{
+			SampleType: tc.sampleType,
+			ReadFormat: tc.readFormat,
+		}
+		ea.computeSizes()
+		assert.Equal(t, tc.sizeofSampleID, ea.sizeofSampleID)
+		assert.Equal(t, tc.sizeofSampleRecord, ea.sizeofSampleRecord)
+	}
+}
 
 func (bf *eventAttrBitfield) testBit(bit uint64) bool {
 	return *bf&eventAttrBitfield(bit) == eventAttrBitfield(bit)
+}
+
+type readError struct {
+	error
+}
+
+func readOrPanic(buf io.Reader, i interface{}) {
+	if err := binary.Read(buf, binary.LittleEndian, i); err != nil {
+		panic(readError{err})
+	}
 }
 
 func (ea *EventAttr) read(buf io.Reader) (err error) {
@@ -268,20 +343,19 @@ func TestEventAttrWriteSizes(t *testing.T) {
 	for _, tc := range sizeTestCases {
 		writeBuffer := &bytes.Buffer{}
 		err := tc.attr.write(writeBuffer)
-		ok(t, err)
+		assert.NoError(t, err)
 
 		var actualSize, actualType uint32
 		readBuffer := bytes.NewBuffer(writeBuffer.Bytes())
 		binary.Read(readBuffer, binary.LittleEndian, &actualType)
 		binary.Read(readBuffer, binary.LittleEndian, &actualSize)
 
-		assert(t, actualSize == tc.size,
-			"wrong size (expected %d; got %d)", tc.size, actualSize)
+		assert.Equal(t, tc.size, actualSize)
 
 		// Don't check the exact size of the write buffer here since
 		// all fields are always written. But the length should be at
 		// least as long as the size.
-		assert(t, actualSize <= uint32(writeBuffer.Len()),
+		assert.Truef(t, actualSize <= uint32(writeBuffer.Len()),
 			"bytes written does not match attr.Size (expected %d; got %d)",
 			actualSize, writeBuffer.Len())
 	}
@@ -329,7 +403,7 @@ func TestEventAttrWriteFailures(t *testing.T) {
 	for _, attr := range failAttrs {
 		writeBuffer := &bytes.Buffer{}
 		err := attr.write(writeBuffer)
-		assert(t, err != nil, "expected error for %+v", attr)
+		assert.Error(t, err)
 	}
 }
 
@@ -388,15 +462,15 @@ func TestEventAttrWriteContent(t *testing.T) {
 	for _, expectedAttr := range testCases {
 		writeBuffer := &bytes.Buffer{}
 		err := expectedAttr.write(writeBuffer)
-		assert(t, err == nil, "unexpected error for %+v: %v", expectedAttr, err)
+		assert.NoError(t, err)
 
 		var actualAttr EventAttr
 		readBuffer := bytes.NewBuffer(writeBuffer.Bytes())
 		err = actualAttr.read(readBuffer)
-		assert(t, err == nil, "unexpected error for %+v: %v", expectedAttr, err)
-
-		assert(t, reflect.DeepEqual(expectedAttr, actualAttr),
-			"\n\n\texp: %#v\n\n\tgot: %#v\n\n", expectedAttr, actualAttr)
+		if assert.NoError(t, err) {
+			actualAttr.computeSizes()
+			assert.Equal(t, expectedAttr, actualAttr)
+		}
 	}
 
 	bitfieldNames := []string{
@@ -414,146 +488,53 @@ func TestEventAttrWriteContent(t *testing.T) {
 		reflect.ValueOf(ea).Elem().FieldByName(name).SetBool(true)
 		writeBuffer := &bytes.Buffer{}
 		err := ea.write(writeBuffer)
-		assert(t, err == nil, "unexpected error for bitfield %s: %v", name, err)
+		assert.NoError(t, err)
 
 		var actualAttr EventAttr
 		readBuffer := bytes.NewBuffer(writeBuffer.Bytes())
 		err = actualAttr.read(readBuffer)
-		assert(t, err == nil, "unexpected error for bitfield %s: %v", name, err)
+		assert.NoError(t, err)
 
-		assert(t, reflect.DeepEqual(*ea, actualAttr),
-			"bitfield %s not serialized properly\n\n\texp: %#v\n\n\tgot: %#v\n\n",
-			name, ea, actualAttr)
+		assert.Equal(t, *ea, actualAttr)
 	}
-}
-
-func TestEventHeaderRead(t *testing.T) {
-	expectedHeader := eventHeader{
-		Type: 827634,
-		Misc: 23746,
-		Size: 26734,
-	}
-	writeBuffer := &bytes.Buffer{}
-	err := binary.Write(writeBuffer, binary.LittleEndian, expectedHeader)
-	ok(t, err)
-
-	var actualHeader eventHeader
-	readBuffer := bytes.NewBuffer(writeBuffer.Bytes())
-	err = actualHeader.read(readBuffer)
-	ok(t, err)
-	equals(t, expectedHeader, actualHeader)
-}
-
-func TestCommRecordRead(t *testing.T) {
-	expectedRecord := CommRecord{
-		Pid:  72463,
-		Tid:  297843,
-		Comm: []byte{'b', 'a', 's', 'h'},
-	}
-	writeBuffer := &bytes.Buffer{}
-	err := binary.Write(writeBuffer, binary.LittleEndian, expectedRecord.Pid)
-	ok(t, err)
-	err = binary.Write(writeBuffer, binary.LittleEndian, expectedRecord.Tid)
-	ok(t, err)
-	_, err = writeBuffer.Write(expectedRecord.Comm)
-	ok(t, err)
-	padding := make([]byte, 8-len(expectedRecord.Comm))
-	_, err = writeBuffer.Write(padding)
-	ok(t, err)
-
-	var actualRecord CommRecord
-	readBuffer := bytes.NewBuffer(writeBuffer.Bytes())
-	actualRecord.read(readBuffer)
-	equals(t, expectedRecord, actualRecord)
-}
-
-func TestExitRecordRead(t *testing.T) {
-	expectedRecord := ExitRecord{
-		Pid:  28374,
-		Ppid: 937845,
-		Tid:  9248375,
-		Ptid: 23487,
-		Time: 2934685723958647,
-	}
-	writeBuffer := &bytes.Buffer{}
-	err := binary.Write(writeBuffer, binary.LittleEndian, expectedRecord)
-	ok(t, err)
-
-	var actualRecord ExitRecord
-	readBuffer := bytes.NewBuffer(writeBuffer.Bytes())
-	actualRecord.read(readBuffer)
-	equals(t, expectedRecord, actualRecord)
-}
-
-func TestLostRecordRead(t *testing.T) {
-	expectedRecord := LostRecord{
-		ID:   923784,
-		Lost: 92837447,
-	}
-	writeBuffer := &bytes.Buffer{}
-	err := binary.Write(writeBuffer, binary.LittleEndian, expectedRecord)
-	ok(t, err)
-
-	var actualRecord LostRecord
-	readBuffer := bytes.NewBuffer(writeBuffer.Bytes())
-	actualRecord.read(readBuffer)
-	equals(t, expectedRecord, actualRecord)
-}
-
-func TestForkRecordRead(t *testing.T) {
-	expectedRecord := ForkRecord{
-		Pid:  97843,
-		Ppid: 293847,
-		Tid:  239487,
-		Ptid: 203498,
-		Time: 92837645928456,
-	}
-	writeBuffer := &bytes.Buffer{}
-	err := binary.Write(writeBuffer, binary.LittleEndian, expectedRecord)
-	ok(t, err)
-
-	var actualRecord ForkRecord
-	readBuffer := bytes.NewBuffer(writeBuffer.Bytes())
-	actualRecord.read(readBuffer)
-	equals(t, expectedRecord, actualRecord)
 }
 
 func (cg *CounterGroup) write(t *testing.T, writeBuffer io.Writer, format uint64) {
 	if format&PERF_FORMAT_GROUP != 0 {
 		err := binary.Write(writeBuffer, binary.LittleEndian, uint64(len(cg.Values)))
-		ok(t, err)
+		assert.NoError(t, err)
 		if format&PERF_FORMAT_TOTAL_TIME_ENABLED != 0 {
 			err = binary.Write(writeBuffer, binary.LittleEndian, cg.TimeEnabled)
-			ok(t, err)
+			assert.NoError(t, err)
 		}
 		if format&PERF_FORMAT_TOTAL_TIME_RUNNING != 0 {
 			err = binary.Write(writeBuffer, binary.LittleEndian, cg.TimeRunning)
-			ok(t, err)
+			assert.NoError(t, err)
 		}
 		for _, v := range cg.Values {
 			err = binary.Write(writeBuffer, binary.LittleEndian, v.Value)
-			ok(t, err)
+			assert.NoError(t, err)
 			if format&PERF_FORMAT_ID != 0 {
 				err = binary.Write(writeBuffer, binary.LittleEndian, v.ID)
-				ok(t, err)
+				assert.NoError(t, err)
 			}
 		}
 	} else {
-		equals(t, 1, len(cg.Values)) // ensure the test is correct
+		assert.Len(t, cg.Values, 1) // ensure the test is correct
 
 		err := binary.Write(writeBuffer, binary.LittleEndian, cg.Values[0].Value)
-		ok(t, err)
+		assert.NoError(t, err)
 		if format&PERF_FORMAT_TOTAL_TIME_ENABLED != 0 {
 			err = binary.Write(writeBuffer, binary.LittleEndian, cg.TimeEnabled)
-			ok(t, err)
+			assert.NoError(t, err)
 		}
 		if format&PERF_FORMAT_TOTAL_TIME_RUNNING != 0 {
 			err = binary.Write(writeBuffer, binary.LittleEndian, cg.TimeRunning)
-			ok(t, err)
+			assert.NoError(t, err)
 		}
 		if format&PERF_FORMAT_ID != 0 {
 			err = binary.Write(writeBuffer, binary.LittleEndian, cg.Values[0].ID)
-			ok(t, err)
+			assert.NoError(t, err)
 		}
 	}
 }
@@ -570,90 +551,135 @@ func TestCounterGroupRead(t *testing.T) {
 		},
 	}
 
-	format := PERF_FORMAT_GROUP | PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_TOTAL_TIME_RUNNING | PERF_FORMAT_ID
-	writeBuffer := &bytes.Buffer{}
-	expectedGroup.write(t, writeBuffer, format)
+	expectedZeroFormatGroup := CounterGroup{
+		Values: []CounterValue{
+			CounterValue{
+				Value: 879649587,
+			},
+		},
+	}
 
-	var actualGroup CounterGroup
-	readBuffer := bytes.NewBuffer(writeBuffer.Bytes())
-	actualGroup.read(readBuffer, format)
-	equals(t, expectedGroup, actualGroup)
+	type testCase struct {
+		expected CounterGroup
+		format   uint64
+		offset   int
+	}
 
-	format = PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_TOTAL_TIME_RUNNING | PERF_FORMAT_ID
-	writeBuffer = &bytes.Buffer{}
-	expectedGroup.write(t, writeBuffer, format)
+	testCases := []testCase{
+		testCase{
+			expected: expectedGroup,
+			format:   PERF_FORMAT_GROUP | PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_TOTAL_TIME_RUNNING | PERF_FORMAT_ID,
+			offset:   40,
+		},
+		testCase{
+			expected: expectedGroup,
+			format:   PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_TOTAL_TIME_RUNNING | PERF_FORMAT_ID,
+			offset:   32,
+		},
+		testCase{
+			expected: expectedZeroFormatGroup,
+			format:   PERF_FORMAT_GROUP,
+			offset:   16,
+		},
+		testCase{
+			expected: expectedZeroFormatGroup,
+			format:   0,
+			offset:   8,
+		},
+	}
+	for _, tc := range testCases {
+		writeBuffer := &bytes.Buffer{}
+		tc.expected.write(t, writeBuffer, tc.format)
 
-	actualGroup = CounterGroup{}
-	readBuffer = bytes.NewBuffer(writeBuffer.Bytes())
-	actualGroup.read(readBuffer, format)
-	equals(t, expectedGroup, actualGroup)
+		var actualGroup CounterGroup
+		o, err := actualGroup.read(writeBuffer.Bytes(), tc.format)
+		if assert.NoError(t, err) {
+			assert.Equal(t, tc.offset, o)
+			assert.Equal(t, tc.expected, actualGroup)
+		}
+	}
+
+	// Test for handling of truncated data
+	badFormats := []uint64{
+		PERF_FORMAT_GROUP,
+		PERF_FORMAT_GROUP | PERF_FORMAT_ID,
+	}
+	for _, format := range badFormats {
+		writeBuffer := &bytes.Buffer{}
+		expectedGroup.write(t, writeBuffer, format)
+
+		var actualGroup CounterGroup
+		b := writeBuffer.Bytes()
+		_, err := actualGroup.read(b[:len(b)-2], format)
+		assert.Error(t, err)
+	}
 }
 
-func (s *SampleRecord) write(t *testing.T, w io.Writer, attr EventAttr) {
+func (s *Sample) write(t *testing.T, w io.Writer, attr EventAttr) {
 	if attr.SampleType&PERF_SAMPLE_IDENTIFIER != 0 {
-		err := binary.Write(w, binary.LittleEndian, s.SampleID)
-		ok(t, err)
+		err := binary.Write(w, binary.LittleEndian, s.ID)
+		assert.NoError(t, err)
 	}
 	if attr.SampleType&PERF_SAMPLE_IP != 0 {
 		err := binary.Write(w, binary.LittleEndian, s.IP)
-		ok(t, err)
+		assert.NoError(t, err)
 	}
 	if attr.SampleType&PERF_SAMPLE_TID != 0 {
-		err := binary.Write(w, binary.LittleEndian, s.Pid)
-		ok(t, err)
-		err = binary.Write(w, binary.LittleEndian, s.Tid)
+		err := binary.Write(w, binary.LittleEndian, s.PID)
+		assert.NoError(t, err)
+		err = binary.Write(w, binary.LittleEndian, s.TID)
 	}
 	if attr.SampleType&PERF_SAMPLE_TIME != 0 {
 		err := binary.Write(w, binary.LittleEndian, s.Time)
-		ok(t, err)
+		assert.NoError(t, err)
 	}
 	if attr.SampleType&PERF_SAMPLE_ADDR != 0 {
 		err := binary.Write(w, binary.LittleEndian, s.Addr)
-		ok(t, err)
+		assert.NoError(t, err)
 	}
 	if attr.SampleType&PERF_SAMPLE_ID != 0 {
 		err := binary.Write(w, binary.LittleEndian, s.ID)
-		ok(t, err)
+		assert.NoError(t, err)
 	}
 	if attr.SampleType&PERF_SAMPLE_STREAM_ID != 0 {
 		err := binary.Write(w, binary.LittleEndian, s.StreamID)
-		ok(t, err)
+		assert.NoError(t, err)
 	}
 	if attr.SampleType&PERF_SAMPLE_CPU != 0 {
 		err := binary.Write(w, binary.LittleEndian, s.CPU)
-		ok(t, err)
+		assert.NoError(t, err)
 		err = binary.Write(w, binary.LittleEndian, uint32(0))
-		ok(t, err)
+		assert.NoError(t, err)
 	}
 	if attr.SampleType&PERF_SAMPLE_PERIOD != 0 {
 		err := binary.Write(w, binary.LittleEndian, s.Period)
-		ok(t, err)
+		assert.NoError(t, err)
 	}
 	if attr.SampleType&PERF_SAMPLE_READ != 0 {
 		s.V.write(t, w, attr.ReadFormat)
 	}
 	if attr.SampleType&PERF_SAMPLE_CALLCHAIN != 0 {
 		err := binary.Write(w, binary.LittleEndian, uint64(len(s.IPs)))
-		ok(t, err)
+		assert.NoError(t, err)
 		for _, ip := range s.IPs {
 			err = binary.Write(w, binary.LittleEndian, ip)
-			ok(t, err)
+			assert.NoError(t, err)
 		}
 	}
 	if attr.SampleType&PERF_SAMPLE_RAW != 0 {
 		err := binary.Write(w, binary.LittleEndian, uint32(len(s.RawData)))
-		ok(t, err)
+		assert.NoError(t, err)
 		_, err = w.Write(s.RawData)
-		ok(t, err)
+		assert.NoError(t, err)
 	}
 	if attr.SampleType&PERF_SAMPLE_BRANCH_STACK != 0 {
 		err := binary.Write(w, binary.LittleEndian, uint64(len(s.Branches)))
-		ok(t, err)
+		assert.NoError(t, err)
 		for _, b := range s.Branches {
 			err = binary.Write(w, binary.LittleEndian, b.From)
-			ok(t, err)
+			assert.NoError(t, err)
 			err = binary.Write(w, binary.LittleEndian, b.To)
-			ok(t, err)
+			assert.NoError(t, err)
 
 			var flags uint64
 			if b.Mispred {
@@ -670,23 +696,24 @@ func (s *SampleRecord) write(t *testing.T, w io.Writer, attr EventAttr) {
 			}
 			flags |= uint64(b.Cycles) << 4
 			err = binary.Write(w, binary.LittleEndian, flags)
-			ok(t, err)
+			assert.NoError(t, err)
 		}
 	}
 }
 
-func TestSampleRecordRead(t *testing.T) {
-	expectedRecord := SampleRecord{
-		SampleID: 0,        // PERF_SAMPLE_IDENTIFIER
-		IP:       98276345, // PERF_SAMPLE_IP
-		Pid:      237846,   // PERF_SAMPLE_TID
-		Tid:      287346,
-		Time:     23948576, // PERF_SAMPLE_TIME
-		Addr:     9467805,  // PERF_SAMPLE_ADDR
-		ID:       423,      // PERF_SAMPLE_ID
-		StreamID: 3598,     // PERF_SAMPLE_STREAM_ID
-		CPU:      2,        // PERF_SAMPLE_CPU
-		Period:   876,      // PERF_SAMPLE_PERIOD
+func TestSampleReadSampleRecord(t *testing.T) {
+	expectedRecord := Sample{
+		SampleID: SampleID{
+			ID:       423,      // PERF_SAMPLE_ID
+			StreamID: 3598,     // PERF_SAMPLE_STREAM_ID
+			CPU:      2,        // PERF_SAMPLE_CPU
+			Time:     23948576, // PERF_SAMPLE_TIME
+			PID:      237846,   // PERF_SAMPLE_TID
+			TID:      287346,
+		},
+		IP:     98276345, // PERF_SAMPLE_IP
+		Addr:   9467805,  // PERF_SAMPLE_ADDR
+		Period: 876,      // PERF_SAMPLE_PERIOD
 
 		// PERF_SAMPLE_READ
 		V: CounterGroup{
@@ -737,78 +764,75 @@ func TestSampleRecordRead(t *testing.T) {
 	writeBuffer := &bytes.Buffer{}
 	expectedRecord.write(t, writeBuffer, attr)
 
-	var actualRecord SampleRecord
-	readBuffer := bytes.NewBuffer(writeBuffer.Bytes())
-	actualRecord.read(readBuffer, &attr)
-	equals(t, expectedRecord, actualRecord)
-}
-
-func TestSampleIDGetSize(t *testing.T) {
-	sampleTypes := map[uint64]int{
-		PERF_SAMPLE_TID:        8,
-		PERF_SAMPLE_TIME:       8,
-		PERF_SAMPLE_ID:         8,
-		PERF_SAMPLE_STREAM_ID:  8,
-		PERF_SAMPLE_CPU:        8,
-		PERF_SAMPLE_IDENTIFIER: 8,
-
-		PERF_SAMPLE_TID | PERF_SAMPLE_TIME: 16,
-		PERF_SAMPLE_ID | PERF_SAMPLE_CPU:   16,
-
-		PERF_SAMPLE_TID | PERF_SAMPLE_TIME | PERF_SAMPLE_ID:              24,
-		PERF_SAMPLE_IDENTIFIER | PERF_SAMPLE_TID | PERF_SAMPLE_STREAM_ID: 24,
-
-		PERF_SAMPLE_TID | PERF_SAMPLE_TIME | PERF_SAMPLE_ID | PERF_SAMPLE_CPU: 32,
+	var actualRecord Sample
+	err := actualRecord.readSampleRecord(writeBuffer.Bytes(), &attr)
+	if assert.NoError(t, err) {
+		assert.Equal(t, expectedRecord, actualRecord)
 	}
-	sampleTypes[PERF_SAMPLE_TID|PERF_SAMPLE_TIME|PERF_SAMPLE_ID|
-		PERF_SAMPLE_STREAM_ID|PERF_SAMPLE_CPU|
-		PERF_SAMPLE_IDENTIFIER] = 48
 
-	wg := sync.WaitGroup{}
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			for x := 0; x < 100; x++ {
-				s := SampleID{}
-				for sampleType, expectedSize := range sampleTypes {
-					size := s.getSize(sampleType, true)
-					equals(t, expectedSize, size)
-				}
-			}
-			wg.Done()
-		}()
+	// Ensure that variable length sample types propagate errors up when
+	// the data is not available.
+	varSampleTypes := []uint64{
+		PERF_SAMPLE_READ,
+		PERF_SAMPLE_CALLCHAIN,
+		PERF_SAMPLE_RAW,
+		PERF_SAMPLE_BRANCH_STACK,
 	}
-	wg.Wait()
+	for _, sampleType := range varSampleTypes {
+		attr.SampleType = sampleType
+		writeBuffer = &bytes.Buffer{}
+		expectedRecord.write(t, writeBuffer, attr)
+		b := writeBuffer.Bytes()
+		err = actualRecord.readSampleRecord(b[:len(b)-2], &attr)
+		assert.Error(t, err)
+	}
+
+	// Ensure unimplemented sample types result in an error
+	badSampleTypes := []uint64{
+		PERF_SAMPLE_REGS_USER,
+		PERF_SAMPLE_STACK_USER,
+		PERF_SAMPLE_WEIGHT,
+		PERF_SAMPLE_DATA_SRC,
+		PERF_SAMPLE_TRANSACTION,
+		PERF_SAMPLE_REGS_INTR,
+	}
+	for _, sampleType := range badSampleTypes {
+		attr.SampleType = sampleType
+		writeBuffer = &bytes.Buffer{}
+		expectedRecord.write(t, writeBuffer, attr)
+		err = actualRecord.readSampleRecord(writeBuffer.Bytes(), &attr)
+		assert.Error(t, err)
+	}
 }
 
 func (sid *SampleID) write(t *testing.T, w io.Writer, sampleType uint64) {
 	if sampleType&PERF_SAMPLE_TID != 0 {
 		err := binary.Write(w, binary.LittleEndian, sid.PID)
-		ok(t, err)
+		assert.NoError(t, err)
 		err = binary.Write(w, binary.LittleEndian, sid.TID)
-		ok(t, err)
+		assert.NoError(t, err)
 	}
 	if sampleType&PERF_SAMPLE_TIME != 0 {
 		err := binary.Write(w, binary.LittleEndian, sid.Time)
-		ok(t, err)
+		assert.NoError(t, err)
 	}
 	if sampleType&PERF_SAMPLE_ID != 0 {
 		err := binary.Write(w, binary.LittleEndian, sid.ID)
-		ok(t, err)
+		assert.NoError(t, err)
 	}
 	if sampleType&PERF_SAMPLE_STREAM_ID != 0 {
 		err := binary.Write(w, binary.LittleEndian, sid.StreamID)
-		ok(t, err)
+		assert.NoError(t, err)
 	}
 	if sampleType&PERF_SAMPLE_CPU != 0 {
 		err := binary.Write(w, binary.LittleEndian, sid.CPU)
-		ok(t, err)
+		assert.NoError(t, err)
 		err = binary.Write(w, binary.LittleEndian, uint32(0))
-		ok(t, err)
+		assert.NoError(t, err)
 	}
 	if sampleType&PERF_SAMPLE_IDENTIFIER != 0 {
 		err := binary.Write(w, binary.LittleEndian, sid.ID)
-		ok(t, err)
+		assert.NoError(t, err)
 	}
 }
 
@@ -828,9 +852,9 @@ func TestSampleIDRead(t *testing.T) {
 	expectedSampleID.write(t, writeBuffer, sampleType)
 
 	var actualSampleID SampleID
-	readBuffer := bytes.NewBuffer(writeBuffer.Bytes())
-	actualSampleID.read(readBuffer, sampleType)
-	equals(t, expectedSampleID, actualSampleID)
+	actualSampleID.read(writeBuffer.Bytes(),
+		&EventAttr{SampleType: sampleType})
+	assert.Equal(t, expectedSampleID, actualSampleID)
 }
 
 func TestSampleResolveEventAttr(t *testing.T) {
@@ -838,187 +862,435 @@ func TestSampleResolveEventAttr(t *testing.T) {
 		SampleType:  PERF_SAMPLE_IDENTIFIER, // must be set
 		SampleIDAll: true,                   // must be set
 	}
-	formatMap := map[uint64]EventAttr{
-		768435: expectedEventAttr,
+	formatMap := map[uint64]*EventAttr{
+		768435: &expectedEventAttr,
 	}
 	expectedSampleID := uint64(768435)
 
-	// 1. eventAttr is supplied non-nil for PERF_RECORD_SAMPLE
+	// 1. sampleID is in formatMap for PERF_RECORD_SAMPLE
 	sample := Sample{}
 	sample.Type = PERF_RECORD_SAMPLE
 	writeBuffer := &bytes.Buffer{}
 	err := binary.Write(writeBuffer, binary.LittleEndian, expectedSampleID)
-	ok(t, err)
-	readBuffer := bytes.NewReader(writeBuffer.Bytes())
-	actualSampleID, actualEventAttr :=
-		sample.resolveEventAttr(readBuffer, 0, &expectedEventAttr, nil)
-	equals(t, expectedSampleID, actualSampleID)
-	equals(t, expectedEventAttr, *actualEventAttr)
+	assert.NoError(t, err)
 
-	// 2. eventAttr is nil, sampleID is in formatMap for PERF_RECORD_SAMPLE
-	readBuffer.Seek(0, os.SEEK_SET)
-	actualSampleID, actualEventAttr =
-		sample.resolveEventAttr(readBuffer, 0, nil, formatMap)
-	equals(t, expectedSampleID, actualSampleID)
-	equals(t, expectedEventAttr, *actualEventAttr)
+	actualEventAttr, err := sample.resolveEventAttr(writeBuffer.Bytes(), formatMap)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedEventAttr, *actualEventAttr)
 
-	// 3. eventAttr is supplied non-nil for !PERF_RECORD_SAMPLE
+	// 2. sampleID is not in formatMap for PERF_RECORD_SAMPLE
+	sample = Sample{}
+	sample.Type = PERF_RECORD_SAMPLE
+	writeBuffer = &bytes.Buffer{}
+	err = binary.Write(writeBuffer, binary.LittleEndian, ^expectedSampleID)
+	assert.NoError(t, err)
+
+	_, err = sample.resolveEventAttr(writeBuffer.Bytes(), formatMap)
+	assert.Error(t, err)
+
+	// 3. sampleID is in formatMap for !PERF_RECORD_SAMPLE
 	sample = Sample{}
 	sample.Type = PERF_RECORD_LOST
-	sample.Size = 24
 	writeBuffer = &bytes.Buffer{}
 	err = binary.Write(writeBuffer, binary.LittleEndian, uint64(237456))
-	ok(t, err)
+	assert.NoError(t, err)
 	err = binary.Write(writeBuffer, binary.LittleEndian, uint64(238476))
-	ok(t, err)
+	assert.NoError(t, err)
 	err = binary.Write(writeBuffer, binary.LittleEndian, expectedSampleID)
-	ok(t, err)
-	readBuffer = bytes.NewReader(writeBuffer.Bytes())
-	actualSampleID, actualEventAttr =
-		sample.resolveEventAttr(readBuffer, 0, &expectedEventAttr, nil)
+	assert.NoError(t, err)
 
-	// 4. eventAttr is nil, sampleID is in formatMap for !PERF_RECORD_SAMPLE
-	readBuffer.Seek(0, os.SEEK_SET)
-	actualSampleID, actualEventAttr =
-		sample.resolveEventAttr(readBuffer, 0, nil, formatMap)
-	equals(t, expectedSampleID, actualSampleID)
-	equals(t, expectedEventAttr, *actualEventAttr)
-}
+	actualEventAttr, err = sample.resolveEventAttr(writeBuffer.Bytes(), formatMap)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedEventAttr, *actualEventAttr)
 
-func makeNonSampleRecord(
-	t *testing.T,
-	attr EventAttr,
-	typ uint32,
-	i interface{},
-	nbytes uint16,
-) io.ReadSeeker {
-	expectedSampleID := SampleID{
-		PID:      987243,
-		TID:      92387,
-		Time:     23965,
-		ID:       123,
-		StreamID: 87456,
-		CPU:      1,
-	}
+	// 4. sampleID is not in formatMap for !PERF_RECORD_SAMPLE
+	sample = Sample{}
+	sample.Type = PERF_RECORD_LOST
+	writeBuffer = &bytes.Buffer{}
+	err = binary.Write(writeBuffer, binary.LittleEndian, uint64(237456))
+	assert.NoError(t, err)
+	err = binary.Write(writeBuffer, binary.LittleEndian, uint64(238476))
+	assert.NoError(t, err)
+	err = binary.Write(writeBuffer, binary.LittleEndian, ^expectedSampleID)
+	assert.NoError(t, err)
 
-	size := nbytes + uint16(expectedSampleID.getSize(attr.SampleType, true))
-	writeBuffer := &bytes.Buffer{}
-	eh := eventHeader{typ, 0, size}
-	err := binary.Write(writeBuffer, binary.LittleEndian, eh)
-	ok(t, err)
-	err = binary.Write(writeBuffer, binary.LittleEndian, i)
-	ok(t, err)
-	expectedSampleID.write(t, writeBuffer, attr.SampleType)
+	_, err = sample.resolveEventAttr(writeBuffer.Bytes(), formatMap)
+	assert.Error(t, err)
 
-	return bytes.NewReader(writeBuffer.Bytes())
-}
-
-func makeSampleRecord(
-	t *testing.T,
-	attr EventAttr,
-	sr SampleRecord,
-) io.ReadSeeker {
-	writeBuffer := &bytes.Buffer{}
-	eh := eventHeader{PERF_RECORD_SAMPLE, 0, 48}
-	err := binary.Write(writeBuffer, binary.LittleEndian, eh)
-	ok(t, err)
-	sr.write(t, writeBuffer, attr)
-
-	return bytes.NewReader(writeBuffer.Bytes())
+	// 5. Not enough data is present to resolve EventAttr
+	shortData := [4]byte{0x11, 0x22, 0x33, 0x44}
+	_, err = sample.resolveEventAttr(shortData[:], formatMap)
+	assert.Error(t, err)
 }
 
 func TestSampleRead(t *testing.T) {
 	attr := EventAttr{
-		SampleType: PERF_SAMPLE_TID | PERF_SAMPLE_TIME |
-			PERF_SAMPLE_ID | PERF_SAMPLE_STREAM_ID |
-			PERF_SAMPLE_CPU | PERF_SAMPLE_IDENTIFIER,
+		SampleType:  PERF_SAMPLE_IDENTIFIER | PERF_SAMPLE_RAW,
 		SampleIDAll: true,
 	}
-	formatMap := map[uint64]EventAttr{
-		123: attr,
+	attr.computeSizes()
+	formatMap := map[uint64]*EventAttr{
+		123: &attr,
 	}
 
-	// PERF_RECORD_FORK
-	fr := ForkRecord{
-		Pid:  278634,
-		Ppid: 827634,
-		Tid:  93784,
-		Ptid: 294387,
-		Time: 2834765324,
+	testCases := []struct {
+		rawData        []byte
+		eventAttr      *EventAttr
+		formatMap      map[uint64]*EventAttr
+		expectError    bool
+		expectedN      int
+		expectedSample Sample
+	}{
+		// Error: not enough eventHeader data (0)
+		{
+			rawData: []byte{
+				0x11, 0x22, 0x33, 0x44, // eventHeader
+			},
+			expectError: true,
+		},
+		// Error: not enough total data (1)
+		{
+			rawData: []byte{
+				0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, // eventHeader
+			},
+			expectError: true,
+		},
+		// No error: eventHeader.Size == sizeofEventHeader (2)
+		{
+			rawData: []byte{
+				0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x08, 0x00, // eventHeader
+			},
+			expectedN: 8,
+			expectedSample: Sample{
+				Type: 0x44332211,
+				Misc: 0x6655,
+			},
+		},
+		// Error: cannot resolve eventAttr (3)
+		{
+			rawData: []byte{
+				0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0A, 0x00, // eventHeader
+				0x00, 0x00, // PERF_SAMPLE_IDENTIFIER
+			},
+			expectError: true,
+			formatMap:   formatMap,
+		},
+		// Error: not PERF_RECORD_SAMPLE, not enough data for SampleID (4)
+		{
+			rawData: []byte{
+				0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0A, 0x00, // eventHeader
+				0x00, 0x00, // PERF_SAMPLE_IDENTIFIER
+			},
+			eventAttr:   &attr,
+			expectError: true,
+		},
+		// Error: PERF_RECORD_LOST incomplete LostRecord (5)
+		{
+			rawData: []byte{
+				0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x00, // eventHeader
+				0x7B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // LostRecord.Id
+				0x7B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // PERF_SAMPLE_IDENTIFIER
+			},
+			eventAttr:   &attr,
+			expectError: true,
+		},
+		// No error: PERF_RECORD_LOST (6)
+		{
+			rawData: []byte{
+				0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, // eventHeader
+				0x7B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // LostRecord.Id
+				0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, // LostRecord.Lost
+				0x7B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // PERF_SAMPLE_IDENTIFIER
+			},
+			eventAttr: &attr,
+			expectedN: 32,
+			expectedSample: Sample{
+				Type: PERF_RECORD_LOST,
+				SampleID: SampleID{
+					ID: 123,
+				},
+				Lost: 0x8877665544332211,
+			},
+		},
+		// Error: PERF_RECORD_SAMPLE incomplete SampleRecord (7)
+		{
+			rawData: []byte{
+				0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x14, 0x00, // eventHeader
+				0x7B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // PERF_SAMPLE_IDENTIFIER
+				0x20, 0x00, 0x00, 0x00, // PERF_SAMPLE_RAW
+			},
+			eventAttr:   &attr,
+			expectError: true,
+		},
+		// No error: PERF_SAMPLE_SAMPLE (8)
+		{
+			rawData: []byte{
+				0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x00, // eventHeader
+				0x7B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // PERF_SAMPLE_IDENTIFIER
+				0x04, 0x00, 0x00, 0x00, 0x11, 0x22, 0x33, 0x44, // PERF_SAMPLE_RAW
+			},
+			eventAttr: &attr,
+			expectedN: 24,
+			expectedSample: Sample{
+				Type: PERF_RECORD_SAMPLE,
+				SampleID: SampleID{
+					ID: 123,
+				},
+				RawData: []byte{0x11, 0x22, 0x33, 0x44},
+			},
+		},
 	}
-	r := makeNonSampleRecord(t, attr, PERF_RECORD_FORK, fr, sizeofForkRecord)
-	sample := Sample{}
-	err := sample.read(r, nil, formatMap)
-	ok(t, err)
-	equals(t, &fr, sample.Record)
 
-	// PERF_RECORD_EXIT
-	er := ExitRecord{
-		Pid:  278634,
-		Ppid: 827634,
-		Tid:  93784,
-		Ptid: 294387,
-		Time: 2834765324,
+	for i, tc := range testCases {
+		var actualSample Sample
+
+		n, err := actualSample.read(tc.rawData, tc.eventAttr, tc.formatMap)
+		if tc.expectError {
+			assert.Errorf(t, err, "test case %d", i)
+		} else if assert.NoErrorf(t, err, "test case %d", i) {
+			assert.Equalf(t, tc.expectedN, n, "test case %d", i)
+			assert.Equalf(t, tc.expectedSample, actualSample, "test case %d", i)
+		}
 	}
-	r = makeNonSampleRecord(t, attr, PERF_RECORD_EXIT, er, sizeofExitRecord)
-	sample = Sample{}
-	err = sample.read(r, nil, formatMap)
-	ok(t, err)
-	equals(t, &er, sample.Record)
+}
 
-	// PERF_RECORD_LOST
-	lr := LostRecord{
-		ID:   872634,
-		Lost: 283746,
+func TestSampleDecodeRawData(t *testing.T) {
+	sample := Sample{
+		RawData: []byte{
+			0x1c, 0x00, 0x06, 0x00, // name4
+			0x22, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, // name8
+			0x11, 0x22, 0x33, 0x44, // pid
+			0x01, 0x01, 0x01, 0x01, 0x02, 0x02, 0x02, 0x02, // args
+			0x28, 0x00, 0x04, 0x00, // foo
+
+			'N', 'A', 'M', 'E', '4', 0,
+			'N', 'A', 'M', 'E', '8', 0,
+			0x11, 0x22, 0x33, 0x44,
+		},
+		TraceFormat: TraceEventFormat{
+			"name4": TraceEventField{
+				FieldName:    "name4",
+				Offset:       0,
+				DataType:     expression.ValueTypeString,
+				DataTypeSize: 1,
+				DataLocSize:  4,
+			},
+			"name8": TraceEventField{
+				FieldName:    "name8",
+				Offset:       4,
+				DataType:     expression.ValueTypeString,
+				DataTypeSize: 1,
+				DataLocSize:  8,
+			},
+			"pid": TraceEventField{
+				FieldName: "pid",
+				Offset:    12,
+				DataType:  expression.ValueTypeSignedInt32,
+			},
+			"args": TraceEventField{
+				FieldName:    "args",
+				Offset:       16,
+				DataType:     expression.ValueTypeUnsignedInt32,
+				DataTypeSize: 4,
+				ArraySize:    2,
+			},
+			"foo": TraceEventField{
+				FieldName:    "foo",
+				Offset:       24,
+				DataType:     expression.ValueTypeUnsignedInt8,
+				DataTypeSize: 1,
+				DataLocSize:  4,
+			},
+		},
 	}
-	r = makeNonSampleRecord(t, attr, PERF_RECORD_LOST, lr, sizeofLostRecord)
-	sample = Sample{}
-	err = sample.read(r, nil, formatMap)
-	ok(t, err)
-	equals(t, &lr, sample.Record)
 
-	// PERF_RECORD_COMM
-	cr := CommRecord{
-		Pid:  72463,
-		Tid:  297843,
-		Comm: []byte{'b', 'a', 's', 'h'},
+	e := expression.FieldValueMap{
+		"name4": "NAME4",
+		"name8": "NAME8",
+		"pid":   int32(0x44332211),
+		"args":  []interface{}{uint32(0x01010101), uint32(0x02020202)},
+		"foo":   []uint8{0x11, 0x22, 0x33, 0x44},
 	}
-	writeBuffer := &bytes.Buffer{}
-	err = binary.Write(writeBuffer, binary.LittleEndian, cr.Pid)
-	ok(t, err)
-	err = binary.Write(writeBuffer, binary.LittleEndian, cr.Tid)
-	ok(t, err)
-	_, err = writeBuffer.Write(cr.Comm)
-	ok(t, err)
-	_, err = writeBuffer.Write(make([]byte, 4))
-	ok(t, err)
 
-	r = makeNonSampleRecord(t, attr, PERF_RECORD_COMM,
-		writeBuffer.Bytes(), uint16(writeBuffer.Len()))
-	sample = Sample{}
-	err = sample.read(r, nil, formatMap)
-	ok(t, err)
-	equals(t, &cr, sample.Record)
+	data, err := sample.DecodeRawData()
+	assert.NoError(t, err)
+	assert.Equal(t, e, data)
 
-	// PERF_RECORD_SAMPLE
-	sr := SampleRecord{
-		SampleID: 123,
-		Pid:      287364,
-		Tid:      297834,
-		Time:     23487298347,
-		ID:       123,
-		StreamID: 123,
-		CPU:      6,
+	sample.TraceFormat = TraceEventFormat{
+		"error": TraceEventField{
+			FieldName:   "error",
+			DataLocSize: 16,
+		},
 	}
-	r = makeSampleRecord(t, attr, sr)
-	err = sample.read(r, &attr, nil)
-	ok(t, err)
-	equals(t, &sr, sample.Record)
+	_, err = sample.DecodeRawData()
+	assert.Error(t, err)
 
-	// ... anything else, not valid-ish ...
-	junk := []byte{1, 2, 3, 4, 5, 6, 7, 23, 4, 6}
-	r = makeNonSampleRecord(t, attr, 283746, junk, uint16(len(junk)))
-	sample = Sample{}
-	err = sample.read(r, &attr, formatMap)
-	ok(t, err)
+	sample.TraceFormat = TraceEventFormat{
+		"error": TraceEventField{
+			FieldName: "error",
+			DataType:  expression.ValueTypeString,
+		},
+	}
+	_, err = sample.DecodeRawData()
+	assert.Error(t, err)
+
+	sample.TraceFormat = TraceEventFormat{
+		"error": TraceEventField{
+			FieldName: "error",
+			DataType:  expression.ValueTypeString,
+			ArraySize: 4,
+		},
+	}
+	_, err = sample.DecodeRawData()
+	assert.Error(t, err)
+
+}
+
+func TestSampleDecodeValue(t *testing.T) {
+	sample := &Sample{
+		RawData: []byte{0x04, 0x00, 0x04, 0x00, 0x12, 0x34, 0x56, 0x78},
+		TraceFormat: TraceEventFormat{
+			"foo": TraceEventField{
+				FieldName:    "foo",
+				Size:         4,
+				IsSigned:     true,
+				DataType:     expression.ValueTypeSignedInt8,
+				DataTypeSize: 1,
+				DataLocSize:  4,
+			},
+		},
+	}
+
+	expectedValue := []int8{0x12, 0x34, 0x56, 0x78}
+	gotValue, err := sample.DecodeValue("foo")
+	assert.NoError(t, err)
+	assert.Equal(t, expectedValue, gotValue)
+
+	_, err = sample.DecodeValue("bar")
+	if assert.Error(t, err) {
+		assert.IsType(t, expression.FieldNotSet{}, err)
+	}
+}
+
+func TestSampleFieldValueGetterImplementation(t *testing.T) {
+	testCases := []struct {
+		method      string
+		dataType    expression.ValueType
+		dataLocSize int
+		rawData     []byte
+		alwaysFail  bool
+		expected    interface{}
+	}{
+		{
+			method:      "GetString",
+			dataType:    expression.ValueTypeString,
+			dataLocSize: 4,
+			rawData:     []byte{4, 0, 9, 0, 'c', 'a', 'p', 's', 'u', 'l', 'e', '8', 0},
+			expected:    "capsule8",
+		},
+		{
+			method:   "GetSignedInt8",
+			dataType: expression.ValueTypeSignedInt8,
+			rawData:  []byte{0x8},
+			expected: int8(0x8),
+		},
+		{
+			method:   "GetSignedInt16",
+			dataType: expression.ValueTypeSignedInt16,
+			rawData:  []byte{0x8, 0x8},
+			expected: int16(0x0808),
+		},
+		{
+			method:   "GetSignedInt32",
+			dataType: expression.ValueTypeSignedInt32,
+			rawData:  []byte{0x8, 0x8, 0x8, 0x8},
+			expected: int32(0x08080808),
+		},
+		{
+			method:   "GetSignedInt64",
+			dataType: expression.ValueTypeSignedInt64,
+			rawData:  []byte{0x8, 0x8, 0x8, 0x8, 0x8, 0x8, 0x8, 0x8},
+			expected: int64(0x0808080808080808),
+		},
+		{
+			method:   "GetUnsignedInt8",
+			dataType: expression.ValueTypeUnsignedInt8,
+			rawData:  []byte{0x88},
+			expected: uint8(0x88),
+		},
+		{
+			method:   "GetUnsignedInt16",
+			dataType: expression.ValueTypeUnsignedInt16,
+			rawData:  []byte{0x88, 0x88},
+			expected: uint16(0x8888),
+		},
+		{
+			method:   "GetUnsignedInt32",
+			dataType: expression.ValueTypeUnsignedInt32,
+			rawData:  []byte{0x88, 0x88, 0x88, 0x88},
+			expected: uint32(0x88888888),
+		},
+		{
+			method:   "GetUnsignedInt64",
+			dataType: expression.ValueTypeUnsignedInt64,
+			rawData:  []byte{0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88},
+			expected: uint64(0x8888888888888888),
+		},
+		{
+			method:     "GetBool",
+			dataType:   expression.ValueTypeBool,
+			alwaysFail: true,
+		},
+		{
+			method:     "GetDouble",
+			dataType:   expression.ValueTypeDouble,
+			alwaysFail: true,
+		},
+		{
+			method:     "GetTimestamp",
+			dataType:   expression.ValueTypeTimestamp,
+			alwaysFail: true,
+		},
+	}
+
+	sample := &Sample{
+		TraceFormat: TraceEventFormat{},
+	}
+	for i, tc := range testCases {
+		sample.RawData = tc.rawData
+		sample.TraceFormat["foo"] = TraceEventField{
+			FieldName:   "foo",
+			DataType:    tc.dataType,
+			DataLocSize: tc.dataLocSize,
+		}
+		method := reflect.ValueOf(sample).MethodByName(tc.method)
+
+		// Error: expression.FieldNotSet
+		r := method.Call([]reflect.Value{reflect.ValueOf("bar")})
+		if !r[1].IsNil() {
+			err := r[1].Interface().(error)
+			assert.Errorf(t, err, "index %d", i)
+		} else {
+			assert.Errorf(t, nil, "index %d", i)
+		}
+
+		if tc.alwaysFail {
+			r = method.Call([]reflect.Value{reflect.ValueOf("foo")})
+			if !r[1].IsNil() {
+				err := r[1].Interface().(error)
+				assert.Errorf(t, err, "index %d", i)
+			} else {
+				assert.Errorf(t, nil, "index %d", i)
+			}
+		} else {
+			// NoError
+			r = method.Call([]reflect.Value{reflect.ValueOf("foo")})
+			if r[1].IsNil() {
+				assert.Equalf(t, tc.expected, r[0].Interface(), "index %d", i)
+			} else {
+				err := r[1].Interface().(error)
+				assert.NoErrorf(t, err, "index %d", i)
+			}
+		}
+	}
 }

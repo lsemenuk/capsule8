@@ -20,17 +20,17 @@ import (
 	"os"
 	"syscall"
 
-	api "github.com/capsule8/capsule8/api/v0"
+	telemetryAPI "github.com/capsule8/capsule8/api/v0"
 )
 
-func fileTestDataMap() (map[string]*api.FileEvent, error) {
+func fileTestDataMap() (map[string]*telemetryAPI.FileEvent, error) {
 	file, err := os.Open("file/testdata/filedata.txt")
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
 
-	result := make(map[string]*api.FileEvent)
+	result := make(map[string]*telemetryAPI.FileEvent)
 	for {
 		var path string
 		var flags, mode uint
@@ -41,8 +41,8 @@ func fileTestDataMap() (map[string]*api.FileEvent, error) {
 			return result, err
 		}
 
-		result[path] = &api.FileEvent{
-			Type:      api.FileEventType_FILE_EVENT_TYPE_OPEN,
+		result[path] = &telemetryAPI.FileEvent{
+			Type:      telemetryAPI.FileEventType_FILE_EVENT_TYPE_OPEN,
 			Filename:  path,
 			OpenFlags: int32(flags),
 			OpenMode:  int32(mode),
@@ -52,7 +52,7 @@ func fileTestDataMap() (map[string]*api.FileEvent, error) {
 	return result, nil
 }
 
-func eventMatchFileTestData(fe *api.FileEvent, td *api.FileEvent) bool {
+func eventMatchFileTestData(fe *telemetryAPI.FileEvent, td *telemetryAPI.FileEvent) bool {
 	// Even on 64 bit systems, we see the large file bit set in open flags.
 	// For now, ignore differences in this bit.
 	const OpenLargeFile = 0100000
