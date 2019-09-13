@@ -11,6 +11,10 @@ LABEL org.label-schema.schema-version="1.0" \
       org.label-schema.vcs-ref="${vcsref}" \
       org.label-schema.version="${version}"
 
+#Add open source licenses for project dependencies
+RUN mkdir -p /LICENSING
+COPY LICENSING /LICENSING/
+
 COPY bin/sensor sensor
 CMD ["/sensor"]
 
